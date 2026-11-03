@@ -4,7 +4,7 @@ import pkg from "../package.json";
 import { requireAdmin } from "./auth";
 import { ApiError, BODY_LIMITS } from "./errors";
 import { error, json, readJsonBody, withSecurityHeaders } from "./http";
-import { getOrGenerateSubscription, refreshAll, type PipelineDeps } from "./pipeline";
+import { buildCacheETag, getOrGenerateSubscription, refreshAll, type PipelineDeps } from "./pipeline";
 import { buildDashboardStats } from "./dashboard";
 import { collectNodeSummaries, countRenamedNodes, sanitizeNodeRenames } from "./node-renames";
 import { fetchText } from "./safe-fetch";
@@ -391,6 +391,18 @@ function textResponse(
   return withSecurityHeaders(new Response(omitBody ? null : body, { status, headers }));
 }
 
+/**
+ * If-None-Match 匹配：支持弱校验前缀（W/）、逗号分隔的多值与 "*"。
+ */
+function matchesETag(ifNoneMatch: string | null, etag: string): boolean {
+  if (!ifNoneMatch) return false;
+  const normalized = etag.replace(/^W\//, "");
+  return ifNoneMatch.split(",").some((raw) => {
+    const candidate = raw.trim().replace(/^W\//, "");
+    return candidate === "*" || candidate === normalized;
+  });
+}
+
 async function handleSubscription(
   request: Request,
   env: Env,
@@ -415,15 +427,22 @@ async function handleSubscription(
     return textResponse("No nodes available", 503, { "Retry-After": "600" }, isHead);
   }
 
+  const etag = buildCacheETag(result.cache);
   const headers = buildSubscriptionResponseHeaders(result.sub.name, result.info ?? {}, {
-    cacheControl: "no-store",
+    // 允许客户端/中间层存副本，但每次使用前必须回源校验（配合 ETag 走 304）
+    cacheControl: "private, no-cache",
     cacheExpirySeconds: 43200,
     autoUpdateIntervalSeconds: 43200,
     isAdmin: false,
   });
-  headers["x-content-type-options"] = "nosniff";
+  headers["etag"] = etag;
   headers["x-robots-tag"] = "noindex";
-  headers["cache-control"] = "no-store";
+
+  // 客户端带上 If-None-Match 且内容没变时只回 304，省掉整个 YAML 的传输量
+  if (matchesETag(request.headers.get("if-none-match"), etag)) {
+    return withSecurityHeaders(new Response(null, { status: 304, headers }));
+  }
+
   const response = new Response(isHead ? null : result.cache.yaml, { status: 200, headers });
   return withSecurityHeaders(response);
 }

@@ -14,6 +14,7 @@ import {
   type SnapshotRecord,
   type SourceDto,
   type SourceInput,
+  type SourceSummary,
   type StatusRecord,
   type StoredSource,
   type StoredSubscription,
@@ -61,6 +62,25 @@ export function createStore(env: Env) {
 
   async function listStoredSources(): Promise<StoredSource[]> {
     return readJsonArray<StoredSource>(kv, KEY_SOURCES);
+  }
+
+  /**
+   * 轻量源列表：不做 payload 解密，只保留生成订阅所需的路由信息。
+   * 订阅缓存命中路径只需要 kind / enabled / nodeRenames，
+   * 走 listSources() 会把每个手动源的整段节点文本都解一遍，纯属浪费。
+   */
+  async function listSourceSummaries(): Promise<SourceSummary[]> {
+    // 与 listSources 一致：未配置密钥时 fail closed
+    requireEncryptionKey(env);
+    const stored = await listStoredSources();
+    return stored.map((item) => ({
+      id: item.id,
+      kind: item.kind,
+      enabled: item.enabled,
+      ...(item.nodeRenames && Object.keys(item.nodeRenames).length > 0
+        ? { nodeRenames: item.nodeRenames }
+        : {}),
+    }));
   }
 
   async function toSourceDto(stored: StoredSource): Promise<SourceDto> {
@@ -303,6 +323,38 @@ export function createStore(env: Env) {
     return readJson<SnapshotRecord>(kv, snapshotKey(sourceId));
   }
 
+  // Workers 批量读上限是 100 个 key，超过就分片并发读（每片仍只算 1 次操作）
+  const KV_BULK_READ_LIMIT = 100;
+
+  /**
+   * 批量读取多个源的快照，返回与 sourceIds 等长的数组（缺失为 null）。
+   * 走 KV 批量读：N 个源只消耗 ⌈N/100⌉ 次外部操作，而不是 N 次串行往返。
+   */
+  async function getSnapshots(sourceIds: string[]): Promise<Array<SnapshotRecord | null>> {
+    if (sourceIds.length === 0) return [];
+
+    const chunks: string[][] = [];
+    for (let index = 0; index < sourceIds.length; index += KV_BULK_READ_LIMIT) {
+      chunks.push(sourceIds.slice(index, index + KV_BULK_READ_LIMIT));
+    }
+
+    const maps = await Promise.all(
+      chunks.map(
+        (chunk) => kv.get(chunk.map((id) => snapshotKey(id)), "json") as Promise<Map<string, unknown>>
+      )
+    );
+
+    const values = new Map<string, unknown>();
+    for (const map of maps) {
+      for (const [key, value] of map) values.set(key, value);
+    }
+
+    return sourceIds.map((id) => {
+      const value = values.get(snapshotKey(id));
+      return value === null || value === undefined ? null : (value as SnapshotRecord);
+    });
+  }
+
   async function putSnapshot(record: SnapshotRecord): Promise<void> {
     await kv.put(snapshotKey(record.sourceId), JSON.stringify(record), {
       expirationTtl: TTL_SNAPSHOT,
@@ -349,6 +401,7 @@ export function createStore(env: Env) {
 
   return {
     listSources,
+    listSourceSummaries,
     listStoredSources,
     listStoredSubscriptions,
     saveSources,
@@ -362,6 +415,7 @@ export function createStore(env: Env) {
     putConfig,
     resetConfig,
     getSnapshot,
+    getSnapshots,
     putSnapshot,
     deleteSnapshot,
     getCache,

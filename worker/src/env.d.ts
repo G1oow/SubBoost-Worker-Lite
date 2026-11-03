@@ -5,6 +5,8 @@
 interface KVNamespace {
   get(key: string, type?: "text"): Promise<string | null>;
   get(key: string, type: "json"): Promise<unknown>;
+  // 批量读：一次操作返回多个 key，未命中的 key 值为 null（Workers 上限 100 个 key）
+  get(keys: string[], type: "json"): Promise<Map<string, unknown>>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
   delete(key: string): Promise<void>;
   list(options?: { prefix?: string }): Promise<{

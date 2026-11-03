@@ -78,7 +78,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.3.9" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.4.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -324,7 +324,10 @@ describe("router /sub", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toContain("text/yaml");
     expect(response.headers.get("profile-update-interval")).toBe("12");
-    expect(response.headers.get("cache-control")).toBe("no-store");
+    // 改前是 no-store：那样客户端无法用 If-None-Match 省流量。
+    // 现在是 private + no-cache：可存副本，但每次使用前回源校验（配合 ETag 走 304）。
+    expect(response.headers.get("cache-control")).toBe("private, no-cache");
+    expect(response.headers.get("etag")).toMatch(/^"[0-9a-f]{16}-\d+-\d+"$/);
     expect(response.headers.get("x-content-type-options")).toBe("nosniff");
     expect(response.headers.get("x-robots-tag")).toBe("noindex");
     expect(response.headers.get("content-disposition")).toContain("myprofile");
@@ -334,6 +337,72 @@ describe("router /sub", () => {
     expect(parsed.proxies).toHaveLength(1);
   });
 
+
+  it("returns 304 with no body when If-None-Match matches the ETag", async () => {
+    const h = createHarness();
+    const { token } = await createManualSubscription(h);
+    const first = await route(new Request(`https://worker.example.com/sub/${token}`), h.env, h.deps);
+    const etag = first.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    const second = await route(
+      new Request(`https://worker.example.com/sub/${token}`, {
+        headers: { "if-none-match": etag as string },
+      }),
+      h.env,
+      h.deps
+    );
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+    // 304 仍要带上同样的 ETag，方便客户端继续复用
+    expect(second.headers.get("etag")).toBe(etag);
+  });
+
+  it("returns a full body when If-None-Match does not match", async () => {
+    const h = createHarness();
+    const { token } = await createManualSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}`, {
+        headers: { "if-none-match": '"stale-etag"' },
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain("proxies:");
+  });
+
+  it("accepts a weak or wildcard If-None-Match", async () => {
+    const h = createHarness();
+    const { token } = await createManualSubscription(h);
+    const first = await route(new Request(`https://worker.example.com/sub/${token}`), h.env, h.deps);
+    const etag = first.headers.get("etag") as string;
+
+    for (const header of [`W/${etag}`, `"nope", ${etag}`, "*"]) {
+      const response = await route(
+        new Request(`https://worker.example.com/sub/${token}`, { headers: { "if-none-match": header } }),
+        h.env,
+        h.deps
+      );
+      expect(response.status).toBe(304);
+    }
+  });
+
+  it("changes the ETag when the config changes", async () => {
+    const h = createHarness();
+    const { token } = await createManualSubscription(h);
+    const first = await route(new Request(`https://worker.example.com/sub/${token}`), h.env, h.deps);
+    const firstEtag = first.headers.get("etag") as string;
+
+    await h.store.putConfig({ mixedPort: 45678 });
+    const second = await route(
+      new Request(`https://worker.example.com/sub/${token}`, { headers: { "if-none-match": firstEtag } }),
+      h.env,
+      h.deps
+    );
+    expect(second.status).toBe(200);
+    expect(second.headers.get("etag")).not.toBe(firstEtag);
+  });
   it("emits subscription-userinfo only when every remote source provides the fields", async () => {
     const h = createHarness();
     const SS_LINK = "ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@example.com:8388#NodeA";
