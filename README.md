@@ -5,7 +5,7 @@
   <p>Cloudflare Workers + Workers KV 上的 Clash/Mihomo 订阅聚合与管理</p>
   <p>
     <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="Platform: Cloudflare Workers + KV">
-    <img src="https://img.shields.io/badge/version-0.3.9-green.svg" alt="Version 0.3.9">
+    <img src="https://img.shields.io/badge/version-0.4.0-green.svg" alt="Version 0.4.0">
     <img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="License AGPL-3.0-only">
   </p>
 </div>
