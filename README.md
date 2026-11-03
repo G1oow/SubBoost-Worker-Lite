@@ -8,7 +8,7 @@
 <p align="center">把多个上游订阅与手动节点聚合成一条 Clash/Mihomo 链接，只依赖 Cloudflare Workers 与 Workers KV 运行。</p>
 
 <p align="center">
-  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
+  <a href="./README.en.md">English</a> | <a href="./README.md">简体中文</a>
 </p>
 
 <p align="center">

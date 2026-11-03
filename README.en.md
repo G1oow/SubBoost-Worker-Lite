@@ -8,7 +8,7 @@
 <p align="center">Aggregate several upstream subscriptions and manual nodes into one Clash/Mihomo link, running only on Cloudflare Workers and Workers KV.</p>
 
 <p align="center">
-  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
+  <a href="./README.en.md">English</a> | <a href="./README.md">简体中文</a>
 </p>
 
 <p align="center">
