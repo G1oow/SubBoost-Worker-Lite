@@ -402,3 +402,150 @@ describe("default config base sections", () => {
     expect(parsed["mixed-port"]).toBe(1234);
   });
 });
+
+describe("cache-hit path stays cheap", () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await createHarness();
+  });
+
+  it("keeps the cached response path at a constant number of KV operations", async () => {
+    await h.store.saveSources(
+      Array.from({ length: 12 }, (_, index) => ({
+        name: `m${index}`,
+        kind: "manual" as const,
+        manualText: ssNode(`m${index}`, 8400 + index),
+      }))
+    );
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+    await getOrGenerateSubscription(h.deps, token);
+
+    const before = h.kv.operationCount;
+    const result = await getOrGenerateSubscription(h.deps, token);
+    const used = h.kv.operationCount - before;
+
+    expect(result.kind).toBe("ok");
+    // 与源数量无关：tokidx + subs + config + cache + sources = 5。
+    // 全 manual 源时 resolveCachedInfo 会提前返回，连快照都不读。
+    expect(used).toBe(5);
+  });
+
+
+  it("keeps the path constant even when every source is remote", async () => {
+    h.deps.fetchText = (async (url: string) =>
+      okResponse(base64Subscription([ssNode(url.slice(-8), 8388 + url.length)]), {
+        "subscription-userinfo": "upload=1; download=2; total=3",
+      })) as unknown as PipelineDeps["fetchText"];
+
+    await h.store.saveSources(
+      Array.from({ length: 12 }, (_, index) => ({
+        name: `r${index}`,
+        kind: "remote" as const,
+        url: `https://r${index}.example.com/sub`,
+      }))
+    );
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+    const first = await getOrGenerateSubscription(h.deps, token);
+    expect(first.kind).toBe("ok");
+
+    const before = h.kv.operationCount;
+    const second = await getOrGenerateSubscription(h.deps, token);
+    const used = h.kv.operationCount - before;
+
+    expect(second.kind).toBe("ok");
+    if (second.kind !== "ok") return;
+    // 12 个 remote 源仍然只是 6 次操作（快照走一次批量读），不随源数量线性增长
+    expect(used).toBe(6);
+    expect(second.info).toEqual({ upload: 12, download: 24, total: 36 });
+  });
+  it("reads all snapshots with a single bulk KV operation", async () => {
+    const sources = await h.store.saveSources(
+      Array.from({ length: 8 }, (_, index) => ({
+        name: `m${index}`,
+        kind: "manual" as const,
+        manualText: ssNode(`m${index}`, 8500 + index),
+      }))
+    );
+    await Promise.all(
+      sources.map((source, index) =>
+        h.store.putSnapshot({
+          sourceId: source.id,
+          nodes: [{ name: `m${index}`, type: "ss", server: "example.com", port: 8500 + index, cipher: "aes-256-gcm", password: "x" }],
+          nodeCount: 1,
+          fetchedAt: "2026-10-01T00:00:00.000Z",
+          parseErrors: [],
+        })
+      )
+    );
+
+    const before = h.kv.operationCount;
+    const snapshots = await h.store.getSnapshots(sources.map((source) => source.id));
+    // 8 个源只算 1 次外部操作
+    expect(h.kv.operationCount - before).toBe(1);
+    expect(snapshots).toHaveLength(8);
+    expect(snapshots.every((snapshot) => snapshot !== null)).toBe(true);
+  });
+
+  it("returns null entries for missing snapshots without failing the batch", async () => {
+    const [source] = await h.store.saveSources([
+      { name: "m", kind: "manual", manualText: ssNode("m", 8388) },
+    ]);
+    const snapshots = await h.store.getSnapshots([source.id, "missing-id"]);
+    expect(snapshots).toHaveLength(2);
+    expect(snapshots[0]).toBeNull();
+    expect(snapshots[1]).toBeNull();
+  });
+});
+
+describe("on-demand refresh", () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await createHarness();
+  });
+
+  it("fetches missing snapshots concurrently instead of serially", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    h.deps.fetchText = (async (url: string) => {
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      inFlight -= 1;
+      return okResponse(base64Subscription([ssNode(url.slice(-8), 8388)]));
+    }) as unknown as PipelineDeps["fetchText"];
+
+    await h.store.saveSources(
+      Array.from({ length: 6 }, (_, index) => ({
+        name: `r${index}`,
+        kind: "remote" as const,
+        url: `https://r${index}.example.com/sub`,
+      }))
+    );
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+    const result = await getOrGenerateSubscription(h.deps, token);
+
+    expect(result.kind).toBe("ok");
+    // 串行实现下 maxInFlight 恒为 1
+    expect(maxInFlight).toBeGreaterThan(1);
+  });
+
+  it("still returns a usable config when one on-demand fetch fails", async () => {
+    h.deps.fetchText = (async (url: string) => {
+      if (url.includes("bad")) return { status: 500, headers: {}, text: "boom", finalUrl: url };
+      return okResponse(base64Subscription([ssNode("ok", 8388)]));
+    }) as unknown as PipelineDeps["fetchText"];
+
+    await h.store.saveSources([
+      { name: "good", kind: "remote", url: "https://good.example.com/sub" },
+      { name: "bad", kind: "remote", url: "https://bad.example.com/sub" },
+    ]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+    const result = await getOrGenerateSubscription(h.deps, token);
+
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(result.cache.nodeCount).toBe(1);
+  });
+});

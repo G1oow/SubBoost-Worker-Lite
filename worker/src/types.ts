@@ -25,6 +25,14 @@ export const MAX_MANUAL_TEXT_BYTES = 512 * 1024;
 export const MAX_PARSE_ERRORS = 20;
 export const REFRESH_CONCURRENCY = 4;
 export const REFRESH_SOFT_DEADLINE_MS = 12 * 60 * 1000;
+/**
+ * 订阅按需生成（客户端拉取且无缓存）时的抓取预算。
+ * 客户端有连接超时，不能像定时刷新那样等 12 分钟：
+ * 超过这个时间就不再发起新的抓取，用已有快照先返回可用的 YAML。
+ */
+export const ON_DEMAND_SOFT_DEADLINE_MS = 20 * 1000;
+/** 按需生成时的抓取并发上限，与 Workers 同时 6 连接的限制对齐 */
+export const ON_DEMAND_CONCURRENCY = 6;
 
 export type SourceKind = "remote" | "manual";
 
@@ -52,6 +60,17 @@ export type SourceDto = {
   nodeRenames?: NodeRenames;
   createdAt: string;
   updatedAt: string;
+};
+
+/**
+ * 源的轻量视图：只含订阅生成需要的路由信息，不含解密后的 URL / 节点文本。
+ * 用于缓存命中路径，避免为了判断 kind 而解密每个源的完整 payload。
+ */
+export type SourceSummary = {
+  id: string;
+  kind: SourceKind;
+  enabled: boolean;
+  nodeRenames?: NodeRenames;
 };
 
 export type StoredSource = {

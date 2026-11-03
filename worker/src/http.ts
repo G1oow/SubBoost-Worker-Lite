@@ -69,7 +69,8 @@ export async function readJsonBody(request: Request, maxBytes: number): Promise<
 
 export function withSecurityHeaders(response: Response): Response {
   const headers = new Headers(response.headers);
-  headers.set("cache-control", "no-store");
+  // 调用方已经显式声明缓存策略时不要覆盖，否则无法支持条件请求（304）
+  if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "no-referrer");
   return new Response(response.body, {

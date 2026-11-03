@@ -9,15 +9,17 @@ import { applyNodeRenames } from "./node-renames";
 import type { fetchText } from "./safe-fetch";
 import type { Store } from "./store";
 import {
+  ON_DEMAND_CONCURRENCY,
+  ON_DEMAND_SOFT_DEADLINE_MS,
   REFRESH_CONCURRENCY,
   REFRESH_SOFT_DEADLINE_MS,
   type CacheRecord,
   type SnapshotRecord,
   type SourceDto,
+  type SourceRefreshStatus,
   type StatusRecord,
   type StoredSubscription,
   type SubscriptionRefreshStatus,
-  type SourceRefreshStatus,
 } from "./types";
 
 
@@ -82,17 +84,20 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
-function targetSources(sub: StoredSubscription, sources: SourceDto[]): SourceDto[] {
+function targetSources<T extends { id: string; enabled: boolean }>(
+  sub: StoredSubscription,
+  sources: T[]
+): T[] {
   const enabled = sources.filter((source) => source.enabled);
   if (sub.sourceIds.length === 0) return enabled;
   const byId = new Map(enabled.map((source) => [source.id, source]));
   return sub.sourceIds
     .map((id) => byId.get(id))
-    .filter((source): source is SourceDto => Boolean(source));
+    .filter((source): source is T => Boolean(source));
 }
 
 function aggregateUserInfo(
-  targets: SourceDto[],
+  targets: ReadonlyArray<{ kind: string }>,
   snapshots: Array<SnapshotRecord | null>
 ): SubscriptionResponseInfo | null {
   const remoteSnapshots: SnapshotRecord[] = [];
@@ -137,28 +142,47 @@ function aggregateUserInfo(
 export async function generateSubscription(
   deps: PipelineDeps,
   sub: StoredSubscription,
-  opts: { onDemand: boolean }
+  opts: {
+    onDemand: boolean;
+    // 调用方已读过配置时直接传入，避免同一次请求里重复读 KV
+    config?: Record<string, unknown>;
+  }
 ): Promise<GenerateSubscriptionResult> {
   const { store } = deps;
   const sources = await store.listSources();
   const targets = targetSources(sub, sources);
+  const deadline = opts.onDemand
+    ? deps.now().getTime() + ON_DEMAND_SOFT_DEADLINE_MS
+    : Number.POSITIVE_INFINITY;
 
-  const snapshots: Array<SnapshotRecord | null> = [];
-  for (const source of targets) {
-    let snapshot = await store.getSnapshot(source.id);
-    if (!snapshot && opts.onDemand) {
+  // 一次批量读拿到全部快照（N 个源只消耗 ⌈N/100⌉ 次 KV 操作），
+  // 避免原来是 N 次串行往返。
+  const existing = await store.getSnapshots(targets.map((source) => source.id));
+
+  // 缺快照且允许按需抓取时并发补齐：串行抓取会让客户端一直等到超时。
+  // 单个源失败不阻塞整体，用已有快照继续出结果。
+  const snapshots = await runWithConcurrency(
+    ON_DEMAND_CONCURRENCY,
+    targets.map((source, index) => ({ source, index })),
+    async ({ source, index }): Promise<SnapshotRecord | null> => {
+      const snapshot = existing[index];
+      if (snapshot || !opts.onDemand) return snapshot;
+      // 超过预算就不再发起新的抓取，宁可返回不完整但可用的配置
+      if (deps.now().getTime() > deadline) return null;
       const refreshed = await refreshSource(source, {
         fetchText: deps.fetchText,
         defaultUserAgent: deps.defaultUserAgent,
         now: deps.now,
       });
-      if (refreshed.ok) {
+      if (!refreshed.ok) return null;
+      try {
         await store.putSnapshot(refreshed.snapshot);
-        snapshot = refreshed.snapshot;
+      } catch {
+        // 写快照失败不影响本次输出，下次拉取会重试
       }
+      return refreshed.snapshot;
     }
-    snapshots.push(snapshot);
-  }
+  );
 
   const seen = new Set<string>();
   const nodes: ParsedNode[] = [];
@@ -177,7 +201,7 @@ export async function generateSubscription(
 
   if (nodes.length === 0) return { kind: "no-nodes" };
 
-  const { config } = await store.getConfig();
+  const config = opts.config ?? (await store.getConfig()).config;
   const options = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes });
   const yaml = generateClashYaml(options);
   const info = aggregateUserInfo(targets, snapshots);
@@ -209,7 +233,7 @@ export async function getOrGenerateSubscription(
   }
 
   try {
-    const generated = await generateSubscription(deps, sub, { onDemand: true });
+    const generated = await generateSubscription(deps, sub, { onDemand: true, config });
     if (generated.kind === "no-nodes") {
       // 可用节点为 0 时按 F6 返回 503，不复用旧缓存
       return { kind: "no-nodes" };
@@ -225,16 +249,19 @@ export async function getOrGenerateSubscription(
   }
 }
 
+/**
+ * 缓存命中时重建 subscription-userinfo。
+ * 只读源的轻量摘要（不解密 payload），并批量读快照，
+ * 让这条最高频的路径保持常数级 KV 往返。
+ */
 async function resolveCachedInfo(
   deps: PipelineDeps,
   sub: StoredSubscription
 ): Promise<SubscriptionResponseInfo | null> {
-  const sources = await deps.store.listSources();
-  const targets = targetSources(sub, sources);
-  const snapshots: Array<SnapshotRecord | null> = [];
-  for (const source of targets) {
-    snapshots.push(await deps.store.getSnapshot(source.id));
-  }
+  const summaries = await deps.store.listSourceSummaries();
+  const targets = targetSources(sub, summaries);
+  if (targets.every((source) => source.kind !== "remote")) return null;
+  const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
   return aggregateUserInfo(targets, snapshots);
 }
 
@@ -351,5 +378,11 @@ export async function refreshAll(
   }
 }
 
-
-
+/**
+ * 缓存内容的 ETag。
+ * 只由「输出内容」决定：配置哈希 + 节点数 + YAML 长度，
+ * 因此快照重抓但节点没变时 ETag 不变，客户端继续命中 304。
+ */
+export function buildCacheETag(cache: CacheRecord): string {
+  return `"${cache.configHash.slice(0, 16)}-${cache.nodeCount}-${cache.yaml.length}"`;
+}
