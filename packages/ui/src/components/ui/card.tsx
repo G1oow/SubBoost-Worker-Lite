@@ -10,7 +10,8 @@ const Card = React.forwardRef<
   <div
     ref={ref}
     className={cn(
-      "rounded-2xl border border-card-border bg-surface p-6 shadow-(--surface-shadow) transition-[border-color,box-shadow] duration-300 hover:border-card-border-hover hover:shadow-(--card-shadow-hover)",
+      // 移动端留 16px 内边距：24px 在 375px 屏上会吃掉近 1/7 的内容宽度
+      "rounded-2xl border border-card-border bg-surface p-4 shadow-(--surface-shadow) transition-[border-color,box-shadow] duration-300 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:p-6",
       className
     )}
     {...props}

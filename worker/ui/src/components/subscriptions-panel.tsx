@@ -184,12 +184,16 @@ export function SubscriptionsPanel({
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="space-y-1">
           <CardTitle>订阅链接</CardTitle>
           <p className="text-xs text-fg-45">随时修改名称或所含源，链接本身不会变化。</p>
         </div>
-        <Button onClick={openCreate} disabled={state.sources.length === 0}>
+        <Button
+          onClick={openCreate}
+          disabled={state.sources.length === 0}
+          className="w-full shrink-0 sm:w-auto"
+        >
           <Plus aria-hidden="true" />
           创建订阅
         </Button>
@@ -211,7 +215,8 @@ export function SubscriptionsPanel({
           <MotionList as="ul" className="space-y-2.5" animateOnMount>
             {state.subscriptions.map((subscription) => (
               <MotionItem as="li" key={subscription.id} itemKey={subscription.id}>
-                <div className="flex items-center gap-3 rounded-xl border border-card-border bg-surface px-4 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover)">
+                {/* 窄屏把五个操作收到第二行并贴右：一行放不下名称 + 链接 + 五个图标 */}
+                <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate text-sm font-medium text-fg">{subscription.name}</span>
@@ -222,7 +227,7 @@ export function SubscriptionsPanel({
                       {subscription.link}
                     </p>
                   </div>
-                  <div className="flex shrink-0 items-center gap-1">
+                  <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                     <IconButton
                       label={`分享 ${subscription.name} 二维码`}
                       variant="ghost"
@@ -280,7 +285,7 @@ export function SubscriptionsPanel({
       <SubscriptionShareDialog subscription={sharing} onClose={() => setSharingId(null)} />
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+          <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>{editingId ? "修改订阅" : "创建订阅"}</DialogTitle>
           </DialogHeader>

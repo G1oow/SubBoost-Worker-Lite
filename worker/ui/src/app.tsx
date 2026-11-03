@@ -255,7 +255,7 @@ export function App() {
         {loading && !state ? (
           <div className="space-y-4">
             <div className="skeleton h-28 w-full animate-shimmer" aria-hidden="true" />
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               {[0, 1, 2, 3].map((index) => (
                 <div key={index} className="skeleton h-24 w-full animate-shimmer" aria-hidden="true" />
               ))}

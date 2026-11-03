@@ -35,7 +35,7 @@ export function TokenGate({ onAuthenticated }: TokenGateProps) {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center px-4 bg-page">
+    <div className="flex min-h-dvh items-center justify-center bg-page px-4 py-10">
       <div className="w-full max-w-md animate-rise">
         <div className="text-center mb-8">
           <div className="mb-5 flex items-center justify-center gap-2.5">
@@ -46,7 +46,7 @@ export function TokenGate({ onAuthenticated }: TokenGateProps) {
           <p className="mt-2 text-fg-50">请输入管理访问 token 以继续</p>
         </div>
 
-        <SpotlightCard className="animate-rise stagger-2 p-6">
+        <SpotlightCard className="animate-rise stagger-2 p-5 sm:p-6">
           <form onSubmit={handleSubmit} className="space-y-4">
             <PasswordField
               label="访问 token"

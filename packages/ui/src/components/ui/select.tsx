@@ -19,7 +19,8 @@ const SelectTrigger = React.forwardRef<
   <SelectPrimitive.Trigger
     ref={ref}
     className={cn(
-      "flex h-10 w-full items-center justify-between whitespace-nowrap rounded-xl border border-field-border bg-field px-4 py-2 text-sm text-fg shadow-sm ring-offset-background placeholder:text-fg-40 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-all duration-200",
+      // 移动端起于 16px 避免 iOS 聚焦自动缩放；43px 高度落在 44px 触控目标附近
+      "flex h-11 w-full items-center justify-between whitespace-nowrap rounded-xl border border-field-border bg-field px-4 py-2 text-base text-fg shadow-sm ring-offset-background placeholder:text-fg-40 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-all duration-200 sm:h-10 sm:text-sm",
       className
     )}
     {...props}
@@ -125,7 +126,7 @@ const SelectItem = React.forwardRef<
   <SelectPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none transition-colors duration-150 focus:bg-ink/10 focus:text-fg data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
+      "relative flex w-full cursor-default select-none items-center rounded-sm py-2 pl-2 pr-8 text-base outline-none transition-colors duration-150 focus:bg-ink/10 focus:text-fg data-[disabled]:pointer-events-none data-[disabled]:opacity-50 sm:py-1.5 sm:text-sm",
       className
     )}
     {...props}
