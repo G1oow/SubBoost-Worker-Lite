@@ -1,126 +1,188 @@
 <!-- markdownlint-disable MD033 MD041 -->
-<div align="center">
-  <p><img src="docs/assets/logo.svg" alt="SubBoost Worker Lite" width="96"></p>
-  <h1>SubBoost Worker Lite</h1>
-  <p>Cloudflare Workers + Workers KV 上的 Clash/Mihomo 订阅聚合与管理</p>
-  <p>
-    <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="Platform: Cloudflare Workers + KV">
-    <img src="https://img.shields.io/badge/version-0.4.0-green.svg" alt="Version 0.4.0">
-    <img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="License AGPL-3.0-only">
-  </p>
-</div>
+<p align="center">
+  <img src="./docs/assets/logo.svg" width="96" alt="SubBoost Worker Lite logo">
+</p>
+
+<h1 align="center">SubBoost Worker Lite</h1>
+
+<p align="center">Aggregate several upstream subscriptions and manual nodes into one Clash/Mihomo link, running only on Cloudflare Workers and Workers KV.</p>
+
+<p align="center">
+  <a href="./README.md">English</a> | <a href="./README.zh-CN.md">简体中文</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="Platform: Cloudflare Workers + KV">
+  <img src="https://img.shields.io/badge/version-0.4.0-green.svg" alt="Version 0.4.0">
+  <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="License AGPL-3.0-only"></a>
+</p>
 <!-- markdownlint-enable MD033 MD041 -->
 
-**SubBoost Worker Lite** 是 [SubBoost](https://github.com/SubBoost/subboost) 的精简部署形态：把几个上游订阅与手动节点聚合成一条 Clash/Mihomo 订阅链接，只依赖 Cloudflare Workers 与 Workers KV，不需要服务器、数据库或容器。适合个人使用、只想维护一条聚合链接的场景。
+**SubBoost Worker Lite** is the minimal deployment form of [SubBoost](https://github.com/SubBoost/subboost). It keeps your upstream subscriptions and manual nodes in Workers KV and serves them as a single Clash/Mihomo link, so you distribute one subscription URL instead of many. There is no server, database, or container to operate.
 
-## 界面预览
+## Highlights
 
-仪表板（深色）：
+- **One link to distribute**: several upstream subscriptions plus manually added nodes are merged and deduplicated across sources into a single Clash/Mihomo profile.
+- **Admin panel inside the same Worker**: a token-protected SPA manages sources and subscriptions, reports refresh status, and edits the generated config as JSON.
+- **Pre-generated cache**: the Cron trigger `0 */12 * * *` fetches upstreams ahead of time, so subscriber requests are answered from KV.
+- **Encrypted at rest**: stored payloads such as subscription tokens are encrypted with AES-256-GCM, using a key derived from `ENCRYPTION_KEY` through HKDF-SHA256.
+- **Hardened upstream fetching**: scheme and credential validation, private network range blocking, and per-hop redirect checks capped at 3 hops.
+- **Nothing cached downstream**: API responses send `cache-control: no-store`, subscription responses are marked `private, no-cache` and advertise the refresh interval, error messages are sanitized, and subscription tokens can be rotated at any time.
 
-![仪表板（深色）](docs/assets/screenshot-dashboard-dark.png)
+## Architecture
 
-订阅链接与二维码分享（深色）：
-
-| 订阅链接 | 二维码分享 |
-| --- | --- |
-| ![订阅链接（深色）](docs/assets/screenshot-subscriptions-dark.png) | ![二维码分享（深色）](docs/assets/screenshot-qr-share-dark.png) |
-
-仪表板与订阅链接（浅色）：
-
-| 仪表板 | 订阅链接 |
-| --- | --- |
-| ![仪表板（浅色）](docs/assets/screenshot-dashboard-light.png) | ![订阅链接（浅色）](docs/assets/screenshot-subscriptions-light.png) |
-
-源管理（深色）：
-
-![源管理（深色）](docs/assets/screenshot-sources-dark.png)
-
-> 截图取自本地 `wrangler dev` 实例，使用示例源与保留域名（`example.com`、RFC 5737 网段）演示数据，不含任何真实订阅或凭据。
-
-## 特性
-
-- **订阅聚合**：导入多个上游订阅与手动节点（`ss://`、`vmess://`、`vless://`、`trojan://`、`hysteria2://` 等常见协议），跨源去重后生成一条订阅链接
-- **管理端**：token 门保护的 SPA（源管理、订阅管理、刷新状态、生成配置 JSON 编辑），浅色/深色主题
-- **扫码导入**：订阅链接可生成二维码，支持复制链接、保存 PNG 或直接打开，方便手机客户端导入
-- **自动刷新**：Cron 每 12 小时抓取上游并预生成缓存，正常访问直接命中缓存
-- **静态加密**：订阅 token 等敏感数据以 AES-256-GCM 静态加密存入 KV（HKDF-SHA256 派生密钥）
-- **SSRF 防护**：协议/凭据校验、私网网段黑名单、重定向逐跳校验（最多 3 跳）
-- **防泄漏**：全响应 `no-store`，错误与状态脱敏，订阅 token 可随时轮换
-
-## 仓库结构
-
-```
-worker/       Cloudflare Worker（后端 API + 管理端 SPA + 部署配置）
-packages/     共享包：core（解析/生成）、server-core（响应头与 UA）、ui（组件与主题）
-docs/         实施文档（Plan/Build）与贡献指南
-test/         回归测试与测试基础设施
+```text
+  ┌──────────────────┐                  ┌──────────────────────┐
+  │ Clash / Mihomo   │                  │ Admin SPA            │
+  │ client           │                  │ worker/dist (assets) │
+  └───────┬──────────┘                  └───────────┬──────────┘
+          │ GET /sub/<token>                        │ /api/* + Bearer token
+          ▼                                         ▼
+  ┌──────────────────────────────────────────────────────────────────┐
+  │ Cloudflare Worker  ·  worker/src                                 │
+  │ ADMIN_TOKEN auth  ·  refresh pipeline                            │
+  │ Clash / Mihomo YAML output  ·  cache-control: no-store           │
+  └───────────────┬──────────────────────────────────┬───────────────┘
+                  │ read / write                     │ fetch upstream
+                  ▼                                  ▼
+  ┌───────────────────────────────┐ ┌────────────────────────────────┐
+  │ Workers KV  ·  SUBBOOST_KV    │ │ Upstream subscriptions         │
+  │ AES-256-GCM at rest           │ │ SSRF checks, <= 3 redirects    │
+  └───────────────▲───────────────┘ └────────────────────────────────┘
+                  │ write
+  ┌───────────────┴──────────┐
+  │ Cron trigger 0 */12 * * *│
+  └──────────────────────────┘
 ```
 
-## 一键部署（fork 本仓库）
+Clients never contact the upstream providers directly: the Worker fetches them, stores the merged result in KV, and answers `/sub/<token>` from that cache.
 
-<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/G1oow/subboost"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="32"></a>
+## Deployment
 
-点按钮后用 GitHub 账号登录 Cloudflare：Cloudflare 会把本仓库复制到你自己的 GitHub 账号下（只复制，不改动上游仓库），新建一个名为 `subboost` 的 Worker。Workers Builds 复用根目录 `package.json` 的 `deploy` 脚本（`SUBBOOST_SKIP_SECRETS=1 npm run worker:deploy`），构建阶段由 `prepare` 自动生成管理页；`wrangler.jsonc` 里 KV namespace 只写了绑定名与占位符 id，Cloudflare 会按绑定名自动创建 KV 并替换配置里的 id。全程不需要手工建 KV，也不需要在本机登录 wrangler。
+Three routes, all ending on a Cloudflare Worker backed by a `SUBBOOST_KV` namespace. Pick one.
 
-一键部署的**唯一手工步骤**是填两个运行时 Secret。按钮页面会启动部署，之后在 Worker 的 Settings → Variables and Secrets 里添加 Secret 类型的 `ADMIN_TOKEN` 与 `ENCRYPTION_KEY`（各 32 位以上随机串，生成命令见 **[worker/README.md](worker/README.md)**）；这两项没配置前，管理接口按 fail closed 返回 503。
+### Option A: Fork the repository, then connect it to Cloudflare
 
-不使用按钮、改为在自己 fork 出来的仓库里推送代码自动部署，或按钮部署后需要排错时，见 **[worker/README.md](worker/README.md)** 的「从 fork 仓库部署」章节。
+Best route if you want a redeploy on every push.
 
-## 本地开发与命令行部署
+1. Fork this repository to your own GitHub account.
+2. In Cloudflare: Workers & Pages → Create → Import a repository, select your fork, and set Production branch to `main`.
+3. Keep Root directory as `/` and leave Build command empty, because the `prepare` script builds the admin SPA during install. Set Deploy command to `npm run deploy`.
+4. Add the two runtime secrets described below. Pushes to `main` then rebuild and redeploy automatically.
 
-前置：Node 24.22.1+ 与 npm（版本见 `.nvmrc`，`nvm use` 可直接切换），本地运行不需要 Cloudflare 账号。
+`npm run deploy` runs `node scripts/deploy-worker.cjs`, which reuses or creates the `SUBBOOST_KV` namespace by title and injects its real id into a temporary config. Do not replace it with a bare `npx wrangler deploy`: the committed `wrangler.jsonc` only carries the KV id placeholder, so that command fails.
+
+### Option B: Deploy to Cloudflare button
+
+<a href="https://deploy.workers.cloudflare.com/?url=https://github.com/G1oow/SubBoost-Worker-Lite"><img src="https://deploy.workers.cloudflare.com/button" alt="Deploy to Cloudflare" height="32"></a>
+
+Cloudflare copies this repository into your own GitHub account, creates the Worker named `subboost`, and creates the KV namespace from the binding name. Add the two runtime secrets below afterwards.
+
+### Option C: Deploy from your machine
+
+```bash
+npx wrangler login
+ADMIN_TOKEN=<32+ random chars> ENCRYPTION_KEY=<32+ random chars> npm run worker:deploy
+```
+
+On PowerShell, set `$env:ADMIN_TOKEN` and `$env:ENCRYPTION_KEY` first, then run `npm run worker:deploy`. The script rejects placeholder or short secrets, reuses or creates the `SUBBOOST_KV` namespace by title, injects the real id into a temporary config, uploads both secrets, and deploys. The committed `wrangler.jsonc` keeps the placeholder id.
+
+### Runtime secrets
+
+Options A and B need the two secrets added by hand; Option C uploads them for you. Add them in Worker → Settings → Variables and Secrets with type Secret:
+
+| Secret | Purpose |
+| --- | --- |
+| `ADMIN_TOKEN` | Login token for the admin panel, 32+ random characters |
+| `ENCRYPTION_KEY` | Key for encrypting stored payloads, 32+ random characters |
+
+```bash
+node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+```
+
+Until both exist, admin endpoints fail closed with 503. Changing `ENCRYPTION_KEY` later makes existing data unreadable, so sources and subscriptions must be re-entered. Post-deploy verification and troubleshooting live in [worker/README.md](./worker/README.md).
+
+## Screenshots
+
+### Desktop
+
+Dashboard, dark theme:
+
+![Dashboard, dark theme](docs/assets/screenshot-dashboard-dark.png)
+
+Subscription link and QR code sharing, dark theme:
+
+| Subscription link | QR code sharing |
+| --- | --- |
+| ![Subscription link, dark theme](docs/assets/screenshot-subscriptions-dark.png) | ![QR code sharing, dark theme](docs/assets/screenshot-qr-share-dark.png) |
+
+Source management, dark theme:
+
+![Source management, dark theme](docs/assets/screenshot-sources-dark.png)
+
+Dashboard and subscriptions, light theme:
+
+| Dashboard | Subscription link |
+| --- | --- |
+| ![Dashboard, light theme](docs/assets/screenshot-dashboard-light.png) | ![Subscription link, light theme](docs/assets/screenshot-subscriptions-light.png) |
+
+### Mobile
+
+Dashboard, source management, and subscription link at 390 x 844, dark theme:
+
+| Dashboard | Source management | Subscription link |
+| --- | --- | --- |
+| ![Dashboard on mobile](docs/assets/screenshot-mobile-dashboard-dark.png) | ![Source management on mobile](docs/assets/screenshot-mobile-sources-dark.png) | ![Subscription link on mobile](docs/assets/screenshot-mobile-subscriptions-dark.png) |
+
+Screenshots were captured from a local `wrangler dev` instance using sample sources and reserved domains (`example.com`, RFC 5737 ranges); they contain no real subscriptions or credentials.
+
+## Quick Start
+
+Prerequisites: Node.js 24.22.1 (see `.nvmrc`) and npm. This path needs no Cloudflare account.
 
 ```bash
 npm ci
-
-# 1. 准备本地密钥（不要提交）
-cp .dev.vars.example .dev.vars   # 填入随机 ADMIN_TOKEN、ENCRYPTION_KEY
-
-# 2. 构建管理页
+cp .dev.vars.example .dev.vars   # fill in random ADMIN_TOKEN and ENCRYPTION_KEY values (32+ chars each)
 npm run worker:build
-
-# 3. 启动（默认 http://127.0.0.1:8787）
-npm run worker:dev
+npm run worker:dev               # http://127.0.0.1:8787
 ```
 
-部署到 Cloudflare 只需一条命令，脚本会自动建好 KV namespace 并绑定，密钥通过环境变量传入、不写入仓库：
+Open `http://127.0.0.1:8787`, enter the `ADMIN_TOKEN` you configured, add an upstream source, then create a subscription. The subscription is served at `/sub/<token>` as a Clash/Mihomo profile.
 
-```bash
-ADMIN_TOKEN=<32 位以上随机串> ENCRYPTION_KEY=<32 位以上随机串> npm run worker:deploy
-```
 
-脚本会按标题 `SUBBOOST_KV` 复用已存在的 KV namespace，找不到就新建，然后把 id 注入临时配置完成部署。CI 场景（Workers Builds、Deploy to Cloudflare 按钮）用根级 `npm run deploy`，它在此基础上跳过 Secret 上传，运行时密钥改在 Dashboard 配置；已有 `SUBBOOST_KV_ID=<id> SUBBOOST_SKIP_SECRETS=1 npm run worker:deploy` 这类显式指定 id 的命令效果等价，无需改动。上述方式的细节、fork 部署排错见 **[worker/README.md](worker/README.md)**。
+## Commands
 
-## 常用命令
+| Command | What it does |
+| --- | --- |
+| `npm run worker:dev` | Run the Worker locally on port 8787 |
+| `npm run worker:build` | Build the admin SPA into `worker/dist` |
+| `npm run worker:deploy` | Build, create or bind KV, upload secrets, deploy |
+| `npm run worker:deploy:dry-run` | Validate config and bindings without uploading |
+| `npm run worker:typecheck` | Type-check the Worker and the UI |
+| `npm run test:unit` | Run all unit and regression tests |
+| `npm run lint` | ESLint, UI consistency, repository hygiene, version check |
 
-```bash
-npm run worker:dev          # 本地运行 Worker
-npm run worker:build        # 构建管理页到 worker/dist
-npm run worker:deploy       # 构建 + 自动建/绑定 KV + 上传 Secret + 部署
-npm run worker:deploy:dry-run  # 只校验配置与绑定，不上传
-npm run worker:typecheck    # 类型检查
-npm run lint                # ESLint + UI 一致性检查 + 仓库卫生检查
-npm run test:unit           # 全量单元/回归测试
-npm run test:coverage       # 带覆盖率阈值的质量门
-```
+## Documentation
 
-## 文档
+| Topic | What it covers | Link |
+| --- | --- | --- |
+| Deployment and operations | Manual deployment steps, post-deploy verification, fork and Workers Builds routes, troubleshooting | [worker/README.md](./worker/README.md) |
+| Implementation plan | Design decisions behind the Workers-only form | [docs/implementation/cf-worker-lite-plan.md](./docs/implementation/cf-worker-lite-plan.md) |
+| Build record | Conflicts resolved during the port and the acceptance record | [docs/implementation/cf-worker-lite-build.md](./docs/implementation/cf-worker-lite-build.md) |
+| Contributing | Issue and PR rules, local checks, UI color rules | [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) |
+| Third-party notices | Dependency and ecosystem attributions | [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md) |
 
-- 部署与运维手册：[worker/README.md](worker/README.md)
-- 实施方案（Plan）：[docs/implementation/cf-worker-lite-plan.md](docs/implementation/cf-worker-lite-plan.md)
-- 构建手册（Build，含冲突与验收记录）：[docs/implementation/cf-worker-lite-build.md](docs/implementation/cf-worker-lite-build.md)
-- 贡献指南：[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)
+## Acknowledgements
 
-## 与上游 SubBoost 的关系
+- Thanks to the community at [linux.do](https://linux.do) for the feedback and discussion that shaped this deployment form.
+- This project builds on upstream [SubBoost](https://github.com/SubBoost/subboost); the parsing, sanitizing, and config-generation logic in `packages/` derives from that work.
 
-本仓库派生自 [SubBoost/subboost](https://github.com/SubBoost/subboost)，只保留 Cloudflare Workers 精简形态所需的代码与测试；上游的 Next.js + PostgreSQL 自托管形态（`local/`）、Docker 发布管线等不在本仓库范围内。共享包（`packages/`）沿用上游实现，但只保留 Workers 形态实际引用到的模块，其余旧前端与 Node 服务端残留已移除。
+## License
 
-## 许可证
+[GNU Affero General Public License v3.0 only](./LICENSE).
 
-[GNU Affero General Public License v3.0 only](./LICENSE)。
+If you modify this project and run it as a network service, AGPL-3.0 requires you to offer the corresponding source code to those users.
 
-如果你修改本仓库并向网络用户提供服务，AGPL-3.0 要求你向这些用户提供对应的源代码。
+## Disclaimer
 
-## 免责声明
-
-本项目不提供任何代理服务，不对第三方订阅内容的可用性与合法性作任何保证。
+This project does not provide any proxy service and makes no guarantee about the availability or legality of third-party subscription content.
