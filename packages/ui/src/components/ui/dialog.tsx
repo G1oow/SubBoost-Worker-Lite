@@ -40,21 +40,23 @@ const DialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    <div className="pointer-events-none fixed inset-0 z-50 grid place-items-center p-4">
+    <div className="pointer-events-none fixed inset-0 z-50 grid place-items-end p-0 sm:place-items-center sm:p-4">
       <DialogPrimitive.Content
         ref={ref}
         className={cn(
           // 弹窗底色是不透明的（--surface 在明暗主题下都没有 alpha），
           // 再叠 glass-card 的 backdrop-blur-xl 只会在每帧对整块背景做 24px 模糊，
           // 既看不出效果又拖慢开合动画。这里直接给不透明底色 + 边框阴影。
-          "pointer-events-auto relative grid w-full max-w-lg gap-4 rounded-2xl border border-ink/10 bg-surface p-6 shadow-(--popover-shadow) max-h-[85vh] overflow-y-auto custom-scrollbar",
+          // 窄屏改成贴底的抽屉形态：键盘弹出时内容区不会被顶出视口，拇指也够得到底部按钮。
+          // dvh 而不是 vh：移动浏览器地址栏收起/展开时 vh 不变，会让弹窗下沿被遮住。
+          "pointer-events-auto relative grid w-full max-w-lg gap-3 rounded-t-2xl border border-ink/10 bg-surface p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-(--popover-shadow) max-h-[92dvh] overflow-y-auto custom-scrollbar sm:gap-4 sm:rounded-2xl sm:p-6 sm:pb-6 sm:max-h-[85vh]",
           "data-[state=open]:animate-modal-in data-[state=closed]:animate-modal-out",
           className
         )}
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-4 top-4 rounded-lg p-1 opacity-70 transition-all hover:opacity-100 hover:bg-ink/5 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:pointer-events-none">
+        <DialogPrimitive.Close className="absolute right-2 top-2 rounded-lg p-2 opacity-70 transition-all hover:opacity-100 hover:bg-ink/5 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:pointer-events-none sm:right-4 sm:top-4 sm:p-1">
           <X className="h-4 w-4 text-fg-60" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>

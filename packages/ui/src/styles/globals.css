@@ -51,12 +51,27 @@
     border-color: var(--border-default);
   }
 
+  /*
+   * 移动端基线：
+   * - html/body 用 min-h-dvh 而不是 100vh：移动浏览器地址栏收起时 vh 不变，
+   *   100vh 会让页面底部多出一截空白可滚动区。
+   * - overflow-x: hidden 防止某个长串（订阅链接、错误信息）把整页推成横向滚动。
+   *   只在纵向仍然保留滚动。
+   * - -webkit-text-size-adjust 固定为 100%：iOS 横竖屏切换时不擅自放大正文。
+   */
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    scrollbar-gutter: stable;
+  }
+
   body {
     background: var(--page);
     color: var(--foreground);
     font-family: 'Inter', system-ui, sans-serif;
-    min-height: 100vh;
+    min-height: 100dvh;
     /* 保持滚动条占位，避免路由切换/加载时出现整体水平位移 */
+    overflow-x: hidden;
     overflow-y: scroll;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;

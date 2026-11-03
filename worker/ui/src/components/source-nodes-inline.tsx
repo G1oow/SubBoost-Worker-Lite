@@ -95,7 +95,7 @@ export function SourceNodesInline({
           {emptyHint}
         </p>
       ) : (
-        <ul className="max-h-[260px] space-y-1 overflow-y-auto pr-1">
+        <ul className="max-h-[45dvh] space-y-1 overflow-y-auto pr-1 sm:max-h-[260px]">
           {visible.map((node, index) => (
             <li
               key={node.key}

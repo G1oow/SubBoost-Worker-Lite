@@ -291,12 +291,12 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="space-y-1">
           <CardTitle>源管理</CardTitle>
           <p className="text-xs text-fg-45">导入上游订阅或手动节点，可解析节点名称/协议并逐个改名。</p>
         </div>
-        <Button onClick={openCreate}>
+        <Button onClick={openCreate} className="w-full shrink-0 sm:w-auto">
           <Plus aria-hidden="true" />
           添加源
         </Button>
@@ -320,7 +320,8 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
               const renamed = Object.keys(source.nodeRenames ?? {}).length;
               return (
                 <MotionItem as="li" key={source.id} itemKey={source.id}>
-                  <div className="flex items-center gap-3 rounded-xl border border-card-border bg-surface px-4 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover)">
+                  {/* 窄屏改成上下两段：文本一行、操作一行贴右，避免长源名把三个图标挤出屏幕 */}
+                  <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-medium text-fg">{source.name}</span>
@@ -337,18 +338,29 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                         {renamed > 0 ? <span>· 已改名 {renamed} 个</span> : null}
                       </p>
                     </div>
-                    <div className="flex shrink-0 items-center gap-1">
+                    <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                       <IconButton
                         label={`查看 ${source.name} 的节点`}
                         variant="ghost"
                         onClick={() => void openNodes(source)}
+                        className="min-h-9 min-w-9"
                       >
                         <Network aria-hidden="true" />
                       </IconButton>
-                      <IconButton label={`编辑 ${source.name}`} variant="ghost" onClick={() => openEdit(source)}>
+                      <IconButton
+                        label={`编辑 ${source.name}`}
+                        variant="ghost"
+                        onClick={() => openEdit(source)}
+                        className="min-h-9 min-w-9"
+                      >
                         <Pencil aria-hidden="true" />
                       </IconButton>
-                      <IconButton label={`删除 ${source.name}`} variant="ghost" onClick={() => handleDelete(source)}>
+                      <IconButton
+                        label={`删除 ${source.name}`}
+                        variant="ghost"
+                        onClick={() => handleDelete(source)}
+                        className="min-h-9 min-w-9"
+                      >
                         <Trash2 aria-hidden="true" />
                       </IconButton>
                     </div>
@@ -361,7 +373,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
       </CardContent>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{editingIndex === null ? "添加源" : "编辑源"}</DialogTitle>
           </DialogHeader>
@@ -472,7 +484,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
       </Dialog>
 
       <Dialog open={nodesDialog !== null} onOpenChange={(next) => (next ? undefined : setNodesDialog(null))}>
-        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+        <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{nodesDialog ? `节点 · ${nodesDialog.source.name}` : "节点"}</DialogTitle>
           </DialogHeader>
@@ -488,7 +500,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                 renames={nodesDialog.renames}
                 onChange={(next) => setNodesDialog({ ...nodesDialog, renames: next })}
                 loading={nodesDialog.loading}
-                maxHeightClassName="max-h-[420px]"
+                maxHeightClassName="max-h-[52dvh] sm:max-h-[420px]"
                 emptyHint={
                   nodesDialog.source.kind === "manual"
                     ? "该源还没有可解析的节点文本。"

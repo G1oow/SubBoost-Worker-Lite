@@ -63,6 +63,7 @@ export function NodeRenameEditor({
           {renamedCount > 0 ? ` · 已改名 ${renamedCount} 个` : ""}
         </p>
         {nodes.length > 6 ? (
+          // 窄屏铺满一行：固定 14rem 宽在 320px 屏上会溢出弹窗
           <div className="relative w-full sm:w-56">
             <Search
               aria-hidden="true"
@@ -73,7 +74,7 @@ export function NodeRenameEditor({
               onChange={(event) => setQuery(event.target.value)}
               placeholder="搜索名称 / 协议 / 服务器"
               aria-label="搜索节点"
-              className="h-8 pl-8 text-xs"
+              className="h-9 pl-8 text-base sm:h-8 sm:text-xs"
             />
           </div>
         ) : null}
@@ -117,12 +118,13 @@ export function NodeRenameEditor({
                     {renamed ? `原名 ${node.originName || "—"}` : node.originName || "—"}
                     {node.server ? ` · ${node.server}${node.port ? `:${node.port}` : ""}` : ""}
                   </p>
+                  {/* 输入框窄屏 16px：iOS 对小于 16px 的字段会在聚焦时自动放大整页 */}
                   <Input
                     value={renames[node.key] ?? ""}
                     onChange={(event) => setName(node, event.target.value)}
                     placeholder="填入新名称"
                     aria-label={`重命名节点 ${node.originName || node.key}`}
-                    className="h-8 text-sm"
+                    className="h-9 text-base sm:h-8 sm:text-sm"
                   />
                 </div>
                 {renamed ? (
@@ -130,6 +132,7 @@ export function NodeRenameEditor({
                     label={`恢复 ${node.originName || node.key} 的原名`}
                     variant="ghost"
                     onClick={() => setName(node, "")}
+                    className="min-h-9 min-w-9"
                   >
                     <RotateCcw aria-hidden="true" />
                   </IconButton>

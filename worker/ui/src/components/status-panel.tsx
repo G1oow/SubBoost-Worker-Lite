@@ -41,7 +41,7 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
   return (
     <div className="rounded-xl border border-card-border bg-surface px-3 py-2.5">
       <p className="text-[11px] text-fg-45">{label}</p>
-      <p className="mt-1 truncate text-lg font-semibold leading-none tabular-nums text-fg">{value}</p>
+      <p className="mt-1 truncate text-base font-semibold leading-none tabular-nums text-fg sm:text-lg">{value}</p>
       {hint ? <p className="mt-1 truncate text-[11px] text-fg-40">{hint}</p> : null}
     </div>
   );
@@ -132,12 +132,17 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="space-y-1">
           <CardTitle>刷新状态</CardTitle>
           <p className="text-xs text-fg-45">最近一次刷新各环节的结果与节点占比。</p>
         </div>
-        <LoadingButton onClick={handleRefresh} loading={refreshing} loadingLabel="刷新中…">
+        <LoadingButton
+          onClick={handleRefresh}
+          loading={refreshing}
+          loadingLabel="刷新中…"
+          className="w-full shrink-0 sm:w-auto"
+        >
           <RefreshCw aria-hidden="true" />
           立即刷新
         </LoadingButton>
@@ -173,6 +178,7 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
               />
             </div>
 
+            {/* 窄屏也保持两列：四个 KPI 一屏看完，单列会把看板拉得过长 */}
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <Metric
                 label="最近刷新"

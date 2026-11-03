@@ -65,29 +65,40 @@ export function ConfigPanel({ state, onSave, onReset }: ConfigPanelProps) {
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between gap-4">
+      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="space-y-1">
           <CardTitle>生成配置</CardTitle>
           <p className="text-xs text-fg-45">
             {state.configIsDefault ? "当前为默认配置" : "当前为自定义配置"}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" onClick={handleReset} disabled={saving}>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            variant="secondary"
+            onClick={handleReset}
+            disabled={saving}
+            className="flex-1 sm:flex-none"
+          >
             <RotateCcw aria-hidden="true" />
             恢复默认
           </Button>
-          <LoadingButton onClick={handleSave} loading={saving} loadingLabel="保存中…">
+          <LoadingButton
+            onClick={handleSave}
+            loading={saving}
+            loadingLabel="保存中…"
+            className="flex-1 sm:flex-none"
+          >
             <Save aria-hidden="true" />
             保存
           </LoadingButton>
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* 窄屏降低最小高度：320px 的编辑器在手机上会占满两屏，必须先滚动才能看见保存按钮 */}
         <Textarea
           value={text}
           onChange={(event) => setText(event.target.value)}
-          className="min-h-[320px] font-mono text-xs resize-y"
+          className="min-h-[240px] resize-y font-mono text-xs sm:min-h-[320px]"
           spellCheck={false}
           aria-label="生成配置 JSON"
         />

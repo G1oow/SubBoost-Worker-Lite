@@ -76,15 +76,15 @@ function StatCard({
           {icon}
         </span>
       </div>
-      <p className="mt-3 text-3xl font-semibold leading-none text-fg">
+      <p className="mt-2.5 text-2xl font-semibold leading-none text-fg sm:mt-3 sm:text-3xl">
         <AnimatedCount value={value} />
       </p>
-      <p className="mt-2 text-[11px] text-fg-45">{hint}</p>
+      <p className="mt-1.5 text-[11px] text-fg-45 sm:mt-2">{hint}</p>
     </>
   );
 
   return (
-    <SpotlightCard className={cn("p-4", className)} data-testid="dashboard-stat-card">
+    <SpotlightCard className={cn("p-3.5 sm:p-4", className)} data-testid="dashboard-stat-card">
       {onClick ? (
         <button
           type="button"
@@ -214,7 +214,7 @@ export function DashboardPanel({
 
   return (
     <div className="space-y-6">
-      <SpotlightCard className="animate-rise p-5">
+      <SpotlightCard className="animate-rise p-4 sm:p-5">
         <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
           <div className="space-y-2">
             <div className="flex flex-wrap items-center gap-2">
@@ -230,7 +230,7 @@ export function DashboardPanel({
               </Badge>
               <span className="text-xs text-fg-45">{state.app.name}</span>
             </div>
-            <h2 className="text-xl font-semibold text-fg sm:text-2xl">
+            <h2 className="text-lg font-semibold text-fg sm:text-2xl">
               {enabledSources > 0 ? `${formatCount(enabledSources)} 个源正在供节点` : "先添加一个源开始聚合"}
             </h2>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-50">
@@ -245,12 +245,16 @@ export function DashboardPanel({
               <span>自动刷新：每 12 小时</span>
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={() => void onRefresh()} disabled={refreshing}>
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Button onClick={() => void onRefresh()} disabled={refreshing} className="w-full sm:w-auto">
               <RefreshCw aria-hidden="true" className={refreshing ? "animate-spin" : undefined} />
               {refreshing ? "刷新中…" : "立即刷新"}
             </Button>
-            <Button variant="secondary" onClick={() => onNavigate("subscriptions")}>
+            <Button
+              variant="secondary"
+              onClick={() => onNavigate("subscriptions")}
+              className="w-full sm:w-auto"
+            >
               订阅链接
               <ArrowRight aria-hidden="true" />
             </Button>
@@ -263,7 +267,8 @@ export function DashboardPanel({
         改用与页面其他卡片同一套 animate-rise + stagger：
         同为 0.44s / 16px 的 CSS 关键帧，观感才一致。
       */}
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {/* 窄屏两列：四个指标一屏内可对比，滚动距离比单列少一半 */}
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <StatCard
           className="animate-rise stagger-1"
           label="源"
@@ -302,7 +307,7 @@ export function DashboardPanel({
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
         <Card className="animate-rise">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="space-y-1">

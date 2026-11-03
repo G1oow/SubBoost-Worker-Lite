@@ -46,7 +46,7 @@ export function SubscriptionShareContent({
         <p className="text-xs text-fg-45">用手机客户端扫描二维码，或复制链接手动导入。</p>
       </div>
 
-      <div className="flex justify-center rounded-2xl border border-ink/10 bg-ink/5 px-4 py-5">
+      <div className="flex justify-center rounded-2xl border border-ink/10 bg-ink/5 px-3 py-4 sm:px-4 sm:py-5">
         <div className="rounded-xl bg-white p-3 shadow-sm">
           <QRCodeCanvas
             ref={canvasRef}
@@ -60,6 +60,8 @@ export function SubscriptionShareContent({
             // 画布内容对辅助技术不可读，链接由下方文本提供
             aria-hidden="true"
             data-testid="subscription-share-qr"
+            // 200px 在 320px 宽的小屏上会顶到弹窗内边距，按容器等比收缩
+            className="h-auto max-w-full"
           />
         </div>
       </div>
@@ -76,22 +78,24 @@ export function SubscriptionShareContent({
         <span>链接等同于访问凭据，拿到即可拉取订阅，请只分享给本人设备。</span>
       </p>
 
-      <DialogFooter className="gap-2 sm:flex-row">
+      {/* 窄屏把三个按钮堆叠铺满：一行三个中文按钮在 320px 下会被压成两行且对齐错乱 */}
+      <DialogFooter className="flex-col gap-2 sm:flex-row">
         <LoadingButton
           type="button"
           variant="secondary"
           onClick={onDownload}
           loading={downloading}
           loadingLabel="保存中…"
+          className="w-full sm:w-auto"
         >
           <Download aria-hidden="true" />
           保存二维码
         </LoadingButton>
-        <Button type="button" variant="secondary" onClick={onOpenLink}>
+        <Button type="button" variant="secondary" onClick={onOpenLink} className="w-full sm:w-auto">
           <ExternalLink aria-hidden="true" />
           打开链接
         </Button>
-        <Button type="button" onClick={onCopy}>
+        <Button type="button" onClick={onCopy} className="w-full sm:w-auto">
           {copied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           {copied ? "已复制" : "复制链接"}
         </Button>

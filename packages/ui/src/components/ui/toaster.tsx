@@ -15,7 +15,8 @@ const ToastViewport = React.forwardRef<
   <ToastPrimitives.Viewport
     ref={ref}
     className={cn(
-      "fixed top-16 z-[100] flex max-h-screen w-full flex-col-reverse p-4 sm:bottom-0 sm:right-0 sm:top-auto sm:flex-col md:max-w-[420px]",
+      // 移动端贴顶单列铺满宽度（顶部已有页头，top-16 会被安全区顶飞），桌面回到底部右侧
+      "fixed inset-x-0 top-[max(0.5rem,env(safe-area-inset-top))] z-[100] flex max-h-screen w-full flex-col gap-2 px-3 sm:inset-x-auto sm:bottom-0 sm:right-0 sm:top-auto sm:gap-0 sm:p-4 sm:flex-col md:max-w-[420px]",
       zeroRightClassName,
       className
     )}
@@ -35,7 +36,7 @@ const Toast = React.forwardRef<
   <ToastPrimitives.Root
     ref={ref}
     className={cn(
-      "toast-swipe group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden border p-4 shadow-lg transition-all glass-card",
+      "toast-swipe group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden border p-3.5 shadow-lg transition-all glass-card sm:p-4",
       "data-[state=open]:animate-toast-in data-[state=closed]:animate-toast-out",
       "data-[swipe=end]:animate-toast-out",
       "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:origin-left after:content-['']",
