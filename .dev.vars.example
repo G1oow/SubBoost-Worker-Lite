@@ -1,2 +1,6 @@
 ADMIN_TOKEN=replace-with-at-least-32-random-chars
 ENCRYPTION_KEY=replace-with-at-least-32-random-chars
+# 可选：订阅 age 加密通道的收件公钥（age-keygen 输出的 public key），逗号分隔可配多把
+AGE_RECIPIENT=age1replace-with-recipient
+# 可选：设为 1 时只输出 age 密文，明文订阅入口与一键导入都会被 403
+AGE_ONLY=0

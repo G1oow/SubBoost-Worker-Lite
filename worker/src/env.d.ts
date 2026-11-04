@@ -39,4 +39,8 @@ interface Env {
   APP_NAME?: string;
   // var：覆盖默认上游抓取 UA
   DEFAULT_USER_AGENT?: string;
+  // var：订阅 age 加密通道的收件公钥（`age1…`，逗号/空白分隔，可多把）
+  AGE_RECIPIENT?: string;
+  // var：设为 1/true 时只输出 age 密文，明文入口与一键导入一律 403
+  AGE_ONLY?: string;
 }

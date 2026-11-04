@@ -12,6 +12,7 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "target": "ES2017"
+    // ES2020：age 加密实现用 BigInt 做 X25519 / Poly1305 的模运算，字面量语法需要这个 target
+    "target": "ES2020"
   }
 }

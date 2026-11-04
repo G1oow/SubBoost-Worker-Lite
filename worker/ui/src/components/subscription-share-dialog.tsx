@@ -15,7 +15,14 @@ import {
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { buildQrFileName, downloadQrPng } from "@subboost/ui/lib/qr-download";
-import type { SubscriptionDto } from "../lib/types";
+import { buildAgeLinks } from "../lib/share-links";
+import type { AgeCapabilities, SubscriptionDto } from "../lib/types";
+import {
+  AgeMisconfiguredNotice,
+  AgeOnlyNotice,
+  AgeSection,
+  ImportLinksSection,
+} from "./subscription-share-sections";
 import { ShortLinkSection } from "./subscription-short-link";
 
 /** 二维码留白（模块数），低于 4 会影响部分扫码器识别 */
@@ -37,6 +44,11 @@ export type SubscriptionShareContentProps = {
   onCreateShortLink?: () => void;
   onCopyShortLink?: () => void;
   onRevokeShortLink?: () => void;
+  /** age 加密通道能力；undefined 视为未配置，不显示加密区块 */
+  age?: AgeCapabilities;
+  /** 加密链接刚复制成功 */
+  ageCopied?: boolean;
+  onCopyAgeLink?: () => void;
 };
 
 /** 与弹窗解耦的分享内容，便于直接渲染和测试 */
@@ -53,6 +65,9 @@ export function SubscriptionShareContent({
   onCreateShortLink,
   onCopyShortLink,
   onRevokeShortLink,
+  age,
+  ageCopied = false,
+  onCopyAgeLink,
 }: SubscriptionShareContentProps) {
   // 生成短链后，二维码与「复制/打开」都指向短链；原链接仍完整展示，方便已在用的客户端继续使用
   const shortLink = subscription.shortLink;
@@ -106,6 +121,13 @@ export function SubscriptionShareContent({
         onRevoke={onRevokeShortLink}
       />
 
+      {age?.misconfigured ? <AgeMisconfiguredNotice /> : null}
+
+      {age?.only ? <AgeOnlyNotice /> : <ImportLinksSection link={shareLink} />}
+
+      {age?.enabled ? (
+        <AgeSection link={shareLink} age={age} copied={ageCopied} onCopy={onCopyAgeLink} />
+      ) : null}
       <p className="flex items-start gap-1.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
         <Icon icon={ShieldAlert} size="sm" className="mt-px shrink-0" />
         <span>链接等同于访问凭据，拿到即可拉取订阅，请只分享给本人设备。</span>
@@ -145,6 +167,8 @@ export type SubscriptionShareDialogProps = {
   onCreateShortLink?: () => Promise<void>;
   /** 撤销短链 */
   onRevokeShortLink?: () => Promise<void>;
+  /** age 加密通道能力，由 /api/state 的 capabilities 传入 */
+  age?: AgeCapabilities;
 };
 
 export function SubscriptionShareDialog({
@@ -152,6 +176,7 @@ export function SubscriptionShareDialog({
   onClose,
   onCreateShortLink,
   onRevokeShortLink,
+  age,
 }: SubscriptionShareDialogProps) {
   const { toast } = useToast();
   const canvasRef = React.useRef<HTMLCanvasElement | null>(null);
@@ -159,6 +184,7 @@ export function SubscriptionShareDialog({
   const [downloading, setDownloading] = React.useState(false);
   const [shortBusy, setShortBusy] = React.useState(false);
   const [shortCopied, setShortCopied] = React.useState(false);
+  const [ageCopied, setAgeCopied] = React.useState(false);
 
   // 切换到另一条订阅时清掉上一条的状态
   React.useEffect(() => {
@@ -166,6 +192,7 @@ export function SubscriptionShareDialog({
     setDownloading(false);
     setShortBusy(false);
     setShortCopied(false);
+    setAgeCopied(false);
   }, [subscription?.id]);
 
   React.useEffect(() => {
@@ -179,6 +206,12 @@ export function SubscriptionShareDialog({
     const timer = window.setTimeout(() => setShortCopied(false), 1500);
     return () => window.clearTimeout(timer);
   }, [shortCopied]);
+
+  React.useEffect(() => {
+    if (!ageCopied) return;
+    const timer = window.setTimeout(() => setAgeCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [ageCopied]);
 
   // 复制与打开都跟随「当前分享链接」：有短链时就是短链
   const shareLink = subscription?.shortLink ?? subscription?.link ?? "";
@@ -201,6 +234,16 @@ export function SubscriptionShareDialog({
       return;
     }
     setShortCopied(true);
+  };
+
+  const handleCopyAge = async () => {
+    if (!subscription) return;
+    const ok = await copyTextToClipboard(buildAgeLinks(shareLink).binary);
+    if (!ok) {
+      toast({ variant: "warning", title: "复制失败", description: "请手动选择加密链接复制。" });
+      return;
+    }
+    setAgeCopied(true);
   };
 
   const handleDownload = async () => {
@@ -287,6 +330,9 @@ export function SubscriptionShareDialog({
             shortCopied={shortCopied}
             onCreateShortLink={onCreateShortLink ? handleCreateShort : undefined}
             onCopyShortLink={handleCopyShort}
+            age={age}
+            ageCopied={ageCopied}
+            onCopyAgeLink={handleCopyAge}
             onRevokeShortLink={onRevokeShortLink ? handleRevokeShort : undefined}
           />
         ) : null}

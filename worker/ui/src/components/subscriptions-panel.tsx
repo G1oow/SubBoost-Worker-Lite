@@ -1,5 +1,16 @@
 import * as React from "react";
-import { Check, Copy, Link2, Pencil, Plus, QrCode, RefreshCw, Trash2 } from "lucide-react";
+import {
+  Check,
+  Copy,
+  KeyRound,
+  Link2,
+  Pencil,
+  Plus,
+  QrCode,
+  RefreshCw,
+  Smartphone,
+  Trash2,
+} from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
@@ -21,6 +32,8 @@ import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { cn } from "@subboost/ui/lib/utils";
 import type { AppState, SubscriptionDto } from "../lib/types";
+import { SubscriptionAgeDialog } from "./subscription-age-dialog";
+import { SubscriptionImportDialog } from "./subscription-import-dialog";
 import { SubscriptionShareDialog } from "./subscription-share-dialog";
 
 export type SubscriptionUpdatePatch = {
@@ -59,12 +72,22 @@ export function SubscriptionsPanel({
   const [error, setError] = React.useState("");
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [sharingId, setSharingId] = React.useState<string | null>(null);
+  const [importingId, setImportingId] = React.useState<string | null>(null);
+  const [ageId, setAgeId] = React.useState<string | null>(null);
   const [shortBusyId, setShortBusyId] = React.useState<string | null>(null);
   const [shortCopiedId, setShortCopiedId] = React.useState<string | null>(null);
   // 由 id 派生而非保存快照，轮换/改名后弹窗自动跟着更新
   const sharing = React.useMemo(
     () => state.subscriptions.find((item) => item.id === sharingId) ?? null,
     [state.subscriptions, sharingId]
+  );
+  const importing = React.useMemo(
+    () => state.subscriptions.find((item) => item.id === importingId) ?? null,
+    [state.subscriptions, importingId]
+  );
+  const ageTarget = React.useMemo(
+    () => state.subscriptions.find((item) => item.id === ageId) ?? null,
+    [state.subscriptions, ageId]
   );
 
   const sourceNameById = React.useMemo(
@@ -324,7 +347,22 @@ export function SubscriptionsPanel({
                       )
                     ) : null}
                   </div>
-                  <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
+                  {/* 窄屏七个图标也要能换行：一键导入 / age 加密放在二维码左边 */}
+                  <div className="flex shrink-0 flex-wrap items-center gap-1 self-end sm:self-auto">
+                    <IconButton
+                      label={`一键导入 ${subscription.name}`}
+                      variant="ghost"
+                      onClick={() => setImportingId(subscription.id)}
+                    >
+                      <Icon icon={Smartphone} />
+                    </IconButton>
+                    <IconButton
+                      label={`${subscription.name} 的 age 加密订阅`}
+                      variant="ghost"
+                      onClick={() => setAgeId(subscription.id)}
+                    >
+                      <Icon icon={KeyRound} />
+                    </IconButton>
                     <IconButton
                       label={`分享 ${subscription.name} 二维码`}
                       variant="ghost"
@@ -388,6 +426,19 @@ export function SubscriptionsPanel({
         onRevokeShortLink={
           onRevokeShortLink && sharing ? () => onRevokeShortLink(sharing.id) : undefined
         }
+        age={state.capabilities?.age}
+      />
+
+      <SubscriptionImportDialog
+        subscription={importing}
+        onClose={() => setImportingId(null)}
+        ageOnly={state.capabilities?.age?.only === true}
+      />
+
+      <SubscriptionAgeDialog
+        subscription={ageTarget}
+        onClose={() => setAgeId(null)}
+        age={state.capabilities?.age}
       />
 
       <Dialog open={open} onOpenChange={setOpen}>

@@ -1,5 +1,9 @@
 import yaml from "js-yaml";
 import { describe, expect, it, vi } from "vitest";
+import { decryptAgeFile } from "@subboost/server-core/crypto/age";
+import { dearmorAge } from "@subboost/server-core/crypto/age-armor";
+import { bech32Encode, encodeAgeRecipient } from "@subboost/server-core/crypto/bech32";
+import { x25519PublicKeyFromSecret } from "@subboost/server-core/crypto/x25519";
 import { route } from "./router";
 import { createStore } from "./store";
 import { MemoryKV } from "./test-utils/memory-kv";
@@ -78,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.6.1" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.7.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -693,3 +697,209 @@ describe("router fallthrough", () => {
 
 
 
+
+const AGE_SECRET = new Uint8Array(32).fill(11);
+const AGE_IDENTITY = bech32Encode("age-secret-key-", AGE_SECRET).toUpperCase();
+const AGE_RECIPIENT = encodeAgeRecipient(x25519PublicKeyFromSecret(AGE_SECRET));
+
+function envWithAge(h: Harness, overrides: Record<string, string> = {}): Env {
+  return { ...h.env, AGE_RECIPIENT, ...overrides } as unknown as Env;
+}
+
+async function seedSubscription(h: Harness) {
+  await h.store.saveSources([{ name: "m", kind: "manual", manualText: SS }]);
+  return h.store.createSubscription({ name: "ageprofile", sourceIds: [] });
+}
+
+describe("router age encrypted output", () => {
+  it("serves binary age ciphertext that decrypts back to the plain YAML", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+
+    const plain = await route(new Request(`https://worker.example.com/sub/${token}`), h.env, h.deps);
+    const plainText = await plain.text();
+
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?format=age`),
+      envWithAge(h),
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("application/octet-stream");
+    expect(response.headers.get("content-disposition")).toContain(".yaml.age");
+    // 密文每次都不同，因此不发 ETag、也不允许缓存
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("etag")).toBeNull();
+    expect(response.headers.get("x-robots-tag")).toBe("noindex");
+
+    const decrypted = await decryptAgeFile(new Uint8Array(await response.arrayBuffer()), [
+      AGE_IDENTITY,
+    ]);
+    expect(new TextDecoder().decode(decrypted)).toBe(plainText);
+  });
+
+  it("serves armored ciphertext for ?format=age-armor", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?format=age-armor`),
+      envWithAge(h),
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/plain");
+    const text = await response.text();
+    expect(text.startsWith("-----BEGIN AGE ENCRYPTED FILE-----")).toBe(true);
+    const decrypted = await decryptAgeFile(dearmorAge(text), [AGE_IDENTITY]);
+    expect(new TextDecoder().decode(decrypted)).toContain("proxies:");
+  });
+
+  it("keeps the plain YAML output untouched when no format is given", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}`),
+      envWithAge(h),
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/yaml");
+    expect(response.headers.get("etag")).toMatch(/^"[0-9a-f]{16}-\d+-\d+"$/);
+  });
+
+  it("returns 503 when AGE_RECIPIENT is missing or invalid", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+
+    const missing = await route(
+      new Request(`https://worker.example.com/sub/${token}?format=age`),
+      h.env,
+      h.deps
+    );
+    expect(missing.status).toBe(503);
+    expect(await missing.text()).toBe("Age recipient not configured");
+
+    const invalid = await route(
+      new Request(`https://worker.example.com/sub/${token}?format=age`),
+      envWithAge(h, { AGE_RECIPIENT: "age1broken" }),
+      h.deps
+    );
+    expect(invalid.status).toBe(503);
+    expect(await invalid.text()).toBe("Age recipient invalid");
+  });
+
+  it("exposes age capabilities on /api/state", async () => {
+    const h = createHarness();
+    const response = await route(apiRequest("/api/state"), envWithAge(h), h.deps);
+    const body = (await response.json()) as { capabilities: { age: unknown } };
+    expect(body.capabilities.age).toEqual({
+      enabled: true,
+      only: false,
+      recipients: [AGE_RECIPIENT],
+      misconfigured: false,
+    });
+  });
+});
+
+describe("router one-click import", () => {
+  it("redirects to the client deep link and drops the target parameter", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?target=clash`),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get("location")).toBe(
+      `clash://install-config?url=${encodeURIComponent(
+        `https://worker.example.com/sub/${token}`
+      )}`
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex");
+    expect(await response.text()).toBe("");
+  });
+
+  it("works through the short link form", async () => {
+    const h = createHarness();
+    const { dto } = await seedSubscription(h);
+    const withShort = await h.store.createShortLink(dto.id, "https://worker.example.com");
+    const code = withShort?.shortLink?.split("/s/")[1] as string;
+
+    const response = await route(
+      new Request(`https://worker.example.com/s/${code}?target=singbox`),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(302);
+    const location = response.headers.get("location") ?? "";
+    expect(location.startsWith("sing-box://import-remote-profile?url=")).toBe(true);
+    expect(decodeURIComponent(location)).toContain(`https://worker.example.com/s/${code}`);
+    expect(decodeURIComponent(location)).toContain("#ageprofile");
+  });
+
+  it("falls back to the normal subscription output for an unknown target", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?target=clashx`),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("text/yaml");
+  });
+
+  it("returns 404 for an unknown subscription without calling the app", async () => {
+    const h = createHarness();
+    const response = await route(
+      new Request("https://worker.example.com/sub/unknown?target=clash"),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(404);
+    expect(response.headers.get("location")).toBeNull();
+    expect(await response.text()).toBe("Not found");
+  });
+});
+
+describe("router age-only mode", () => {
+  it("rejects the plain output and the deep link but keeps the encrypted one", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const env = envWithAge(h, { AGE_ONLY: "1" });
+
+    const plain = await route(new Request(`https://worker.example.com/sub/${token}`), env, h.deps);
+    expect(plain.status).toBe(403);
+    expect(await plain.text()).toBe("Encrypted output only");
+
+    const deepLink = await route(
+      new Request(`https://worker.example.com/sub/${token}?target=clash`),
+      env,
+      h.deps
+    );
+    expect(deepLink.status).toBe(403);
+
+    const encrypted = await route(
+      new Request(`https://worker.example.com/sub/${token}?format=age`),
+      env,
+      h.deps
+    );
+    expect(encrypted.status).toBe(200);
+  });
+
+  it("does not lock the plain output when the recipient is misconfigured", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const env = { ...h.env, AGE_RECIPIENT: "age1broken", AGE_ONLY: "1" } as unknown as Env;
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}`),
+      env,
+      h.deps
+    );
+    // 配置错误时不能把实例锁死：明文照常输出，加密通道报 503
+    expect(response.status).toBe(200);
+  });
+});

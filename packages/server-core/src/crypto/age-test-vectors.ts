@@ -1,0 +1,71 @@
+/**
+ * age v1 官方向量（C2SP/CCTV 的 age testkit）。
+ *
+ * 这些向量按 0BSD / CC0-1.0 / Unlicense 三选一发布，可直接内联到本仓库；
+ * 只保留不需要 zlib 解压、不涉及 passphrase 的用例，用来逐字节校验我们的实现：
+ * 解出的明文 SHA-256 必须等于 `payloadSha256Hex`。
+ */
+export type AgeTestVector = {
+  name: string;
+  expect: "success" | "no match" | "HMAC failure" | "payload failure" | "armor failure" | "header failure";
+  payloadSha256Hex?: string;
+  fileKeyHex?: string;
+  identities: string[];
+  armored: boolean;
+  /** 向量里的 age 文件（或 armor 文本）原始字节，base64 存放以免仓库出现二进制文件 */
+  base64: string;
+};
+
+export const AGE_TEST_VECTORS: AgeTestVector[] = [
+  {
+    name: "x25519",
+    expect: "success",
+    payloadSha256Hex: "013f54400c82da08037759ada907a8b864e97de81c088a182062c4b5622fd2ab",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0"],
+    armored: false,
+    base64: "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBURWlGMHlwcXIrYnB2Y3FYTnlDVkpwTDdPdXdQZFZ3UEw3S1FFYkZET0NjCmhqYWJHWHdTTFE5YzNTNkx3MmkrUzJUdTJmaXdRSEhzbGJCTjZCNDFGTEUKLS0tIFd5SnA5Ri85Rk9aaDdnSmRoZXEyV0lKY3dIZ1ljOE5JVmgzZGR3aHJjTmcK7s9ix86RtDMnTmjU8vkTTLdMW/73vqpSyPC8DpksHoMx+2Y=",
+  },
+  {
+    name: "x25519_multiple_recipients",
+    expect: "success",
+    payloadSha256Hex: "013f54400c82da08037759ada907a8b864e97de81c088a182062c4b5622fd2ab",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0"],
+    armored: false,
+    base64: "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBhanRxQXZERWtWTnIyQjd6VU90cTJtQVFYRFNCbE5yVkF1TS9kS2I1c1Q0CjBldnJLL0hRWFZzUTRZYURlKzY1OWw1T1F6dkF6RDJ5dExHSFFMUWlxeGcKLT4gWDI1NTE5IDBxQzd1NkFiTHh1d25NOHRQRk9XVnRXWm4vWlplN3o3Z2NzUDVrZ0EwRkkKWTNPemV2TG0yM1Z4N1BOOWszM0Y5eStlcmNXZS9iY1pKTHFocUEzaDQwOAotLS0gODU1cEtibFF6WjNvYWJEb3d4UkRRdlNqL3hvNDdaU2g1V1Rqa21LMEkwVQrwuBi+DzVUQjmZIK2AhJZLb5XDbbNeT1nY+J488m8tH6VCEw==",
+  },
+  {
+    name: "armor_x25519",
+    expect: "success",
+    payloadSha256Hex: "013f54400c82da08037759ada907a8b864e97de81c088a182062c4b5622fd2ab",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0"],
+    armored: true,
+    base64: "LS0tLS1CRUdJTiBBR0UgRU5DUllQVEVEIEZJTEUtLS0tLQpZV2RsTFdWdVkzSjVjSFJwYjI0dWIzSm5MM1l4Q2kwK0lGZ3lOVFV4T1NCVVJXbEdNSGx3Y1hJclluQjJZM0ZZClRubERWa3B3VERkUGRYZFFaRlozVUV3M1MxRkZZa1pFVDBOakNtaHFZV0pIV0hkVFRGRTVZek5UTmt4M01ta3IKVXpKVWRUSm1hWGRSU0VoemJHSkNUalpDTkRGR1RFVUtMUzB0SUZkNVNuQTVSaTg1Ums5YWFEZG5TbVJvWlhFeQpWMGxLWTNkSVoxbGpPRTVKVm1nelpHUjNhSEpqVG1jSzdzOWl4ODZSdERNblRtalU4dmtUVExkTVcvNzN2cXBTCnlQQzhEcGtzSG9NeCsyWT0KLS0tLS1FTkQgQUdFIEVOQ1JZUFRFRCBGSUxFLS0tLS0K",
+  },
+  {
+    name: "hmac_bad",
+    expect: "HMAC failure",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0"],
+    armored: false,
+    base64: "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBURWlGMHlwcXIrYnB2Y3FYTnlDVkpwTDdPdXdQZFZ3UEw3S1FFYkZET0NjCmhqYWJHWHdTTFE5YzNTNkx3MmkrUzJUdTJmaXdRSEhzbGJCTjZCNDFGTEUKLS0tIDhNY0UzaXg5UjM0RS92THJRdjN5ZXBzSGpvL0xYaGZzMjJBYjNVeUlubWcK7s9ix86RtDMnTmjU8vkTTLdMW/73vqpSyPC8DpksHoMx+2Y=",
+  },
+  {
+    name: "x25519_no_match",
+    expect: "no match",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-143WN7DCXU4G8R5AXQSSYD9AEPYDNT3HXSLWSPK36CDU6E8M59SSSAGZ3KG"],
+    armored: false,
+    base64: "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBhanRxQXZERWtWTnIyQjd6VU90cTJtQVFYRFNCbE5yVkF1TS9kS2I1c1Q0CkhVS3R6MFIyajVCbDJFUjdIaEFaclVSaWtDRnBpSWpOYTBLakhjamJBR1UKLS0tIHJycFRsdktFS3JLM0VxaG9PUEplUDFLRThPMWQyYXJyUmV6Nzdtd2VrUmMK3d9y0G+8q1ffPQ0xJJatIYzX/W+AeLv4gS3YeUcVXre9Xog=",
+  },
+  {
+    name: "x25519_low_order",
+    expect: "header failure",
+    fileKeyHex: "59454c4c4f57205355424d4152494e45",
+    identities: ["AGE-SECRET-KEY-1EGTZVFFV20835NWYV6270LXYVK2VKNX2MMDKWYKLMGR48UAWX40Q2P2LM0"],
+    armored: false,
+    base64: "YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBYNXlWdktOUWpDU3gwTEZWbklQdld3UkVYTVJZSEk2RzJDSk8zZENmRWRjCjNFME5wRmFucy9tMFdMV0Y3KzU0WkJkTmozaXFRcXByYUdERmlhUmt2QkEKLS0tIHNYdzMyN1lNVDEvVUxYZStaeVJNYk1ZMFoyam5XSEdnSTlqMXdlNnlROEEKrF0/NwblUHHTpgQgRpe5CQWVwvf1267oDXoBjChyBYrzznw=",
+  },
+];
