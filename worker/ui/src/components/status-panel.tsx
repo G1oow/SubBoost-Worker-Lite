@@ -1,5 +1,6 @@
 import * as React from "react";
 import { CircleAlert, CircleCheck, Clock, RefreshCw, TriangleAlert } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { GrowBar } from "@subboost/ui/motion/grow-bar";
@@ -20,19 +21,19 @@ export type StatusPanelProps = {
 const TONE_STYLE: Record<RefreshTone, { box: string; icon: React.ReactNode }> = {
   ok: {
     box: "border-emerald-500/30 bg-emerald-500/10",
-    icon: <CircleCheck aria-hidden="true" className="h-5 w-5 text-emerald-400" />,
+    icon: <Icon icon={CircleCheck} size="lg" className="text-emerald-400" />,
   },
   warn: {
     box: "border-amber-500/30 bg-amber-500/10",
-    icon: <TriangleAlert aria-hidden="true" className="h-5 w-5 text-amber-400" />,
+    icon: <Icon icon={TriangleAlert} size="lg" className="text-amber-400" />,
   },
   error: {
     box: "border-red-500/30 bg-red-500/10",
-    icon: <CircleAlert aria-hidden="true" className="h-5 w-5 text-red-400" />,
+    icon: <Icon icon={CircleAlert} size="lg" className="text-red-400" />,
   },
   idle: {
     box: "border-ink/10 bg-ink/5",
-    icon: <Clock aria-hidden="true" className="h-5 w-5 text-fg-40" />,
+    icon: <Icon icon={Clock} size="lg" className="text-fg-40" />,
   },
 };
 
@@ -143,7 +144,7 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
           loadingLabel="刷新中…"
           className="w-full shrink-0 sm:w-auto"
         >
-          <RefreshCw aria-hidden="true" />
+          <Icon icon={RefreshCw} />
           立即刷新
         </LoadingButton>
       </CardHeader>

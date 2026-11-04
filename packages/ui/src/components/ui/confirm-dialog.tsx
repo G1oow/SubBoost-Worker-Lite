@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, HelpCircle, XCircle } from "lucide-react";
+import { CircleHelp, CircleX, TriangleAlert } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Button } from "@subboost/ui/components/ui/button";
 import {
   Dialog,
@@ -105,11 +106,11 @@ function useConfirmDialog() {
 function getVariantIcon(variant: ConfirmDialogVariant) {
   switch (variant) {
     case "destructive":
-      return <XCircle className="h-5 w-5 text-red-400" />;
+      return <Icon icon={CircleX} size="lg" className="text-red-400" />;
     case "warning":
-      return <AlertTriangle className="h-5 w-5 text-amber-400" />;
+      return <Icon icon={TriangleAlert} size="lg" className="text-amber-400" />;
     default:
-      return <HelpCircle className="h-5 w-5 text-indigo-400" />;
+      return <Icon icon={CircleHelp} size="lg" className="text-indigo-400" />;
   }
 }
 

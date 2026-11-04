@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Activity, LayoutDashboard, Layers, Link2, Loader2, Settings } from "lucide-react";
+import { Activity, LayoutDashboard, Layers, Link2, LoaderCircle, Settings } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { ConfirmDialogHost } from "@subboost/ui/components/ui/confirm-dialog";
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { AppShell, type AppNavItem } from "./components/app-shell";
@@ -8,6 +9,7 @@ import { DashboardPanel } from "./components/dashboard-panel";
 import { SourcesPanel } from "./components/sources-panel";
 import { StatusPanel } from "./components/status-panel";
 import { SubscriptionsPanel, type SubscriptionUpdatePatch } from "./components/subscriptions-panel";
+import { DemoBanner } from "./components/demo-banner";
 import { TokenGate } from "./components/token-gate";
 import { clearAdminToken, readAdminToken, writeAdminToken } from "./lib/admin-token";
 import { createApiClient } from "./lib/api-client";
@@ -21,6 +23,10 @@ import type {
   StatusRecord,
 } from "./lib/types";
 import { runPageTransition } from "./lib/view-transition";
+
+// 构建期常量（由 vite.config.ts 的 define 注入）。写成模块内的本地常量而
+// 不是跨文件导入，正式构建才能把它折叠成 false，进而摇掉演示分支与它的 chunk。
+const DEMO_MODE: boolean = __SUBBOOST_DEMO__;
 
 type SubscriptionResponse = { subscription: AppState["subscriptions"][number] };
 type SourcesResponse = { sources: AppState["sources"] };
@@ -41,16 +47,19 @@ function readPageFromHash(): PageId {
 }
 
 const NAV_ITEMS: AppNavItem[] = [
-  { id: "dashboard", label: "仪表板", icon: <LayoutDashboard className="h-4 w-4" /> },
-  { id: "sources", label: "源管理", icon: <Layers className="h-4 w-4" /> },
-  { id: "subscriptions", label: "订阅链接", icon: <Link2 className="h-4 w-4" /> },
-  { id: "status", label: "刷新状态", icon: <Activity className="h-4 w-4" /> },
-  { id: "config", label: "生成配置", icon: <Settings className="h-4 w-4" /> },
+  { id: "dashboard", label: "仪表板", icon: <Icon icon={LayoutDashboard} size="md" /> },
+  { id: "sources", label: "源管理", icon: <Icon icon={Layers} size="md" /> },
+  { id: "subscriptions", label: "订阅链接", icon: <Icon icon={Link2} size="md" /> },
+  { id: "status", label: "刷新状态", icon: <Icon icon={Activity} size="md" /> },
+  { id: "config", label: "生成配置", icon: <Icon icon={Settings} size="md" /> },
 ];
 
 export function App() {
   const { toast } = useToast();
-  const [token, setToken] = React.useState<string | null>(() => readAdminToken());
+  const [token, setToken] = React.useState<string | null>(() =>
+    // 演示构建不需要真实凭据：给一个非空占位直接进入（鉴权由内存后端统一注入）
+    DEMO_MODE ? "demo-session" : readAdminToken()
+  );
   const [state, setState] = React.useState<AppState | null>(null);
   const [stats, setStats] = React.useState<DashboardStats | null>(null);
   const [statsLoading, setStatsLoading] = React.useState(false);
@@ -70,6 +79,16 @@ export function App() {
       createApiClient({
         getToken: () => token,
         onUnauthorized: handleUnauthorized,
+        // 演示构建把所有 /api 请求交给浏览器内存里的真实路由处理。
+        // 这里用动态 import，正式构建折叠掉该分支后，演示代码与它的 chunk 都不会产生。
+        ...(DEMO_MODE
+          ? {
+              fetchImpl: ((input: RequestInfo | URL, init?: RequestInit) =>
+                import("./demo/demo-backend").then((mod) =>
+                  mod.getDemoBackend().dispatch(input, init)
+                )) as typeof fetch,
+            }
+          : {}),
       }),
     [token, handleUnauthorized]
   );
@@ -196,6 +215,41 @@ export function App() {
     );
   };
 
+  /** 短链与 token 链接指向同一条订阅；生成后按 id 替换该项，弹窗与列表立即刷新 */
+  const handleCreateShortLink = async (id: string) => {
+    const result = await client.send<SubscriptionResponse>(
+      "POST",
+      `/api/subscriptions/${encodeURIComponent(id)}/short-link`
+    );
+    setState((current) =>
+      current
+        ? {
+            ...current,
+            subscriptions: current.subscriptions.map((item) =>
+              item.id === id ? result.subscription : item
+            ),
+          }
+        : current
+    );
+  };
+
+  const handleRevokeShortLink = async (id: string) => {
+    const result = await client.send<SubscriptionResponse>(
+      "DELETE",
+      `/api/subscriptions/${encodeURIComponent(id)}/short-link`
+    );
+    setState((current) =>
+      current
+        ? {
+            ...current,
+            subscriptions: current.subscriptions.map((item) =>
+              item.id === id ? result.subscription : item
+            ),
+          }
+        : current
+    );
+  };
+
   const handleDeleteSubscription = async (id: string) => {
     await client.send<void>("DELETE", `/api/subscriptions/${encodeURIComponent(id)}`);
     setState((current) =>
@@ -262,7 +316,7 @@ export function App() {
             </div>
             <div className="skeleton h-64 w-full animate-shimmer" aria-hidden="true" />
             <p className="flex items-center justify-center gap-2 py-2 text-sm text-fg-50">
-              <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+              <Icon icon={LoaderCircle} size="md" className="animate-spin" />
               加载中…
             </p>
           </div>
@@ -293,6 +347,8 @@ export function App() {
                 onCreate={handleCreateSubscription}
                 onUpdate={handleUpdateSubscription}
                 onRotate={handleRotateSubscription}
+                onCreateShortLink={handleCreateShortLink}
+                onRevokeShortLink={handleRevokeShortLink}
                 onDelete={handleDeleteSubscription}
               />
             ) : null}
@@ -308,6 +364,7 @@ export function App() {
         )}
       </AppShell>
       <ConfirmDialogHost />
+      {DEMO_MODE ? <DemoBanner /> : null}
     </>
   );
 }

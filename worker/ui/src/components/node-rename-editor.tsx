@@ -1,5 +1,6 @@
 import * as React from "react";
 import { RotateCcw, Search } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
@@ -65,9 +66,10 @@ export function NodeRenameEditor({
         {nodes.length > 6 ? (
           // 窄屏铺满一行：固定 14rem 宽在 320px 屏上会溢出弹窗
           <div className="relative w-full sm:w-56">
-            <Search
-              aria-hidden="true"
-              className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg-40"
+            <Icon
+              icon={Search}
+              size="sm"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-40"
             />
             <Input
               value={query}
@@ -134,7 +136,7 @@ export function NodeRenameEditor({
                     onClick={() => setName(node, "")}
                     className="min-h-9 min-w-9"
                   >
-                    <RotateCcw aria-hidden="true" />
+                    <Icon icon={RotateCcw} />
                   </IconButton>
                 ) : null}
               </MotionItem>

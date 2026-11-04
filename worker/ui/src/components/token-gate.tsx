@@ -1,5 +1,6 @@
 import * as React from "react";
 import { KeyRound } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { PasswordField } from "@subboost/ui/components/ui/password-field";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { SpotlightCard } from "@subboost/ui/motion/spotlight-card";
@@ -39,7 +40,7 @@ export function TokenGate({ onAuthenticated }: TokenGateProps) {
       <div className="w-full max-w-md animate-rise">
         <div className="text-center mb-8">
           <div className="mb-5 flex items-center justify-center gap-2.5">
-            <KeyRound className="h-6 w-6 text-primary-400" aria-hidden="true" />
+            <Icon icon={KeyRound} size="xl" className="text-primary-400" />
             <span className="text-sm font-medium tracking-tight text-fg-60">SubBoost Lite</span>
           </div>
           <h1 className="text-2xl font-bold text-fg">管理访问</h1>

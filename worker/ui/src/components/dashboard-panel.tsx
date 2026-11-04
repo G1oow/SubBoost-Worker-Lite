@@ -16,6 +16,7 @@ import {
   TriangleAlert,
   Waypoints,
 } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge, badgeVariants } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -220,11 +221,11 @@ export function DashboardPanel({
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={health.variant} className="gap-1">
                 {health.variant === "success" ? (
-                  <CircleCheck aria-hidden="true" className="h-3 w-3" />
+                  <Icon icon={CircleCheck} size="xs" />
                 ) : health.variant === "destructive" ? (
-                  <CircleAlert aria-hidden="true" className="h-3 w-3" />
+                  <Icon icon={CircleAlert} size="xs" />
                 ) : (
-                  <Sparkles aria-hidden="true" className="h-3 w-3" />
+                  <Icon icon={Sparkles} size="xs" />
                 )}
                 {health.label}
               </Badge>
@@ -235,7 +236,7 @@ export function DashboardPanel({
             </h2>
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-50">
               <span className="inline-flex items-center gap-1">
-                <Clock aria-hidden="true" className="h-3.5 w-3.5" />
+                <Icon icon={Clock} size="sm" />
                 最近刷新 {formatRelativeTime(lastRunAt)}
               </span>
               {lastRunTrigger ? (
@@ -247,7 +248,7 @@ export function DashboardPanel({
           </div>
           <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Button onClick={() => void onRefresh()} disabled={refreshing} className="w-full sm:w-auto">
-              <RefreshCw aria-hidden="true" className={refreshing ? "animate-spin" : undefined} />
+              <Icon icon={RefreshCw} className={refreshing ? "animate-spin" : undefined} />
               {refreshing ? "刷新中…" : "立即刷新"}
             </Button>
             <Button
@@ -256,7 +257,7 @@ export function DashboardPanel({
               className="w-full sm:w-auto"
             >
               订阅链接
-              <ArrowRight aria-hidden="true" />
+              <Icon icon={ArrowRight} />
             </Button>
           </div>
         </div>
@@ -273,7 +274,7 @@ export function DashboardPanel({
           className="animate-rise stagger-1"
           label="源"
           value={totalSources}
-          icon={<Server className="h-4 w-4" />}
+          icon={<Icon icon={Server} size="md" />}
           accent="text-primary-300"
           hint={`${enabledSources} 启用 · ${remoteSources} 远程 / ${manualSources} 手动`}
           onClick={() => onNavigate("sources")}
@@ -282,7 +283,7 @@ export function DashboardPanel({
           className="animate-rise stagger-2"
           label="订阅链接"
           value={totalSubscriptions}
-          icon={<Link2 className="h-4 w-4" />}
+          icon={<Icon icon={Link2} size="md" />}
           accent="text-indigo-300"
           hint={`${allSourceSubscriptions} 条使用全部启用源`}
           onClick={() => onNavigate("subscriptions")}
@@ -291,7 +292,7 @@ export function DashboardPanel({
           className="animate-rise stagger-3"
           label="可用节点"
           value={totalNodes}
-          icon={<Boxes className="h-4 w-4" />}
+          icon={<Icon icon={Boxes} size="md" />}
           accent="text-emerald-300"
           hint={renamedNodes > 0 ? `${renamedNodes} 个已改名` : "来自启用源的节点快照"}
           onClick={() => onNavigate("sources")}
@@ -300,7 +301,7 @@ export function DashboardPanel({
           className="animate-rise stagger-4"
           label="刷新失败源"
           value={failedSources}
-          icon={<Gauge className="h-4 w-4" />}
+          icon={<Icon icon={Gauge} size="md" />}
           accent={failedSources > 0 ? "text-red-300" : "text-fg-40"}
           hint={failedSources > 0 ? "展开提醒查看错误" : "上次刷新全部成功"}
           onClick={() => onNavigate("status")}
@@ -312,7 +313,7 @@ export function DashboardPanel({
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2 text-base">
-                <Waypoints aria-hidden="true" className="h-4 w-4 text-primary-300" />
+                <Icon icon={Waypoints} size="md" className="text-primary-300" />
                 协议分布
               </CardTitle>
               <p className="text-xs text-fg-45">按启用源解析出的节点协议统计</p>
@@ -358,14 +359,14 @@ export function DashboardPanel({
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2 text-base">
-                <Layers aria-hidden="true" className="h-4 w-4 text-primary-300" />
+                <Icon icon={Layers} size="md" className="text-primary-300" />
                 源健康
               </CardTitle>
               <p className="text-xs text-fg-45">节点数与最近一次刷新结果</p>
             </div>
             <Button variant="ghost" size="sm" onClick={() => onNavigate("sources")}>
               管理源
-              <ArrowRight aria-hidden="true" />
+              <Icon icon={ArrowRight} />
             </Button>
           </CardHeader>
           <CardContent>
@@ -424,10 +425,11 @@ export function DashboardPanel({
                         >
                           {formatCount(item.nodeCount)}
                         </span>
-                        <ChevronDown
-                          aria-hidden="true"
+                        <Icon
+                          icon={ChevronDown}
+                          size="md"
                           className={cn(
-                            "h-4 w-4 shrink-0 text-fg-40 transition-transform duration-300",
+                            "shrink-0 text-fg-40 transition-transform duration-300",
                             expanded && "rotate-180 text-primary-200"
                           )}
                         />
@@ -461,8 +463,8 @@ export function DashboardPanel({
                 onClick={() => setShowAllSources((current) => !current)}
               >
                 {showAllSources ? "收起" : `展开全部 ${sourceStats.length} 个源`}
-                <ChevronDown
-                  aria-hidden="true"
+                <Icon
+                  icon={ChevronDown}
                   className={cn("transition-transform duration-300", showAllSources && "rotate-180")}
                 />
               </Button>
@@ -475,7 +477,7 @@ export function DashboardPanel({
         <Card className="animate-rise border-amber-500/30">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <CardTitle className="flex items-center gap-2 text-base">
-              <TriangleAlert aria-hidden="true" className="h-4 w-4 text-amber-400" />
+              <Icon icon={TriangleAlert} size="md" className="text-amber-400" />
               提醒
             </CardTitle>
             <Badge variant="warning">{warnings.length}</Badge>
@@ -493,7 +495,7 @@ export function DashboardPanel({
                       : "border-amber-500/30 bg-amber-500/10 text-amber-200"
                   )}
                 >
-                  <CircleAlert aria-hidden="true" className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  <Icon icon={CircleAlert} size="sm" className="mt-0.5 shrink-0" />
                   <span className="break-words">{item.message}</span>
                 </MotionItem>
               ))}
@@ -505,21 +507,21 @@ export function DashboardPanel({
       <Card className="animate-rise">
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="flex items-center gap-2 text-base">
-            <Activity aria-hidden="true" className="h-4 w-4 text-primary-300" />
+            <Icon icon={Activity} size="md" className="text-primary-300" />
             快捷操作
           </CardTitle>
         </CardHeader>
         <CardContent className="grid gap-2 sm:grid-cols-3">
           <Button variant="secondary" onClick={() => onNavigate("sources")}>
-            <Server aria-hidden="true" />
+            <Icon icon={Server} />
             导入 / 管理源
           </Button>
           <Button variant="secondary" onClick={() => onNavigate("subscriptions")}>
-            <Link2 aria-hidden="true" />
+            <Icon icon={Link2} />
             创建订阅链接
           </Button>
           <Button variant="secondary" onClick={() => onNavigate("config")}>
-            <Sparkles aria-hidden="true" />
+            <Icon icon={Sparkles} />
             调整生成配置
           </Button>
         </CardContent>

@@ -103,6 +103,36 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 
 Until both exist, admin endpoints fail closed with 503. Changing `ENCRYPTION_KEY` later makes existing data unreadable, so sources and subscriptions must be re-entered. Post-deploy verification and troubleshooting live in [worker/README.md](./worker/README.md).
 
+## Vercel preview (optional)
+
+If you want a public link to show the UI without deploying a Worker or exposing real subscriptions,
+host the **demo build** of the admin UI on Vercel. It runs the same Worker routes from this repo,
+but against an in-memory KV with remote fetching disabled: data lives only in the current tab
+and is reset on reload.
+
+The repository-level `vercel.json` already sets everything up:
+
+| Setting | Value |
+| --- | --- |
+| Framework Preset | Other (`framework: null`) |
+| Build Command | `npm run worker:build` |
+| Output Directory | `worker/dist` |
+| Build env | `VITE_SUBBOOST_DEMO=1` (declared in `vercel.json` → `build.env`) |
+
+```powershell
+npm i -g vercel
+vercel login
+vercel            # first run: link or create the project from the repo root
+vercel --prod     # publish
+```
+
+Notes:
+
+- The demo site needs no `ADMIN_TOKEN` / `ENCRYPTION_KEY`; every `/api/*` call is handled in the browser.
+- Seed data covers 3 manual sources, 2 subscriptions and 6 nodes, all on `example.com` with demo labels; node renames and YAML generation still work.
+- Edits only affect the current tab. Remote sources fail immediately in demo mode instead of fetching external URLs.
+- Regular Cloudflare builds are unaffected: without `VITE_SUBBOOST_DEMO=1` the demo code is tree-shaken away.
+
 ## Screenshots
 
 ### Desktop

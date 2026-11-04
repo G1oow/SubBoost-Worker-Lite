@@ -1,5 +1,6 @@
 import * as React from "react";
 import { RotateCcw, Save } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { Textarea } from "@subboost/ui/components/ui/textarea";
@@ -79,7 +80,7 @@ export function ConfigPanel({ state, onSave, onReset }: ConfigPanelProps) {
             disabled={saving}
             className="flex-1 sm:flex-none"
           >
-            <RotateCcw aria-hidden="true" />
+            <Icon icon={RotateCcw} />
             恢复默认
           </Button>
           <LoadingButton
@@ -88,7 +89,7 @@ export function ConfigPanel({ state, onSave, onReset }: ConfigPanelProps) {
             loadingLabel="保存中…"
             className="flex-1 sm:flex-none"
           >
-            <Save aria-hidden="true" />
+            <Icon icon={Save} />
             保存
           </LoadingButton>
         </div>

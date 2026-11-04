@@ -1,12 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { LoaderCircle } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Button, type ButtonProps } from "@subboost/ui/components/ui/button";
 import { cn } from "@subboost/ui/lib/utils";
 
 export type LoadingButtonProps = ButtonProps & {
-  /** 处于等待态：禁用按钮、图标换成旋转的 Loader2、文案换成 loadingLabel */
+  /** 处于等待态：禁用按钮、图标换成旋转的 LoaderCircle、文案换成 loadingLabel */
   loading?: boolean;
   /** 等待态文案，省略时保持原 children */
   loadingLabel?: React.ReactNode;
@@ -35,7 +36,7 @@ export function LoadingButton({
     >
       {loading ? (
         <>
-          <Loader2 aria-hidden="true" className="animate-spin" />
+          <Icon icon={LoaderCircle} className="animate-spin" />
           {loadingLabel ?? children}
         </>
       ) : (
