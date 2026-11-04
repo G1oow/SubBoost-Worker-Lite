@@ -44,6 +44,9 @@ export default mergeConfig(
           // 部署 CLI 是纯进程装配入口（spawn wrangler、读写文件），逻辑已抽到
           // scripts/lib/deploy-runner.cjs 并被完整覆盖；入口本身由 dry-run 手测覆盖。
           "scripts/deploy-worker.cjs",
+          // Vercel 预览站构建入口同理：流程在 scripts/lib/vercel-demo-runner.cjs 并被完整覆盖，
+          // 入口只负责传仓库路径、退出，产物由部署日志里的断言信息兜住。
+          "scripts/build-vercel-demo.cjs",
         ],
         reporter: ["text", "json-summary", "html", "lcov"],
         reportsDirectory: "coverage",
