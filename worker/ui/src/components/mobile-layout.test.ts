@@ -110,7 +110,8 @@ describe("app shell on narrow screens", () => {
     expect(html).toContain("<nav");
     expect(html).toContain("aria-label=\"主导航\"");
     expect(html).toContain("sm:hidden");
-    // 当前页在桌面 tab 与移动 tab 各出现一次
+    // 当前页在桌面胶囊与移动底栏各标记一次；吸顶胶囊只在滚动后才挂载，
+    // 首帧不存在，所以这里只能是 2
     expect(html.match(/aria-current="page"/gu)).toHaveLength(2);
     // 五个页面各自成项，不会像横向胶囊那样被压扁
     for (const item of navItems) expect(html).toContain(item.label);
@@ -189,19 +190,68 @@ describe("panel layout on mobile", () => {
 });
 
 describe("page header", () => {
-  it("does not stick the header to the viewport", () => {
+  const navItems = [
+    { id: "dashboard", label: "仪表板" },
+    { id: "sources", label: "源管理", badge: 2 },
+    { id: "subscriptions", label: "订阅链接" },
+    { id: "status", label: "刷新状态" },
+    { id: "config", label: "生成配置" },
+  ];
+
+  it("keeps the header itself as ordinary page content", () => {
     const source = readWorkerUi("components/app-shell.tsx");
     const headerTag = /<header[\s\S]*?>/u.exec(source)?.[0] ?? "";
     expect(headerTag).not.toBe("");
-    // 常驻页头一定会压住内容：它只能是页面顶部的普通内容，随页面一起滚走
+    // 常驻页头一定会压住内容：页头本身只能是页面顶部的普通内容，随页面一起滚走
     expect(headerTag, "页头不得 sticky").not.toContain("sticky");
     expect(headerTag, "页头不得 fixed").not.toContain("fixed");
     // 也不要有底板与分隔线（背景不做硬性存在）
     expect(headerTag).not.toContain("bg-header");
     expect(headerTag).not.toContain("border-b");
-    // 不做滚动动画：源码里出现 scrollY 就是又想把页头接到滚动事件上
-    expect(source).not.toContain("scrollY");
-    expect(source).not.toContain("useScrollHeaderPhase");
+  });
+
+  it("reveals a separate pinned bar once the page is scrolled", () => {
+    const source = readWorkerUi("components/app-shell.tsx");
+    // 滚过阈值后常驻的那一层是独立元素：fixed 脱离文档流，页头照旧滚走，
+    // 所以收起第二行、缩小内边距都不会让正文跟着跳
+    expect(source).toContain("useScrollHeaderPinned");
+    expect(source).toContain("data-pinned-header");
+    // 未吸顶时整条不挂载：DOM 里没有常驻固定层，与页头里的同名按钮也不会重复可读
+    expect(source).toContain("pinnedHeader ? (");
+    // 出场只跑只驱动 opacity 的关键帧；位移与过渡会把整条变成合成层，
+    // 滚动时压在下方的内容会被插值采样糊掉（本轮修的就是这个回归）
+    expect(source).toContain("animate-fade-in");
+    const barTag = /data-pinned-header="true"[\s\S]*?>/u.exec(source)?.[0] ?? "";
+    expect(barTag).not.toBe("");
+    expect(barTag, "吸顶条不得使用位移类").not.toMatch(/\b-?translate-[xy]-/u);
+    expect(barTag, "吸顶条不得过渡").not.toMatch(/\btransition-/u);
+    expect(barTag, "吸顶条不得缩放").not.toMatch(/\bscale-\d/u);
+    // 压着下文滚动的表面必须是实心色，不能叠背景模糊
+    expect(source).not.toContain("backdrop-blur");
+    // 左上角的品牌徽章兼"回到顶部"
+    expect(source).toContain('aria-label="回到顶部"');
+  });
+
+  it("renders no permanent fixed layer on the first paint", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(
+        AppShell,
+        {
+          title: "SubBoost Lite",
+          version: APP_VERSION,
+          onLogout: () => {},
+          navItems,
+          activeNav: "sources",
+          onNavigate: () => {},
+          onRefresh: () => {},
+        },
+        React.createElement("p", null, "content")
+      )
+    );
+    // 首帧一定未吸顶：整条不挂载。隐藏但存在的固定层同样会被合成，
+    // 所以这里要求它是"不存在"，而不是"透明"
+    expect(html).not.toContain("data-pinned-header");
+    expect(html).not.toContain('aria-label="回到顶部"');
   });
 
   it("keeps the page-switch pill on its own full-width row", () => {
