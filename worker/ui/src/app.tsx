@@ -299,7 +299,7 @@ export function App() {
       <AppShell
         title={state?.app.name ?? "SubBoost Lite"}
         version={state?.app.version ?? ""}
-        onLogout={handleLogout}
+        onLogout={DEMO_MODE ? undefined : handleLogout}
         navItems={state ? navItems : undefined}
         activeNav={page}
         onNavigate={navigate}
@@ -360,7 +360,9 @@ export function App() {
             ) : null}
           </>
         ) : (
-          <div className="py-24 text-center text-fg-50">加载失败，请重新输入 token。</div>
+          <div className="py-24 text-center text-fg-50">
+            {DEMO_MODE ? "演示数据加载失败，请刷新重试。" : "加载失败，请重新输入 token。"}
+          </div>
         )}
       </AppShell>
       <ConfirmDialogHost />

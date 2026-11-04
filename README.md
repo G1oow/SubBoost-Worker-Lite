@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.6.0-green.svg" alt="Version 0.6.0">
+  <img src="https://img.shields.io/badge/version-0.6.1-green.svg" alt="Version 0.6.1">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="许可证 AGPL-3.0-only"></a>
 </p>
 <!-- markdownlint-enable MD033 MD041 -->
@@ -114,9 +114,9 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 | 项目 | 值 |
 | --- | --- |
 | Framework Preset | Other（`framework: null`） |
-| Build Command | `npm run worker:build` |
+| Build Command | `node scripts/build-vercel-demo.cjs` |
 | Output Directory | `worker/dist` |
-| 构建环境变量 | `VITE_SUBBOOST_DEMO=1`（已写进 `vercel.json` 的 `build.env`） |
+| 演示开关 | 由构建脚本强制开启，无需在 Vercel 侧配环境变量 |
 
 ```powershell
 npm i -g vercel
@@ -127,10 +127,12 @@ vercel --prod     # 发布到生产域名
 
 说明：
 
+- 演示开关不靠 Vercel 控制台：`scripts/build-vercel-demo.cjs` 在构建环境里写死 `VITE_SUBBOOST_DEMO=1`，构建完成后还会校验产物里确实有演示代码，对不上就让构建失败，而不是发出一份要 `ADMIN_TOKEN` 登录的正式管理端。另外只要构建发生在 Vercel 容器里（`VERCEL=1`），`resolveDemoMode` 也会默认按演示构建。
+- 不要在 Vercel 控制台 override Build Command / Install Command，否则与仓库里的 `vercel.json` 漂移；真要在 Vercel 上托管正式管理端时，显式设 `VITE_SUBBOOST_DEMO=0` 关闭演示构建。
 - 演示站不需要 `ADMIN_TOKEN` / `ENCRYPTION_KEY`，也没有任何密钥；`/api/*` 全部由浏览器内存里的路由处理。
 - 演示数据是 3 个手动源、2 个订阅、6 个节点，域名统一用 `example.com` 保留域名并带「演示」标记，节点改名与订阅 YAML 生成都能正常展示。
-- 在演示站上的任何改动只影响当前标签页；远程源在演示模式下直接失败，不会真的去抓取外部地址。
-- 不影响正常部署：不带 `VITE_SUBBOOST_DEMO=1` 构建（`npm run worker:build`）时，演示代码会被整体摇掉。
+- 在演示站上的任何改动只影响当前标签页；远程源在演示模式下直接失败，不会真的去抓取外部地址；页头也不显示「退出」，避免访问者被送回登录页。
+- 不影响正常部署：本地与 CI 的 `npm run worker:build`（没有 `VERCEL`、也没设开关）仍是正式构建，演示代码会被整体摇掉。
 
 ## 界面预览
 
