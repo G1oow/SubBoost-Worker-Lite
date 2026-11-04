@@ -54,6 +54,24 @@ export type SubscriptionsPanelProps = {
   onRevokeShortLink?: (id: string) => Promise<void>;
 };
 
+/**
+ * 订阅可能仍引用已被删除的源：卡片上这些 id 会渲染成「已删除的源」。
+ * 它们既不在勾选列表里，也绝不能提交回后端 —— PATCH 会以「源不存在：<id>」直接 400，
+ * 用户看到一个看不见的 id 无从下手。这里是唯一剔除它们的地方。
+ */
+function splitBoundSourceIds(
+  sourceIds: string[],
+  knownIds: Set<string>
+): { selected: string[]; danglingCount: number } {
+  const selected: string[] = [];
+  let danglingCount = 0;
+  for (const id of sourceIds) {
+    if (knownIds.has(id)) selected.push(id);
+    else danglingCount += 1;
+  }
+  return { selected, danglingCount };
+}
+
 export function SubscriptionsPanel({
   state,
   onCreate,
@@ -70,6 +88,8 @@ export function SubscriptionsPanel({
   const [selected, setSelected] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
+  /** 该订阅引用但已被删除的源数量：只用于弹窗提示，不参与提交 */
+  const [danglingCount, setDanglingCount] = React.useState(0);
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [sharingId, setSharingId] = React.useState<string | null>(null);
   const [importingId, setImportingId] = React.useState<string | null>(null);
@@ -94,19 +114,30 @@ export function SubscriptionsPanel({
     () => new Map(state.sources.map((source) => [source.id, source.name])),
     [state.sources]
   );
+  const knownSourceIds = React.useMemo(
+    () => new Set(state.sources.map((source) => source.id)),
+    [state.sources]
+  );
 
   const openCreate = () => {
     setEditingId(null);
     setName("");
     setSelected([]);
+    setDanglingCount(0);
     setError("");
     setOpen(true);
   };
 
   const openEdit = (subscription: SubscriptionDto) => {
+    const { selected: bound, danglingCount: dangling } = splitBoundSourceIds(
+      subscription.sourceIds,
+      knownSourceIds
+    );
     setEditingId(subscription.id);
     setName(subscription.name);
-    setSelected(subscription.sourceIds);
+    // 已删除的源不能进勾选态，否则保存时会把看不见的 id 一起提交
+    setSelected(bound);
+    setDanglingCount(dangling);
     setError("");
     setOpen(true);
   };
@@ -125,16 +156,18 @@ export function SubscriptionsPanel({
       return;
     }
     setSaving(true);
+    // 兜底：只提交现存源，残留的已删除源 id 会让后端 400「源不存在」
+    const sourceIds = selected.filter((id) => knownSourceIds.has(id));
     try {
       if (editingId) {
         if (!onUpdate) {
           setError("当前版本不支持修改订阅。");
           return;
         }
-        await onUpdate(editingId, { name: name.trim(), sourceIds: selected });
+        await onUpdate(editingId, { name: name.trim(), sourceIds });
         toast({ variant: "success", title: "已更新订阅", description: "链接保持不变，下次访问即按新源生成。" });
       } else {
-        await onCreate({ name: name.trim(), sourceIds: selected });
+        await onCreate({ name: name.trim(), sourceIds });
         toast({ variant: "success", title: "已创建订阅" });
       }
       setOpen(false);
@@ -460,6 +493,11 @@ export function SubscriptionsPanel({
               <p className="text-xs text-fg-45">
                 不选择任何源表示使用全部启用源；勾选后只聚合这些源。
               </p>
+              {editingId && danglingCount > 0 ? (
+                <p className="text-xs text-amber-400" role="status">
+                  该订阅还挂着 {danglingCount} 个已被删除的源（下方列表不再显示它们），保存后会自动移除。
+                </p>
+              ) : null}
               {/* 勾选/取消只是改变高亮，不需要进离场动画；FLIP 负责重排 */}
               <MotionList as="div" className="grid gap-2" mode="sync">
                 {state.sources.map((source) => {

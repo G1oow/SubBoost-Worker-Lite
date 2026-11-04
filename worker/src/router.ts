@@ -378,7 +378,12 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       const known = new Set(sources.map((source) => source.id));
       const unknown = sourceIds.filter((sourceId) => !known.has(sourceId));
       if (unknown.length > 0) {
-        throw new ApiError(400, "VALIDATION_ERROR", `源不存在：${unknown.slice(0, 3).join("、")}`);
+        // 客户端拿到的源列表可能是旧的：指出这些 id 已不存在，提示刷新后重选，避免只看到一串乱码 id
+        throw new ApiError(
+          400,
+          "VALIDATION_ERROR",
+          `源不存在：${unknown.slice(0, 3).join("、")}（源可能已被删除，请刷新页面后重新选择）`
+        );
       }
       patch.sourceIds = sourceIds;
     }
