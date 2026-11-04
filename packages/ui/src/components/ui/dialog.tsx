@@ -3,6 +3,7 @@
 import * as React from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { cn } from "@subboost/ui/lib/utils";
 
 const Dialog = DialogPrimitive.Root;
@@ -57,7 +58,7 @@ const DialogContent = React.forwardRef<
       >
         {children}
         <DialogPrimitive.Close className="absolute right-2 top-2 rounded-lg p-2 opacity-70 transition-all hover:opacity-100 hover:bg-ink/5 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:pointer-events-none sm:right-4 sm:top-4 sm:p-1">
-          <X className="h-4 w-4 text-fg-60" />
+          <Icon icon={X} size="md" className="text-fg-60" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>
       </DialogPrimitive.Content>

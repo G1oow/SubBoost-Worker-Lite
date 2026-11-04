@@ -147,6 +147,53 @@ describe("public UI consistency checker", () => {
     expect(log).toHaveBeenCalledWith("UI consistency check passed (2 source files scanned).");
   });
 
+  it("keeps icons behind the Icon wrapper and rejects legacy lucide aliases and raw svg", () => {
+    const badFile = writeSource(
+      "packages/components/icons-bad.tsx",
+      [
+        `import "lucide-react";`,
+        `import { AlertTriangle, Loader2 } from "lucide-react";`,
+        `export function Bad() {`,
+        `  return <>`,
+        `    <AlertTriangle className="size-4" />`,
+        `    <Loader2 />`,
+        `    <svg viewBox="0 0 24 24" />`,
+        `  </>;`,
+        `}`,
+      ].join("\n"),
+    );
+    // 两个白名单：图标包装本身可以渲染传入的 lucide 组件，品牌标志允许手写 svg
+    const iconWrapper = writeSource(
+      "packages/components/ui/icon.tsx",
+      [
+        `import { CircleCheck } from "lucide-react";`,
+        `const Glyph = CircleCheck;`,
+        `export function Icon() { return <Glyph aria-hidden="true" />; }`,
+      ].join("\n"),
+    );
+    const brandMark = writeSource(
+      "packages/components/ui/brand-mark.tsx",
+      `export function BrandMark() { return <svg viewBox="0 0 64 64" />; }`,
+    );
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((message) => errors.push(String(message)));
+    process.exit = vi.fn((code?: string | number | null) => {
+      throw new Error("exit:" + code);
+    }) as never;
+
+    expect(() => runCheck([badFile, iconWrapper, brandMark])).toThrow("exit:1");
+    const output = errors.join("\n");
+    expect(output).toContain("lucide 已把 AlertTriangle 更名为 TriangleAlert");
+    expect(output).toContain("lucide 已把 Loader2 更名为 LoaderCircle");
+    expect(output).toContain("图标 AlertTriangle 必须写成 <Icon icon={AlertTriangle} />");
+    expect(output).toContain("图标 Loader2 必须写成 <Icon icon={Loader2} />");
+    expect(output).toContain("业务代码不得手写 <svg> 图标");
+    expect(output).not.toContain("icon.tsx:");
+    expect(output).not.toContain("brand-mark.tsx:");
+    expect(errors.at(-1)).toContain("UI consistency check failed with 5 finding(s).");
+    expect(output).toMatch(/icons-bad\.tsx:7:\d+ 业务代码不得手写 <svg> 图标/);
+  });
+
   it("accepts an explicit missing root as an empty scoped check", () => {
     const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
     runCheck([join(tempRoot, "missing")]);

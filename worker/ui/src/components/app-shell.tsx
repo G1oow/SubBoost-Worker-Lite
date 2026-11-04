@@ -1,5 +1,6 @@
 import * as React from "react";
 import { LogOut, Moon, RefreshCw, Sun } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { BrandMark } from "@subboost/ui/components/ui/brand-mark";
 import { Button } from "@subboost/ui/components/ui/button";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
@@ -92,7 +93,7 @@ export function AppShell({
                   disabled={refreshing}
                   className="min-h-9 min-w-9 sm:hidden"
                 >
-                  <RefreshCw aria-hidden="true" className={cn(refreshing && "animate-spin")} />
+                  <Icon icon={RefreshCw} className={cn(refreshing && "animate-spin")} />
                 </IconButton>
                 <LoadingButton
                   variant="secondary"
@@ -102,7 +103,7 @@ export function AppShell({
                   loadingLabel="刷新中…"
                   className="hidden sm:inline-flex"
                 >
-                  <RefreshCw aria-hidden="true" />
+                  <Icon icon={RefreshCw} />
                   刷新
                 </LoadingButton>
               </>
@@ -113,7 +114,7 @@ export function AppShell({
               onClick={toggleTheme}
               className="min-h-9 min-w-9"
             >
-              {theme === "dark" ? <Sun aria-hidden="true" /> : <Moon aria-hidden="true" />}
+              {theme === "dark" ? <Icon icon={Sun} /> : <Icon icon={Moon} />}
             </IconButton>
             <IconButton
               label="退出登录"
@@ -121,10 +122,10 @@ export function AppShell({
               onClick={onLogout}
               className="min-h-9 min-w-9 sm:hidden"
             >
-              <LogOut aria-hidden="true" />
+              <Icon icon={LogOut} />
             </IconButton>
             <Button variant="ghost" size="sm" onClick={onLogout} className="hidden sm:inline-flex">
-              <LogOut aria-hidden="true" />
+              <Icon icon={LogOut} />
               退出
             </Button>
           </div>

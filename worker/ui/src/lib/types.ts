@@ -22,6 +22,8 @@ export type SubscriptionDto = {
   name: string;
   sourceIds: string[];
   link: string;
+  /** 已生成短链时才有值：`${origin}/s/${shortCode}`，与 link 输出同一份配置 */
+  shortLink?: string;
   createdAt: string;
   updatedAt: string;
 };

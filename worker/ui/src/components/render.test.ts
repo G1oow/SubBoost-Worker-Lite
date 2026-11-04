@@ -14,7 +14,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.4.0" },
+  app: { name: "SubBoost Lite", version: "0.6.0" },
   sources: [
     {
       id: "s1",
@@ -84,7 +84,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.4.0");
+    expect(html).toContain("v0.6.0");
     expect(html).toContain("content");
   });
 
@@ -194,6 +194,110 @@ describe("admin UI rendering", () => {
     expect(html).toContain("打开链接");
     expect(html).toContain("链接等同于访问凭据");
     expect(html).toContain("<canvas");
+  });
+
+  it("keeps long source names inside shrinkable badges", () => {
+    // 长中文源名曾经把 Badge 撑开并挤走同一行的订阅名：
+    // 现在省略号由 Badge 内部的 span 负责，Badge 自身允许收缩并带完整名称的 title
+    const longName = "示例源 A（手动节点）超长名称用于验证胶囊截断行为";
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: {
+          ...STATE,
+          sources: [{ ...STATE.sources[0], name: longName }],
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"] }],
+        },
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+      })
+    );
+    expect(html).toContain(`title="${longName}"`);
+    // 截断落在内部文本容器上，而不是 inline-flex 的 Badge 本身
+    expect(html).toContain('<span class="min-w-0 truncate">');
+    expect(html).toContain("min-w-0 max-w-[min(100%,11rem)]");
+    // 名称与胶囊同处一个可收缩容器，名称不会再被胶囊顶出去
+    expect(html).toContain("flex min-w-0 flex-wrap items-center gap-2");
+  });
+
+  it("offers the short link entry and shows both links once generated", () => {
+    const withoutShort = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, {
+        subscription: STATE.subscriptions[0],
+        onCreateShortLink: () => {},
+      })
+    );
+    expect(withoutShort).toContain("生成短链");
+    expect(withoutShort).toContain("https://worker.example.com/sub/tokenvalue");
+    expect(withoutShort).not.toContain("撤销短链");
+    // 未生成短链时不能出现「原始链接」这种有短链才成立的说法
+    expect(withoutShort).not.toContain("原始链接");
+
+    const withShort = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, {
+        subscription: {
+          ...STATE.subscriptions[0],
+          shortLink: "https://worker.example.com/s/abc123XY",
+        },
+        onCreateShortLink: () => {},
+        onCopyShortLink: () => {},
+        onRevokeShortLink: () => {},
+      })
+    );
+    expect(withShort).toContain("https://worker.example.com/s/abc123XY");
+    expect(withShort).toContain("复制短链");
+    expect(withShort).toContain("撤销短链");
+    // 原链接仍要完整可读：已经在用的客户端还指望着它
+    expect(withShort).toContain("原始链接：https://worker.example.com/sub/tokenvalue");
+    expect(withShort).not.toContain("生成短链");
+  });
+
+  it("renders a dedicated short link button per subscription", () => {
+    // 未生成：卡片上有独立的「生成短链」按钮，不需要先打开分享弹窗
+    const withoutShort = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: STATE,
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+        onCreateShortLink: noopAsync,
+        onRevokeShortLink: noopAsync,
+      })
+    );
+    expect(withoutShort).toContain("生成短链");
+
+    // 已生成：同一条卡片上显示短码与「复制短链」
+    const withShort = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: {
+          ...STATE,
+          subscriptions: [
+            { ...STATE.subscriptions[0], shortLink: "https://worker.example.com/s/abc123XY" },
+          ],
+        },
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+        onCreateShortLink: noopAsync,
+        onRevokeShortLink: noopAsync,
+      })
+    );
+    expect(withShort).toContain("短链 https://worker.example.com/s/abc123XY");
+    // 短链行保留完整短链的悬停提示：图标只是行首标记，文本不能被压成省略号
+    expect(withShort).toContain('title="https://worker.example.com/s/abc123XY"');
+    expect(withShort).toContain("复制短链");
+    expect(withShort).not.toContain("生成短链");
+
+    // 父级不提供处理器时不渲染入口，避免点了没反应
+    const noHandler = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: STATE,
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+      })
+    );
+    expect(noHandler).not.toContain("生成短链");
   });
 
   it("keeps the share dialog closed until a subscription is selected", () => {

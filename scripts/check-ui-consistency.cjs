@@ -23,6 +23,23 @@ const roots = (requestedRoots.length > 0 ? requestedRoots : ["packages", "worker
 const ignoredDirectoryNames = new Set([".next", "dist", "generated", "node_modules"]);
 const findings = [];
 
+// 图标只有一个来源：lucide-react，且必须经 packages/ui 的 <Icon> 渲染。
+// 手写 <svg> 与 lucide 的旧别名会随版本漂移，这里一并拦住。
+const LUCIDE_MODULE = "lucide-react";
+const ICON_WRAPPER_FILE = "/components/ui/icon.tsx";
+const BRAND_MARK_FILE = "/components/ui/brand-mark.tsx";
+const DEPRECATED_LUCIDE_ALIASES = new Map([
+  ["AlertTriangle", "TriangleAlert"],
+  ["AlertCircle", "CircleAlert"],
+  ["CheckCircle", "CircleCheck"],
+  ["CheckCircle2", "CircleCheck"],
+  ["XCircle", "CircleX"],
+  ["HelpCircle", "CircleHelp"],
+  ["Loader2", "LoaderCircle"],
+  ["MoreHorizontal", "Ellipsis"],
+  ["Home", "House"],
+]);
+
 // Dark-only colors break the light theme. Colors that change between themes come from
 // packages/ui/src/styles/theme.css; components use its utilities instead.
 const VARIANT_PREFIX = String.raw`(?:[\w-]+(?:-\[[^\]\s]*\])?:|\[[^\]\s]+\]:)*`;
@@ -149,12 +166,27 @@ function checkFile(filePath) {
   const isUiWrapper = normalized.includes("/components/ui/");
   const isIconButtonWrapper = normalized.endsWith("/components/ui/icon-button.tsx");
   const isSwitchFieldWrapper = normalized.endsWith("/components/ui/switch-field.tsx");
+  const isIconWrapper = normalized.endsWith(ICON_WRAPPER_FILE);
+  const isBrandMarkWrapper = normalized.endsWith(BRAND_MARK_FILE);
+  /** 本文件从 lucide-react 导入的本地名：它们只能在 <Icon icon={...}> 里当参数用 */
+  const lucideLocalNames = new Set();
 
   function visit(node) {
     if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
       const moduleName = node.moduleSpecifier.text;
       if (moduleName.startsWith("@radix-ui/react-") && !isUiWrapper) {
         report(sourceFile, node, `业务代码不得直接导入 ${moduleName}，请使用共享 UI 包装组件`);
+      }
+      if (moduleName === LUCIDE_MODULE) {
+        const bindings = node.importClause?.namedBindings;
+        for (const specifier of bindings && ts.isNamedImports(bindings) ? bindings.elements : []) {
+          const importedName = specifier.propertyName?.text ?? specifier.name.text;
+          const canonical = DEPRECATED_LUCIDE_ALIASES.get(importedName);
+          if (canonical) {
+            report(sourceFile, specifier, `lucide 已把 ${importedName} 更名为 ${canonical}，请导入规范名`);
+          }
+          lucideLocalNames.add(specifier.name.text);
+        }
       }
     }
 
@@ -175,6 +207,22 @@ function checkFile(filePath) {
 
       if (name === "IconButton" && !findAttribute(opening, "label")) {
         report(sourceFile, opening, "IconButton 必须提供 label");
+      }
+
+      if (lucideLocalNames.has(name) && !isIconWrapper) {
+        report(
+          sourceFile,
+          opening,
+          `图标 ${name} 必须写成 <Icon icon={${name}} />（@subboost/ui/components/ui/icon），不要直接当 JSX 标签用`
+        );
+      }
+
+      if (name === "svg" && !isIconWrapper && !isBrandMarkWrapper) {
+        report(
+          sourceFile,
+          opening,
+          "业务代码不得手写 <svg> 图标；统一用 lucide 图标 + <Icon> 渲染（品牌标志见 brand-mark.tsx）"
+        );
       }
 
       if (name === "Switch" && !isSwitchFieldWrapper) {

@@ -7,9 +7,9 @@ const mocks = vi.hoisted(() => ({
 }));
 
 vi.mock("lucide-react", () => ({
-  AlertTriangle: () => React.createElement("span", null, "AlertTriangle"),
-  HelpCircle: () => React.createElement("span", null, "HelpCircle"),
-  XCircle: () => React.createElement("span", null, "XCircle"),
+  CircleHelp: () => React.createElement("span", null, "CircleHelp"),
+  CircleX: () => React.createElement("span", null, "CircleX"),
+  TriangleAlert: () => React.createElement("span", null, "TriangleAlert"),
 }));
 
 vi.mock("@subboost/ui/components/ui/button", () => ({
@@ -64,7 +64,7 @@ describe("confirm dialog", () => {
     const html = renderHost(ConfirmDialogHost);
 
     expect(html).toContain('data-open="false"');
-    expect(html).toContain("HelpCircle");
+    expect(html).toContain("CircleHelp");
     expect(html).toContain("取消");
     expect(html).toContain("确认");
   });
@@ -83,7 +83,7 @@ describe("confirm dialog", () => {
 
     let html = renderHost(ConfirmDialogHost);
     expect(html).toContain('data-open="true"');
-    expect(html).toContain("XCircle");
+    expect(html).toContain("CircleX");
     expect(html).toContain("Delete item");
     expect(html).toContain("This cannot be undone.");
 
@@ -91,7 +91,7 @@ describe("confirm dialog", () => {
     await expect(first).resolves.toBe(true);
 
     html = renderHost(ConfirmDialogHost);
-    expect(html).toContain("AlertTriangle");
+    expect(html).toContain("TriangleAlert");
     expect(html).toContain("Proceed?");
 
     findButton("取消").onClick();

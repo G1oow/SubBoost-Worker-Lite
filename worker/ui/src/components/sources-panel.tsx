@@ -1,5 +1,6 @@
 import * as React from "react";
-import { Boxes, Network, Pencil, Plus, Trash2 } from "lucide-react";
+import { Boxes, LoaderCircle, Network, Pencil, Plus, Trash2 } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -297,14 +298,14 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
           <p className="text-xs text-fg-45">导入上游订阅或手动节点，可解析节点名称/协议并逐个改名。</p>
         </div>
         <Button onClick={openCreate} className="w-full shrink-0 sm:w-auto">
-          <Plus aria-hidden="true" />
+          <Icon icon={Plus} />
           添加源
         </Button>
       </CardHeader>
       <CardContent>
         {state.sources.length === 0 ? (
           <div className="animate-fade-in-up rounded-xl border border-dashed border-ink/15 px-4 py-10 text-center">
-            <Boxes aria-hidden="true" className="mx-auto mb-2 h-6 w-6 text-fg-35" />
+            <Icon icon={Boxes} size="xl" className="mx-auto mb-2 text-fg-35" />
             <p className="text-sm text-fg-50">还没有源，先添加一个上游订阅或手动节点。</p>
           </div>
         ) : (
@@ -345,7 +346,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                         onClick={() => void openNodes(source)}
                         className="min-h-9 min-w-9"
                       >
-                        <Network aria-hidden="true" />
+                        <Icon icon={Network} />
                       </IconButton>
                       <IconButton
                         label={`编辑 ${source.name}`}
@@ -353,7 +354,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                         onClick={() => openEdit(source)}
                         className="min-h-9 min-w-9"
                       >
-                        <Pencil aria-hidden="true" />
+                        <Icon icon={Pencil} />
                       </IconButton>
                       <IconButton
                         label={`删除 ${source.name}`}
@@ -361,7 +362,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                         onClick={() => handleDelete(source)}
                         className="min-h-9 min-w-9"
                       >
-                        <Trash2 aria-hidden="true" />
+                        <Icon icon={Trash2} />
                       </IconButton>
                     </div>
                   </div>
@@ -425,7 +426,10 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-fg-80">解析出的节点</p>
                   {parse.status === "loading" ? (
-                    <span className="text-[11px] text-fg-45">解析中…</span>
+                    <span className="flex items-center gap-1.5 text-[11px] text-fg-45">
+                      <Icon icon={LoaderCircle} size="xs" className="animate-spin" />
+                      解析中…
+                    </span>
                   ) : parse.status === "error" ? (
                     <span className="text-[11px] text-red-400">{parse.message}</span>
                   ) : (

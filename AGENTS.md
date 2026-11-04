@@ -81,6 +81,59 @@ npx wrangler dev --port 8799 --local
 - token 只能出现在本机回复里，不许写进 commit、PR 正文、README、测试或任何会公开的位置。
 - 探活失败时如实说明失败状态与原因，不要把"进程起来了"当成"可以访问"。
 
+## Vercel 预览站（演示构建）
+
+仓库除 Cloudflare Worker 之外还维护一个**纯静态预览站**形态：同一份管理端代码，
+构建时打开演示模式后把 `/api/*` 交给浏览器内存里的真实 Worker 路由处理，
+不依赖 Workers 运行时与 KV，也不需要 `ADMIN_TOKEN` / `ENCRYPTION_KEY`。
+它只用于对外展示界面，不承载真实数据，访问者在页面上的改动刷新即丢失。
+
+实现位置与硬约定：
+
+- `vercel.json`（仓库根）是唯一部署配置：`buildCommand: npm run worker:build`、
+  `outputDirectory: worker/dist`、`build.env.VITE_SUBBOOST_DEMO=1`、SPA 回退与安全响应头。
+  不要改到 Vercel 控制台里另建一套，否则与仓库配置漂移。
+- `worker/ui/src/demo/`：`demo-kv.ts`（内存 KV）、`demo-seed.ts`（种子数据）、
+  `demo-backend.ts`（在内存 env 里调用 `worker/src/index.ts` 的真实路由，禁用远程抓取）。
+  演示数据只能用 `example.com` / RFC 5737 / RFC 3849 保留地址，节点名必须带「演示」标记。
+- `worker/ui/vite.config.ts` 把 `VITE_SUBBOOST_DEMO` 折叠成构建期常量 `__SUBBOOST_DEMO__`；
+  `worker/ui/src/app.tsx` 用**模块内本地常量**读它，分支才会被折叠。
+  **禁止**在 `app.tsx` 顶层静态 import `src/demo/*`，演示代码一律走动态 `import()`，
+  否则正式构建会把 Worker 路由塞进管理端产物。
+- `worker/ui/src/demo/demo-backend.test.ts` 守护这条链路（种子、YAML 生成、不持久化、不联网），
+  改动演示模式必须同步更新它。
+
+改动后自检（正式构建里不该有任何演示痕迹）：
+
+```powershell
+npm run worker:build
+Get-ChildItem worker/dist/assets/*.js | Select-String -Pattern 'demo-preview-token|演示模式'
+# 无输出 = 演示分支已摇掉；有输出说明摇树被破坏，先修再交付
+```
+
+本地查看演示构建：
+
+```powershell
+$env:VITE_SUBBOOST_DEMO='1'
+npx vite --config worker/ui/vite.config.ts --configLoader runner --port 5273
+# 打开 http://localhost:5273 —— vite 只监听 ::1，用 localhost 而不是 127.0.0.1
+```
+
+部署（属于外部写操作，执行前先说明目标与影响）：
+
+```powershell
+vercel link --yes --project <小写项目名>   # 目录名含空格，必须显式给合法项目名
+vercel deploy                              # preview 部署
+vercel --prod                              # 覆盖生产别名
+```
+
+- 全新项目的**首次**部署会被 Vercel 指派为 production，之后的 `vercel deploy` 才是 preview，
+  回复里要写清落在哪个环境。
+- `vercel link` 会生成 `.vercel/` 与 `.env.local`（含 `VERCEL_OIDC_TOKEN`），两者必须在
+  `.gitignore` 内；**不要**用 `.env*` 这种宽规则，它会覆盖已有的 `!.env.example`。
+- 与"脱敏红线"一致：AGENTS.md、README、提交信息里不写具体部署域名、项目 id 与账号标识，
+  只用占位符。
+
 ## 版本号规范（强制）
 
 版本号的单一来源是**根 `package.json` 的 `version`**。worker 运行时读取
@@ -159,7 +212,13 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 - 图标按钮用 `IconButton` 且必须传 `label`；不要用 `Button size="icon"`。
 - 裸 `<Switch>` 必须提供 `aria-label` 或 `aria-labelledby`，优先用 `SwitchField`。
 - 不要在 `<a>` 里嵌套 `<Button>`，改用 `Button asChild`。
-- 图标统一用 lucide-react，不用 emoji 代替功能图标。
+- 图标统一用 lucide-react，不用 emoji 代替功能图标；渲染一律走
+  `@subboost/ui/components/ui/icon` 的 `<Icon icon={X} size="…" />`：
+  默认 `strokeWidth` 1.75，尺寸只用 `xs/sm/md/lg/xl`（12/14/16/20/24px）五档，
+  自带 `aria-hidden`（需要被读屏念出来时传 `label`）。容器已有 `[&_svg]:size-*`
+  时不要传 `size`（父选择器特异性更高，会盖掉档位类）。`npm run check:ui-consistency`
+  会拒绝把 lucide 图标直接当 JSX 标签用、手写 `<svg>` 以及 lucide 的旧别名
+  （`AlertTriangle`、`XCircle`、`CheckCircle2`、`Loader2` 等）。
 
 ### 动效（有强校验）
 
@@ -202,3 +261,6 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
   真实 id 由部署脚本注入，不进仓库。
 - `ADMIN_TOKEN`、`ENCRYPTION_KEY` 只能作为 Worker Secret 或 `.dev.vars` 存在。
 - 涉及部署、改密钥、改 CI 配置的操作，执行前必须先说明目标与影响并取得确认。
+- Vercel 预览站是独立的纯静态形态，只部署管理端演示构建，不涉及 Worker、KV 与密钥；
+  实现与部署流程见上文「Vercel 预览站（演示构建）」。同一份仓库同时存在两种部署目标时，
+  确认清楚要更新哪一个，不要用预览站流程去改生产 Worker。

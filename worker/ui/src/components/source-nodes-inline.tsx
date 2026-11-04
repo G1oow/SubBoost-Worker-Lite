@@ -1,5 +1,6 @@
 import * as React from "react";
 import { RefreshCw } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Button } from "@subboost/ui/components/ui/button";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
@@ -54,7 +55,7 @@ export function SourceNodesInline({
         <p className="min-w-0 break-words text-xs text-red-200">{state.message}</p>
         {onRetry ? (
           <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
-            <RefreshCw aria-hidden="true" />
+            <Icon icon={RefreshCw} />
             重试
           </Button>
         ) : null}
@@ -84,7 +85,7 @@ export function SourceNodesInline({
           ) : null}
           {onRetry ? (
             <IconButton label="重新读取节点" variant="ghost" onClick={onRetry}>
-              <RefreshCw aria-hidden="true" />
+              <Icon icon={RefreshCw} />
             </IconButton>
           ) : null}
         </div>

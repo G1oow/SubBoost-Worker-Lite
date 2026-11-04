@@ -18,6 +18,11 @@ function themeInitPlugin() {
 const configDir = path.dirname(fileURLToPath(import.meta.url));
 export default defineConfig({
   root: configDir,
+  // 演示 / 预览站开关：构建时设 VITE_SUBBOOST_DEMO=1 打开。
+  // 折叠成字面量常量，正式构建才能把演示代码整块摇掉。
+  define: {
+    __SUBBOOST_DEMO__: JSON.stringify(process.env.VITE_SUBBOOST_DEMO === "1"),
+  },
   plugins: [react(), tailwindcss(), themeInitPlugin()],
   resolve: {
     alias: {

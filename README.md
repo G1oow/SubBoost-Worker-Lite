@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.4.0-green.svg" alt="Version 0.4.0">
+  <img src="https://img.shields.io/badge/version-0.6.0-green.svg" alt="Version 0.6.0">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="许可证 AGPL-3.0-only"></a>
 </p>
 <!-- markdownlint-enable MD033 MD041 -->
@@ -102,6 +102,35 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 ```
 
 两项缺失时管理接口按 fail closed 返回 503；事后更换 `ENCRYPTION_KEY` 会导致已有数据无法解密，需要重新录入源与订阅。部署后验证与常见报错见 [worker/README.md](./worker/README.md)。
+
+## Vercel 预览站（可选）
+
+想要一个能直接发给别人看的在线预览，又不想为它部署 Worker、也不想把真实订阅放上去时，
+可以把**演示版管理端**托管在 Vercel：浏览器里跑的是仓库里同一份 Worker 路由，
+只是 KV 换成内存实现、远程抓取被禁用，数据只存在于当前页面，刷新即重置。
+
+仓库根目录的 `vercel.json` 已经配好，Vercel 侧不用改构建命令：
+
+| 项目 | 值 |
+| --- | --- |
+| Framework Preset | Other（`framework: null`） |
+| Build Command | `npm run worker:build` |
+| Output Directory | `worker/dist` |
+| 构建环境变量 | `VITE_SUBBOOST_DEMO=1`（已写进 `vercel.json` 的 `build.env`） |
+
+```powershell
+npm i -g vercel
+vercel login
+vercel            # 首次：在仓库根目录链接或创建项目
+vercel --prod     # 发布到生产域名
+```
+
+说明：
+
+- 演示站不需要 `ADMIN_TOKEN` / `ENCRYPTION_KEY`，也没有任何密钥；`/api/*` 全部由浏览器内存里的路由处理。
+- 演示数据是 3 个手动源、2 个订阅、6 个节点，域名统一用 `example.com` 保留域名并带「演示」标记，节点改名与订阅 YAML 生成都能正常展示。
+- 在演示站上的任何改动只影响当前标签页；远程源在演示模式下直接失败，不会真的去抓取外部地址。
+- 不影响正常部署：不带 `VITE_SUBBOOST_DEMO=1` 构建（`npm run worker:build`）时，演示代码会被整体摇掉。
 
 ## 界面预览
 

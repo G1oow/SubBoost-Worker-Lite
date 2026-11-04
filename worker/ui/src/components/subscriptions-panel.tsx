@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Check, Copy, Link2, Pencil, Plus, QrCode, RefreshCw, Trash2 } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -16,6 +17,7 @@ import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { MotionItem, MotionList } from "@subboost/ui/motion/motion-list";
+import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { cn } from "@subboost/ui/lib/utils";
 import type { AppState, SubscriptionDto } from "../lib/types";
@@ -33,6 +35,10 @@ export type SubscriptionsPanelProps = {
   onDelete: (id: string) => Promise<void>;
   /** 修改已创建订阅的名称与所含源（链接不变） */
   onUpdate?: (id: string, patch: SubscriptionUpdatePatch) => Promise<void>;
+  /** 为订阅生成短链（已有短链时幂等返回同一条） */
+  onCreateShortLink?: (id: string) => Promise<void>;
+  /** 撤销订阅短链，原 token 链接不受影响 */
+  onRevokeShortLink?: (id: string) => Promise<void>;
 };
 
 export function SubscriptionsPanel({
@@ -41,6 +47,8 @@ export function SubscriptionsPanel({
   onRotate,
   onDelete,
   onUpdate,
+  onCreateShortLink,
+  onRevokeShortLink,
 }: SubscriptionsPanelProps) {
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
@@ -51,6 +59,8 @@ export function SubscriptionsPanel({
   const [error, setError] = React.useState("");
   const [copiedId, setCopiedId] = React.useState<string | null>(null);
   const [sharingId, setSharingId] = React.useState<string | null>(null);
+  const [shortBusyId, setShortBusyId] = React.useState<string | null>(null);
+  const [shortCopiedId, setShortCopiedId] = React.useState<string | null>(null);
   // 由 id 派生而非保存快照，轮换/改名后弹窗自动跟着更新
   const sharing = React.useMemo(
     () => state.subscriptions.find((item) => item.id === sharingId) ?? null,
@@ -122,10 +132,42 @@ export function SubscriptionsPanel({
     window.setTimeout(() => setCopiedId((current) => (current === subscription.id ? null : current)), 1500);
   };
 
+  /** 卡片上的「生成短链」独立入口：生成成功后 shortLink 出现在同一张卡片上 */
+  const handleCreateShortLink = async (subscription: SubscriptionDto) => {
+    if (!onCreateShortLink) return;
+    setShortBusyId(subscription.id);
+    try {
+      await onCreateShortLink(subscription.id);
+      toast({ variant: "success", title: "已生成短链" });
+    } catch (err) {
+      toast({
+        variant: "destructive",
+        title: "生成短链失败",
+        description: err instanceof Error ? err.message : "生成短链失败",
+      });
+    } finally {
+      setShortBusyId((current) => (current === subscription.id ? null : current));
+    }
+  };
+
+  const handleCopyShortLink = async (subscription: SubscriptionDto) => {
+    if (!subscription.shortLink) return;
+    const ok = await copyTextToClipboard(subscription.shortLink);
+    if (!ok) {
+      toast({ variant: "warning", title: "复制失败", description: "请手动选择短链复制。" });
+      return;
+    }
+    setShortCopiedId(subscription.id);
+    window.setTimeout(
+      () => setShortCopiedId((current) => (current === subscription.id ? null : current)),
+      1500
+    );
+  };
+
   const handleRotate = async (subscription: SubscriptionDto) => {
     const confirmed = await confirmDialog({
       title: "轮换订阅 token？",
-      description: `「${subscription.name}」的旧链接会立即失效，需要把新链接重新导入客户端。`,
+      description: `「${subscription.name}」的旧链接与短链会立即失效，需要把新链接重新导入客户端。`,
       confirmText: "轮换",
       variant: "warning",
     });
@@ -169,14 +211,27 @@ export function SubscriptionsPanel({
     const names = subscription.sourceIds.map((id) => sourceNameById.get(id) ?? "已删除的源");
     const visible = names.slice(0, 2);
     return (
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {/*
+         * 截断必须落在 Badge 内部的文本容器上：
+         * Badge 自身是 inline-flex，把 truncate 直接挂在它身上时 text-overflow
+         * 在 flex 容器里各浏览器表现不一致（Chrome 出省略号，Firefox 直接切断），
+         * 且 flex item 的 min-width:auto 会让长源名拒绝收缩、把同一行的订阅名挤走。
+         */}
         {visible.map((item, index) => (
-          <Badge key={`${item}-${index}`} variant="outline" className="max-w-[120px] truncate">
-            {item}
+          <Badge
+            key={`${item}-${index}`}
+            variant="outline"
+            title={item}
+            className="min-w-0 max-w-[min(100%,11rem)]"
+          >
+            <span className="min-w-0 truncate">{item}</span>
           </Badge>
         ))}
         {names.length > visible.length ? (
-          <Badge variant="secondary">+{names.length - visible.length}</Badge>
+          <Badge variant="secondary" className="shrink-0">
+            +{names.length - visible.length}
+          </Badge>
         ) : null}
       </div>
     );
@@ -194,14 +249,14 @@ export function SubscriptionsPanel({
           disabled={state.sources.length === 0}
           className="w-full shrink-0 sm:w-auto"
         >
-          <Plus aria-hidden="true" />
+          <Icon icon={Plus} />
           创建订阅
         </Button>
       </CardHeader>
       <CardContent>
         {state.sources.length === 0 ? (
           <div className="animate-fade-in-up rounded-xl border border-dashed border-ink/15 px-4 py-10 text-center">
-            <Link2 aria-hidden="true" className="mx-auto mb-2 h-6 w-6 text-fg-35" />
+            <Icon icon={Link2} size="xl" className="mx-auto mb-2 text-fg-35" />
             <p className="text-sm text-fg-50">请先添加源，再创建订阅链接。</p>
           </div>
         ) : state.subscriptions.length === 0 ? (
@@ -218,14 +273,56 @@ export function SubscriptionsPanel({
                 {/* 窄屏把五个操作收到第二行并贴右：一行放不下名称 + 链接 + 五个图标 */}
                 <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                   <div className="min-w-0 flex-1 space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium text-fg">{subscription.name}</span>
+                    <div className="flex min-w-0 flex-wrap items-center gap-2">
+                      {/* 名称自己可收缩：长名称先让位，而不是把源名胶囊挤出可视区 */}
+                      <span className="min-w-0 max-w-full truncate text-sm font-medium text-fg">
+                        {subscription.name}
+                      </span>
                       {renderBoundSources(subscription)}
                     </div>
                     {/* 链接单占一行：表格里被压成一列，前缀都读不全 */}
                     <p className="truncate font-mono text-[11px] text-fg-45" title={subscription.link}>
                       {subscription.link}
                     </p>
+                    {/* 短链独立成一个按钮：不翻弹窗也能生成，生成后短码直接显示在这一行 */}
+                    {onCreateShortLink ? (
+                      subscription.shortLink ? (
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="flex min-w-0 items-center gap-1 text-[11px] text-fg-60">
+                            <Icon icon={Link2} size="xs" className="shrink-0 text-fg-45" />
+                            <span
+                              className="select-all break-all font-mono"
+                              title={subscription.shortLink}
+                            >
+                              短链 {subscription.shortLink}
+                            </span>
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => handleCopyShortLink(subscription)}
+                          >
+                            <Icon icon={shortCopiedId === subscription.id ? Check : Copy} />
+                            {shortCopiedId === subscription.id ? "已复制" : "复制短链"}
+                          </Button>
+                        </div>
+                      ) : (
+                        <div>
+                          <LoadingButton
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => handleCreateShortLink(subscription)}
+                            loading={shortBusyId === subscription.id}
+                            loadingLabel="生成中…"
+                          >
+                            <Icon icon={Link2} />
+                            生成短链
+                          </LoadingButton>
+                        </div>
+                      )
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
                     <IconButton
@@ -233,21 +330,21 @@ export function SubscriptionsPanel({
                       variant="ghost"
                       onClick={() => setSharingId(subscription.id)}
                     >
-                      <QrCode aria-hidden="true" />
+                      <Icon icon={QrCode} />
                     </IconButton>
                     <IconButton
                       label={`复制 ${subscription.name} 链接`}
                       variant="ghost"
                       onClick={() => handleCopy(subscription)}
                     >
-                      <Check
-                        aria-hidden="true"
+                      <Icon
+                        icon={Check}
                         className={cn(
                           copiedId === subscription.id ? "animate-icon-pop text-emerald-400" : "hidden"
                         )}
                       />
-                      <Copy
-                        aria-hidden="true"
+                      <Icon
+                        icon={Copy}
                         className={cn(copiedId === subscription.id ? "hidden" : undefined)}
                       />
                     </IconButton>
@@ -257,7 +354,7 @@ export function SubscriptionsPanel({
                         variant="ghost"
                         onClick={() => openEdit(subscription)}
                       >
-                        <Pencil aria-hidden="true" />
+                        <Icon icon={Pencil} />
                       </IconButton>
                     ) : null}
                     <IconButton
@@ -265,14 +362,14 @@ export function SubscriptionsPanel({
                       variant="ghost"
                       onClick={() => handleRotate(subscription)}
                     >
-                      <RefreshCw aria-hidden="true" />
+                      <Icon icon={RefreshCw} />
                     </IconButton>
                     <IconButton
                       label={`删除 ${subscription.name}`}
                       variant="ghost"
                       onClick={() => handleDelete(subscription)}
                     >
-                      <Trash2 aria-hidden="true" />
+                      <Icon icon={Trash2} />
                     </IconButton>
                   </div>
                 </div>
@@ -282,7 +379,16 @@ export function SubscriptionsPanel({
         )}
       </CardContent>
 
-      <SubscriptionShareDialog subscription={sharing} onClose={() => setSharingId(null)} />
+      <SubscriptionShareDialog
+        subscription={sharing}
+        onClose={() => setSharingId(null)}
+        onCreateShortLink={
+          onCreateShortLink && sharing ? () => onCreateShortLink(sharing.id) : undefined
+        }
+        onRevokeShortLink={
+          onRevokeShortLink && sharing ? () => onRevokeShortLink(sharing.id) : undefined
+        }
+      />
 
       <Dialog open={open} onOpenChange={setOpen}>
           <DialogContent className="max-h-[92dvh] overflow-y-auto sm:max-w-xl">
@@ -328,7 +434,7 @@ export function SubscriptionsPanel({
                               checked ? "border-primary-500 bg-primary-500/70" : "border-ink/25"
                             )}
                           >
-                            {checked ? <Check className="h-3 w-3 text-fg" /> : null}
+                            {checked ? <Icon icon={Check} size="xs" className="text-fg" /> : null}
                           </span>
                           {source.name}
                         </span>

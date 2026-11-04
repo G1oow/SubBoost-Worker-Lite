@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Eye, EyeOff } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { FormField } from "@subboost/ui/components/ui/form-field";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input, type InputProps } from "@subboost/ui/components/ui/input";
@@ -29,7 +30,7 @@ const PasswordControl = React.forwardRef<HTMLInputElement, PasswordControlProps>
         onClick={onVisibleChange}
         className="absolute right-1 top-1/2 h-8 w-8 -translate-y-1/2 rounded-lg text-fg-50 hover:text-fg"
       >
-        {visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
+        {visible ? <Icon icon={EyeOff} /> : <Icon icon={Eye} />}
       </IconButton>
     </span>
   )

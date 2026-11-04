@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import * as ToastPrimitives from "@radix-ui/react-toast";
-import { AlertTriangle, CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { CircleAlert, CircleCheck, Info, TriangleAlert, X } from "lucide-react";
+import { Icon } from "@subboost/ui/components/ui/icon";
 import { zeroRightClassName } from "react-remove-scroll-bar";
 import { cn } from "@subboost/ui/lib/utils";
 
@@ -80,7 +81,7 @@ const ToastClose = React.forwardRef<
     toast-close=""
     {...props}
   >
-    <X className="h-4 w-4" />
+    <Icon icon={X} size="md" />
   </ToastPrimitives.Close>
 ));
 ToastClose.displayName = ToastPrimitives.Close.displayName;
@@ -146,13 +147,13 @@ function genId() {
 function getToastIcon(variant: ToastVariant) {
   switch (variant) {
     case "success":
-      return <CheckCircle2 className="h-4 w-4 text-emerald-400" />;
+      return <Icon icon={CircleCheck} size="md" className="text-emerald-400" />;
     case "warning":
-      return <AlertTriangle className="h-4 w-4 text-amber-400" />;
+      return <Icon icon={TriangleAlert} size="md" className="text-amber-400" />;
     case "info":
-      return <Info className="h-4 w-4 text-sky-400" />;
+      return <Icon icon={Info} size="md" className="text-sky-400" />;
     case "destructive":
-      return <XCircle className="h-4 w-4 text-red-400" />;
+      return <Icon icon={CircleAlert} size="md" className="text-red-400" />;
     default:
       return null;
   }

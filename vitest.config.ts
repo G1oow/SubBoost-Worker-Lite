@@ -23,6 +23,10 @@ function tsxTransformPlugin() {
 
 export default defineConfig({
   plugins: [tsxTransformPlugin()],
+  // 单测默认不是演示构建；演示相关代码用显式传入的常量走各自分支
+  define: {
+    __SUBBOOST_DEMO__: "false",
+  },
   test: {
     environment: "node",
     setupFiles: ["./test/setup-runtime.ts"],
