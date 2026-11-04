@@ -21,7 +21,11 @@ const DialogOverlay = React.forwardRef<
   <DialogPrimitive.Overlay
     ref={ref}
     className={cn(
-      "fixed inset-0 z-50 bg-overlay backdrop-blur-sm",
+      // w-screen 而不是 inset-x-0：锁定滚动期间浏览器不再绘制那条 8px 滚动条，
+      // 布局视口的宽度（fixed 定位的参照，= html 宽度）仍由 scrollbar-gutter 保留，
+      // 遮罩若按 inset-x-0 铺开就只能盖到 1272，右边缘会留一条没变暗的竖条。
+      // 100vw 含滚动条宽度，正好补上这条缝（开合前后的数值也不变）。
+      "fixed inset-y-0 left-0 z-50 w-screen bg-overlay backdrop-blur-sm",
       "data-[state=open]:animate-overlay-in data-[state=closed]:animate-overlay-out",
       className
     )}
@@ -41,7 +45,7 @@ const DialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => (
   <DialogPortal>
     <DialogOverlay />
-    <div className="pointer-events-none fixed inset-0 z-50 grid place-items-end p-0 sm:place-items-center sm:p-4">
+    <div className="pointer-events-none fixed inset-y-0 left-0 z-50 grid w-screen place-items-end p-0 sm:place-items-center sm:p-4">
       <DialogPrimitive.Content
         ref={ref}
         className={cn(

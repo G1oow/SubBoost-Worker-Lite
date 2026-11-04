@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.9.0" },
+  app: { name: "SubBoost Lite", version: "0.9.1" },
   sources: [
     {
       id: "s1",
@@ -89,7 +89,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.9.0");
+    expect(html).toContain("v0.9.1");
     expect(html).toContain("content");
   });
 
