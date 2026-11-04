@@ -50,6 +50,18 @@ export type StatusRecord = {
   subscriptions: SubscriptionRefreshStatus[];
 };
 
+/** age 加密通道的实例能力（对应 worker/src/age.ts 的 AgeCapabilities） */
+export type AgeCapabilities = {
+  enabled: boolean;
+  only: boolean;
+  recipients: string[];
+  misconfigured: boolean;
+};
+
+export type AppCapabilities = {
+  age: AgeCapabilities;
+};
+
 export type AppState = {
   app: { name: string; version: string };
   sources: SourceDto[];
@@ -57,6 +69,8 @@ export type AppState = {
   config: Record<string, unknown>;
   configIsDefault: boolean;
   status: StatusRecord | null;
+  /** 老版本 Worker 不返回这个字段，管理端按「未启用」处理 */
+  capabilities?: AppCapabilities;
 };
 
 export type SourceInput = {

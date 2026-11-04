@@ -8,13 +8,18 @@ import { NodeRenameEditor } from "./node-rename-editor";
 import { SourcesPanel } from "./sources-panel";
 import { SourceNodesInline } from "./source-nodes-inline";
 import { StatusPanel } from "./status-panel";
+import {
+  AgeSection,
+  AgeSetupHint,
+  ImportLinksSection,
+} from "./subscription-share-sections";
 import { SubscriptionShareContent, SubscriptionShareDialog } from "./subscription-share-dialog";
 import { SubscriptionsPanel } from "./subscriptions-panel";
 import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.6.1" },
+  app: { name: "SubBoost Lite", version: "0.7.0" },
   sources: [
     {
       id: "s1",
@@ -84,7 +89,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.6.1");
+    expect(html).toContain("v0.7.0");
     expect(html).toContain("content");
   });
 
@@ -194,6 +199,122 @@ describe("admin UI rendering", () => {
     expect(html).toContain("打开链接");
     expect(html).toContain("链接等同于访问凭据");
     expect(html).toContain("<canvas");
+  });
+
+  it("renders one-click import links for every supported client", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, { subscription: STATE.subscriptions[0] })
+    );
+    for (const target of ["clash", "stash", "shadowrocket", "singbox", "v2rayng", "hiddify"]) {
+      expect(html).toContain(`?target=${target}`);
+    }
+    expect(html).toContain("一键导入");
+  });
+
+  it("only shows the age block when the worker reports the capability", () => {
+    const withoutAge = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, { subscription: STATE.subscriptions[0] })
+    );
+    expect(withoutAge).not.toContain("age 加密订阅");
+
+    const withAge = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, {
+        subscription: STATE.subscriptions[0],
+        age: {
+          enabled: true,
+          only: false,
+          recipients: ["age1demoexampleexampleexampleexample"],
+          misconfigured: false,
+        },
+      })
+    );
+    expect(withAge).toContain("age 加密订阅");
+    expect(withAge).toContain("?format=age");
+    // 公钥只展示首尾片段，避免把整串塞进弹窗
+    expect(withAge).toContain("age1demoexam…mple");
+    expect(withAge).toContain("一键导入");
+  });
+
+  it("drops the import links when the instance only serves ciphertext", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, {
+        subscription: STATE.subscriptions[0],
+        age: { enabled: true, only: true, recipients: ["age1demo"], misconfigured: false },
+      })
+    );
+    expect(html).not.toContain("一键导入");
+    expect(html).toContain("只输出 age 密文");
+  });
+
+  it("warns when AGE_RECIPIENT is misconfigured", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionShareContent, {
+        subscription: STATE.subscriptions[0],
+        age: { enabled: false, only: false, recipients: [], misconfigured: true },
+      })
+    );
+    expect(html).toContain("AGE_RECIPIENT 配置无效");
+    expect(html).not.toContain("age 加密订阅");
+  });
+
+
+  it("exposes one-click import and age buttons on every subscription card", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: {
+          ...STATE,
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"] }],
+          capabilities: {
+            age: {
+              enabled: true,
+              only: false,
+              recipients: ["age1demoexampleexampleexampleexample"],
+              misconfigured: false,
+            },
+          },
+        },
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+      })
+    );
+    expect(html).toContain("一键导入 默认订阅");
+    expect(html).toContain("默认订阅 的 age 加密订阅");
+    // 两个按钮都排在二维码按钮之前：DOM 顺序即视觉顺序（往二维码左边加）
+    expect(html.indexOf("一键导入 默认订阅")).toBeLessThan(html.indexOf("分享 默认订阅 二维码"));
+    expect(html.indexOf("默认订阅 的 age 加密订阅")).toBeLessThan(
+      html.indexOf("分享 默认订阅 二维码")
+    );
+  });
+
+  it("renders the shared import and age sections", () => {
+    const imports = renderToStaticMarkup(
+      React.createElement(ImportLinksSection, { link: "https://worker.example.com/sub/tokenvalue" })
+    );
+    expect(imports).toContain("?target=clash");
+    expect(imports).toContain("一键导入");
+
+    const age = renderToStaticMarkup(
+      React.createElement(AgeSection, {
+        link: "https://worker.example.com/sub/tokenvalue",
+        age: {
+          enabled: true,
+          only: false,
+          recipients: ["age1demoexampleexampleexampleexample"],
+          misconfigured: false,
+        },
+      })
+    );
+    expect(age).toContain("?format=age");
+    expect(age).toContain("复制加密链接");
+  });
+
+  it("points to the deployment doc when age is not configured", () => {
+    const html = renderToStaticMarkup(React.createElement(AgeSetupHint));
+    expect(html).toContain("还没配置 age 公钥");
+    expect(html).toContain("查看部署与使用文档");
+    // 未配置时点开 age 弹窗必须给出可点的文档地址
+    expect(html).toContain("/blob/main/docs/age-encryption.md");
   });
 
   it("keeps long source names inside shrinkable badges", () => {

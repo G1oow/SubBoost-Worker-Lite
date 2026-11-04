@@ -1,6 +1,14 @@
 import { parseSubscription } from "@subboost/core/parser";
+import { encryptAge } from "@subboost/server-core/crypto/age";
+import { armorAge } from "@subboost/server-core/crypto/age-armor";
 import { buildSubscriptionResponseHeaders } from "@subboost/server-core/subscription/response-headers";
+import {
+  buildImportDeepLink,
+  parseImportTarget,
+  type ImportTargetId,
+} from "@subboost/server-core/subscription/import-targets";
 import pkg from "../package.json";
+import { ageCapabilities, resolveAgeConfig, type AgeResolution } from "./age";
 import { requireAdmin } from "./auth";
 import { ApiError, BODY_LIMITS } from "./errors";
 import { error, json, readJsonBody, withSecurityHeaders } from "./http";
@@ -28,6 +36,7 @@ import {
   SHORT_CODE_PATTERN,
   type SnapshotRecord,
   type SourceInput,
+  type StoredSubscription,
 } from "./types";
 
 export type RouterDeps = {
@@ -184,6 +193,8 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       config,
       configIsDefault: isDefault,
       status,
+      // 管理端据此决定是否显示 age 加密链接与一键导入按钮
+      capabilities: { age: ageCapabilities(resolveAgeConfig(env)) },
     });
   }
 
@@ -423,20 +434,78 @@ function matchesETag(ifNoneMatch: string | null, etag: string): boolean {
   });
 }
 
+type SubscriptionFormat = "yaml" | "age" | "age-armor";
+
+/** `?format=` 只认这两个加密格式；其余值（含乱填）一律按默认 YAML 处理 */
+function parseSubscriptionFormat(value: string | null): SubscriptionFormat {
+  return value === "age" || value === "age-armor" ? value : "yaml";
+}
+
+type SubscriptionEntry = {
+  age: AgeResolution;
+  format: SubscriptionFormat;
+  target: ImportTargetId | null;
+  /** 按 token / 短码生成或读取订阅缓存 */
+  resolve: () => Promise<GetOrGenerateResult>;
+  /** 只查订阅是否存在：深链跳转不该触发上游抓取 */
+  findStored: () => Promise<StoredSubscription | null>;
+};
+
 /**
  * 订阅输出（`/sub/<token>` 与 `/s/<code>` 共用）。
  * 两种入口只在「怎么找到订阅」上不同，输出与错误处理必须完全一致，
  * 因此把解析动作交给调用方，其他逻辑留在这里。
  */
-async function handleSubscription(
-  request: Request,
-  resolve: () => Promise<GetOrGenerateResult>
-): Promise<Response> {
+async function handleSubscription(request: Request, entry: SubscriptionEntry): Promise<Response> {
   const isHead = request.method.toUpperCase() === "HEAD";
+  // 只出密文模式：配了合法公钥且显式打开 AGE_ONLY 才生效
+  const encryptedOnly = entry.age.status === "ok" && entry.age.only;
+
+  if (encryptedOnly && entry.format === "yaml") {
+    // 在查订阅之前就拒绝，不泄漏某条订阅是否存在
+    return textResponse("Encrypted output only", 403, undefined, isHead);
+  }
+
+  if (entry.target) {
+    // 一键导入只做「订阅存在 + 拼深链」，不生成 YAML、不做加密
+    let stored: StoredSubscription | null;
+    try {
+      stored = await entry.findStored();
+    } catch {
+      return textResponse("Internal error", 500, undefined, isHead);
+    }
+    if (!stored) return textResponse("Not found", 404, undefined, isHead);
+
+    const plainUrl = new URL(request.url);
+    plainUrl.searchParams.delete("target");
+    const location = buildImportDeepLink(entry.target, {
+      url: plainUrl.toString(),
+      name: stored.name,
+    });
+    return withSecurityHeaders(
+      new Response(null, {
+        status: 302,
+        headers: {
+          location,
+          "cache-control": "no-store",
+          "x-robots-tag": "noindex",
+        },
+      })
+    );
+  }
+
+  if (entry.format !== "yaml") {
+    if (entry.age.status === "disabled") {
+      return textResponse("Age recipient not configured", 503, undefined, isHead);
+    }
+    if (entry.age.status === "invalid") {
+      return textResponse("Age recipient invalid", 503, undefined, isHead);
+    }
+  }
 
   let result: GetOrGenerateResult;
   try {
-    result = await resolve();
+    result = await entry.resolve();
   } catch {
     // /sub/* 与 /s/* 的非 200 响应体一律为纯文本，不使用 JSON 错误体
     return textResponse("Internal error", 500, undefined, isHead);
@@ -447,6 +516,15 @@ async function handleSubscription(
   }
   if (result.kind === "no-nodes") {
     return textResponse("No nodes available", 503, { "Retry-After": "600" }, isHead);
+  }
+
+  if (entry.age.status === "ok" && entry.format !== "yaml") {
+    return await buildAgeSubscriptionResponse(
+      result,
+      entry.age.recipients,
+      entry.format,
+      isHead
+    );
   }
 
   const etag = buildCacheETag(result.cache);
@@ -467,6 +545,38 @@ async function handleSubscription(
 
   const response = new Response(isHead ? null : result.cache.yaml, { status: 200, headers });
   return withSecurityHeaders(response);
+}
+
+/** age 加密输出：`?format=age` 给二进制，`?format=age-armor` 给 PEM 文本 */
+async function buildAgeSubscriptionResponse(
+  result: Extract<GetOrGenerateResult, { kind: "ok" }>,
+  recipients: string[],
+  format: Exclude<SubscriptionFormat, "yaml">,
+  isHead: boolean
+): Promise<Response> {
+  let body: Uint8Array | string;
+  try {
+    const encrypted = await encryptAge({ plaintext: result.cache.yaml, recipients });
+    body = format === "age-armor" ? armorAge(encrypted) : encrypted;
+  } catch {
+    return textResponse("Internal error", 500, undefined, isHead);
+  }
+
+  const headers = buildSubscriptionResponseHeaders(result.sub.name, result.info ?? {}, {
+    // 密文每次都不一样（随机 file key 与 payload nonce），不发 ETag、不进任何缓存
+    cacheControl: "no-store",
+    cacheExpirySeconds: 43200,
+    autoUpdateIntervalSeconds: 43200,
+    isAdmin: false,
+    fileNameSuffix: ".yaml.age",
+  });
+  headers["content-type"] =
+    format === "age-armor" ? "text/plain;charset=utf-8" : "application/octet-stream";
+  headers["x-robots-tag"] = "noindex";
+
+  // Uint8Array 在运行时就是合法的 BodyInit，只是 TS 6 的泛型把 buffer 类型收得过窄
+  const payload = isHead ? null : (body as BodyInit);
+  return withSecurityHeaders(new Response(payload, { status: 200, headers }));
 }
 
 export async function route(
@@ -491,7 +601,13 @@ export async function route(
         return textResponse("Not found", 404, undefined, isHead);
       }
       const pipelineDeps = buildPipelineDeps(env, deps);
-      return await handleSubscription(request, () => getOrGenerateSubscription(pipelineDeps, token));
+      return await handleSubscription(request, {
+        age: resolveAgeConfig(env),
+        format: parseSubscriptionFormat(url.searchParams.get("format")),
+        target: parseImportTarget(url.searchParams.get("target")),
+        resolve: () => getOrGenerateSubscription(pipelineDeps, token),
+        findStored: () => pipelineDeps.store.findSubscriptionByToken(token),
+      });
     }
 
     // 短链：非法格式直接 404，不拿任意路径去消耗 KV 读
@@ -506,9 +622,13 @@ export async function route(
         return textResponse("Not found", 404, undefined, isHead);
       }
       const pipelineDeps = buildPipelineDeps(env, deps);
-      return await handleSubscription(request, () =>
-        getOrGenerateSubscriptionByShortCode(pipelineDeps, code)
-      );
+      return await handleSubscription(request, {
+        age: resolveAgeConfig(env),
+        format: parseSubscriptionFormat(url.searchParams.get("format")),
+        target: parseImportTarget(url.searchParams.get("target")),
+        resolve: () => getOrGenerateSubscriptionByShortCode(pipelineDeps, code),
+        findStored: () => pipelineDeps.store.findSubscriptionByShortCode(code),
+      });
     }
 
     if (path.startsWith("/api/")) {

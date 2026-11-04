@@ -39,6 +39,8 @@ export function createDemoBackend(options: { origin?: string } = {}): DemoBacken
     ADMIN_TOKEN: DEMO_TOKEN,
     ENCRYPTION_KEY: "demo-fixture-encryption-passphrase",
     APP_NAME: "SubBoost Lite",
+    // 演示用的固定 age 公钥（对应私钥没有保留，只用于展示「age 加密订阅」区块）
+    AGE_RECIPIENT: "age1q740705lc9njw42y7np6dgtumqml9mrw0rxc54a3u00m8nqrtfmqg3lme7",
   } as unknown as Env;
 
   let ready: Promise<void> | null = null;

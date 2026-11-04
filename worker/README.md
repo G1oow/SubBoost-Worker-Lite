@@ -116,6 +116,22 @@ node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'
 
 未设置 `ADMIN_TOKEN` 时所有管理 API 返回 503；未设置 `ENCRYPTION_KEY` 时源与订阅相关接口同样返回 503，即 fail closed。更换 `ENCRYPTION_KEY` 会导致已有密文无法解密，需要重新录入源与订阅。
 
+订阅的 age 加密通道用普通变量（不是 Secret），按需配置，不配就不启用：
+
+```bash
+# 可选：age 收件公钥（age-keygen 输出的 public key），逗号/空白分隔可配多把
+npx wrangler secret put AGE_RECIPIENT    # 公钥不是秘密，用 Secret/Variable 存都可以
+# 可选：只输出 age 密文，明文订阅入口与一键导入会被 403
+npx wrangler secret put AGE_ONLY
+```
+
+也可以在 Dashboard → Worker → Settings → Variables and Secrets 里作为 Variables 添加。
+`AGE_RECIPIENT` 属于实例配置，同样不进仓库、不写进部署脚本：值配错时加密通道返回 503
+且明文入口照常工作，不会把实例锁死。
+
+完整步骤（生成密钥对、多把公钥、只出密文模式、客户端解密）见
+[docs/age-encryption.md](../docs/age-encryption.md)。
+
 ### 第 2 步：部署后验证
 
 把 `B` 换成实际地址，`T` 换成部署时设置的 `ADMIN_TOKEN`：

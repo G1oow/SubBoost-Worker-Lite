@@ -8,6 +8,8 @@ type BuildSubscriptionResponseHeadersOptions = {
   cacheExpirySeconds?: number;
   autoUpdateIntervalSeconds?: number | null;
   isAdmin: boolean;
+  /** 附件名后缀，例如 age 加密输出要加 `.yaml.age` */
+  fileNameSuffix?: string;
 };
 
 function normalizeHeaderFileNameBase(name: string): string {
@@ -42,8 +44,8 @@ function serializeSubscriptionUserInfo(subscriptionInfo: SubscriptionResponseInf
   return parts.length > 0 ? parts.join("; ") : null;
 }
 
-function buildContentDisposition(name: string): string {
-  const safeNameBase = normalizeHeaderFileNameBase(name);
+function buildContentDisposition(name: string, suffix = ""): string {
+  const safeNameBase = `${normalizeHeaderFileNameBase(name)}${suffix}`;
   const asciiFileNameBase = normalizeAsciiFileNameBase(safeNameBase);
   const encodedFileName = encodeURIComponent(safeNameBase);
   if (asciiFileNameBase === safeNameBase) {
@@ -60,7 +62,7 @@ export function buildSubscriptionResponseHeaders(
   const headers: Record<string, string> = {
     "content-type": "text/yaml;charset=utf-8",
     // 订阅客户端可能把 filename 当作订阅显示名，响应头不要补 .yaml。
-    "content-disposition": buildContentDisposition(name),
+    "content-disposition": buildContentDisposition(name, options.fileNameSuffix),
     "cache-control": options.cacheControl ?? "no-cache",
   };
 

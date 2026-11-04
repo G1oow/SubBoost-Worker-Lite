@@ -45,4 +45,20 @@ describe("subscription response headers", () => {
     expect(headers["plan-name"]).toBe("Pro");
     expect(headers["profile-web-page-url"]).toBe("https://example.com/account");
   });
+
+  it("appends the age suffix to the attachment name", () => {
+    const headers = buildSubscriptionResponseHeaders(
+      "我的订阅.yaml",
+      {},
+      { isAdmin: false, fileNameSuffix: ".yaml.age" }
+    );
+    // 名字里的 .yaml 会被剥掉再拼后缀，避免出现 sub.yaml.yaml.age
+    expect(headers["content-disposition"]).toContain("filename*=UTF-8''");
+    expect(decodeURIComponent(headers["content-disposition"])).toContain("我的订阅.yaml.age");
+  });
+
+  it("keeps the plain attachment name when no suffix is given", () => {
+    const headers = buildSubscriptionResponseHeaders("demo", {}, { isAdmin: false });
+    expect(headers["content-disposition"]).toBe(`attachment; filename="demo"; filename*=UTF-8''demo`);
+  });
 });

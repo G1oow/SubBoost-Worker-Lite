@@ -1,13 +1,17 @@
 {
   "name": "@subboost/server-core",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "license": "AGPL-3.0-only",
   "private": true,
   "type": "module",
   "exports": {
     "./http": "./src/http.ts",
     "./subscription/response-headers": "./src/subscription/response-headers.ts",
-    "./subscription/user-agents": "./src/subscription/user-agents.ts"
+    "./subscription/user-agents": "./src/subscription/user-agents.ts",
+    "./subscription/import-targets": "./src/subscription/import-targets.ts",
+    "./crypto/age": "./src/crypto/age.ts",
+    "./crypto/age-armor": "./src/crypto/age-armor.ts",
+    "./crypto/bech32": "./src/crypto/bech32.ts"
   },
   "dependencies": {
     "@subboost/core": "file:../core"
