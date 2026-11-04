@@ -59,6 +59,24 @@
    *   只在纵向仍然保留滚动。
    * - -webkit-text-size-adjust 固定为 100%：iOS 横竖屏切换时不擅自放大正文。
    */
+  /*
+   * 滚动条占位只留**一处**：这里的 scrollbar-gutter。
+   *
+   * 页面全程都有一条 8px 纵向滚动条（body 的 overflow-y: scroll 保证），
+   * gutter: stable 让它在"锁定滚动"期间（Radix 弹窗/下拉）被移除后仍然保留
+   * 等宽空白 —— 布局视口宽度在开合前后完全一致，正文、吸顶工具条、底部
+   * tab 栏都不会横移。
+   *
+   * 千万不要在别处再补一次（例如锁定期间给 body 加回 padding-right）：
+   * 两条补偿同时生效就等于凭空少 8px 可用宽度，max-w 容器重新居中，
+   * 整页在弹窗打开的瞬间左移 4px、关闭再弹回 —— 用户报的"打开弹窗时
+   * 背景跳动"就是它。react-remove-scroll 默认就会补 padding/margin，
+   * 我们在 body[data-scroll-locked] 里把它清零，别改回去。
+   *
+   * 代价：锁定期间浏览器不再绘制滚动条，那 8px 由遮罩自己盖住，见
+   * components/ui/dialog.tsx 里遮罩层与弹窗容器上的 w-screen
+   * （100vw 含滚动条宽度，正好等于被遮住的那条）。
+   */
   html {
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
@@ -91,21 +109,18 @@
   }
 
   html body[data-scroll-locked] {
-    /* Radix Select/Dialog 使用 react-remove-scroll：锁定滚动时补齐滚动条占位，避免页面水平平移 */
+    /*
+     * Radix Select/Dialog 走 react-remove-scroll：它会按自己的内联样式给 body
+     * 补 margin-right / padding-right（gapMode 默认 margin），测到的就是滚动条
+     * 宽度。占位已经由上面 html 的 scrollbar-gutter 提供，这里必须清零，
+     * 否则同一段空间被补两次，页面在弹窗开合时会横跳。
+     */
     overflow: hidden !important;
     overscroll-behavior: contain;
     margin-right: 0 !important;
-    padding-right: var(--removed-body-scroll-bar-size) !important;
+    padding-right: 0 !important;
   }
 
-  /* react-remove-scroll-bar 支持：仅在锁滚动期间修正 fixed 元素对齐 */
-  html body[data-scroll-locked] .right-scroll-bar-position {
-    right: var(--removed-body-scroll-bar-size) !important;
-  }
-
-  html body[data-scroll-locked] .width-before-scroll-bar {
-    margin-right: var(--removed-body-scroll-bar-size) !important;
-  }
 }
 
 /* 自定义滚动条 */
