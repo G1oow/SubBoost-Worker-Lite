@@ -4,7 +4,14 @@ import pkg from "../package.json";
 import { requireAdmin } from "./auth";
 import { ApiError, BODY_LIMITS } from "./errors";
 import { error, json, readJsonBody, withSecurityHeaders } from "./http";
-import { buildCacheETag, getOrGenerateSubscription, refreshAll, type PipelineDeps } from "./pipeline";
+import {
+  buildCacheETag,
+  getOrGenerateSubscription,
+  getOrGenerateSubscriptionByShortCode,
+  refreshAll,
+  type GetOrGenerateResult,
+  type PipelineDeps,
+} from "./pipeline";
 import { buildDashboardStats } from "./dashboard";
 import { collectNodeSummaries, countRenamedNodes, sanitizeNodeRenames } from "./node-renames";
 import { fetchText } from "./safe-fetch";
@@ -18,6 +25,7 @@ import {
   MAX_SOURCES,
   MAX_SUBSCRIPTIONS,
   MAX_USER_AGENT_LENGTH,
+  SHORT_CODE_PATTERN,
   type SnapshotRecord,
   type SourceInput,
 } from "./types";
@@ -320,6 +328,18 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
     return json({ subscription });
   }
 
+  // 短链：每条订阅最多一条，重复生成幂等（返回同一个码），DELETE 为撤销
+  const shortLinkMatch = /^\/api\/subscriptions\/([^/]+)\/short-link$/.exec(path);
+  if (shortLinkMatch && (method === "POST" || method === "DELETE")) {
+    const id = decodeURIComponent(shortLinkMatch[1]);
+    const subscription =
+      method === "POST"
+        ? await store.createShortLink(id, url.origin)
+        : await store.revokeShortLink(id, url.origin);
+    if (!subscription) throw new ApiError(404, "NOT_FOUND", "订阅不存在");
+    return json({ subscription });
+  }
+
   const subscriptionIdMatch = /^\/api\/subscriptions\/([^/]+)$/.exec(path);
 
   // 随时修改订阅的名称与所含源；链接不变，但会丢弃旧缓存以便按新源重新生成
@@ -403,20 +423,22 @@ function matchesETag(ifNoneMatch: string | null, etag: string): boolean {
   });
 }
 
+/**
+ * 订阅输出（`/sub/<token>` 与 `/s/<code>` 共用）。
+ * 两种入口只在「怎么找到订阅」上不同，输出与错误处理必须完全一致，
+ * 因此把解析动作交给调用方，其他逻辑留在这里。
+ */
 async function handleSubscription(
   request: Request,
-  env: Env,
-  deps: RouterDeps,
-  token: string
+  resolve: () => Promise<GetOrGenerateResult>
 ): Promise<Response> {
-  const pipelineDeps = buildPipelineDeps(env, deps);
   const isHead = request.method.toUpperCase() === "HEAD";
 
-  let result;
+  let result: GetOrGenerateResult;
   try {
-    result = await getOrGenerateSubscription(pipelineDeps, token);
+    result = await resolve();
   } catch {
-    // /sub/* 的非 200 响应体一律为纯文本，不使用 JSON 错误体
+    // /sub/* 与 /s/* 的非 200 响应体一律为纯文本，不使用 JSON 错误体
     return textResponse("Internal error", 500, undefined, isHead);
   }
 
@@ -456,17 +478,37 @@ export async function route(
   const path = url.pathname;
 
   try {
+    const isHead = request.method.toUpperCase() === "HEAD";
+
     if (path.startsWith("/sub/")) {
       let token: string;
       try {
         token = decodeURIComponent(path.slice("/sub/".length));
       } catch {
-        return textResponse("Not found", 404, undefined, request.method.toUpperCase() === "HEAD");
+        return textResponse("Not found", 404, undefined, isHead);
       }
       if (!token || token.includes("/")) {
-        return textResponse("Not found", 404, undefined, request.method.toUpperCase() === "HEAD");
+        return textResponse("Not found", 404, undefined, isHead);
       }
-      return await handleSubscription(request, env, deps, token);
+      const pipelineDeps = buildPipelineDeps(env, deps);
+      return await handleSubscription(request, () => getOrGenerateSubscription(pipelineDeps, token));
+    }
+
+    // 短链：非法格式直接 404，不拿任意路径去消耗 KV 读
+    if (path.startsWith("/s/")) {
+      let code: string;
+      try {
+        code = decodeURIComponent(path.slice("/s/".length));
+      } catch {
+        return textResponse("Not found", 404, undefined, isHead);
+      }
+      if (!SHORT_CODE_PATTERN.test(code)) {
+        return textResponse("Not found", 404, undefined, isHead);
+      }
+      const pipelineDeps = buildPipelineDeps(env, deps);
+      return await handleSubscription(request, () =>
+        getOrGenerateSubscriptionByShortCode(pipelineDeps, code)
+      );
     }
 
     if (path.startsWith("/api/")) {

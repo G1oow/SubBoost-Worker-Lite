@@ -17,7 +17,8 @@
     "directory": "./worker/dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/sub/*", "/__scheduled"]
+    // /s/* 是订阅短链：必须交给 Worker，否则静态资源层会用 SPA 回退把 index.html 当成订阅内容返回
+    "run_worker_first": ["/api/*", "/sub/*", "/s/*", "/__scheduled"]
   },
   // 占位符只用于本地 `wrangler dev`（本地模式不读真实 id）。
   // 真实 id 由部署脚本从环境变量 SUBBOOST_KV_ID 注入到临时配置文件，不写入本文件。

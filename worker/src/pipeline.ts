@@ -217,14 +217,15 @@ export async function generateSubscription(
   return { kind: "ok", cache, info };
 }
 
-export async function getOrGenerateSubscription(
+/**
+ * 拿到已解析的订阅后生成或读缓存。
+ * `/sub/<token>` 与 `/s/<code>` 两条入口共用这里的逻辑，保证两者输出完全一致。
+ */
+async function getOrGenerateForStored(
   deps: PipelineDeps,
-  token: string
+  sub: StoredSubscription
 ): Promise<GetOrGenerateResult> {
   const { store } = deps;
-  const sub = await store.findSubscriptionByToken(token);
-  if (!sub) return { kind: "not-found" };
-
   const { config } = await store.getConfig();
   const configHash = await computeConfigHash(config);
   const cached = await store.getCache(sub.id);
@@ -247,6 +248,24 @@ export async function getOrGenerateSubscription(
     }
     throw err;
   }
+}
+
+/** 按订阅 token 输出（`/sub/<token>`） */
+export async function getOrGenerateSubscription(
+  deps: PipelineDeps,
+  token: string
+): Promise<GetOrGenerateResult> {
+  const sub = await deps.store.findSubscriptionByToken(token);
+  return sub ? getOrGenerateForStored(deps, sub) : { kind: "not-found" };
+}
+
+/** 按短链码输出（`/s/<code>`）；未命中或已撤销时与未知 token 一样返回 not-found */
+export async function getOrGenerateSubscriptionByShortCode(
+  deps: PipelineDeps,
+  code: string
+): Promise<GetOrGenerateResult> {
+  const sub = await deps.store.findSubscriptionByShortCode(code);
+  return sub ? getOrGenerateForStored(deps, sub) : { kind: "not-found" };
 }
 
 /**

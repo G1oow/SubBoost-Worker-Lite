@@ -121,6 +121,14 @@ export function generateToken(): string {
   return toBase64Url(crypto.getRandomValues(new Uint8Array(32)));
 }
 
+/**
+ * 短链码：6 字节 base64url，固定 8 字符（48 bit 熵）。
+ * 字符集与 token 一致（[A-Za-z0-9_-]），可直接放进 URL 路径。
+ */
+export function generateShortCode(): string {
+  return toBase64Url(crypto.getRandomValues(new Uint8Array(6)));
+}
+
 export async function timingSafeEqual(a: string, b: string): Promise<boolean> {
   const [hashA, hashB] = await Promise.all([sha256Hex(a), sha256Hex(b)]);
   let diff = 0;

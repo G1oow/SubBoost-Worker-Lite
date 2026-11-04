@@ -3,10 +3,12 @@ import {
   CryptoError,
   decryptString,
   encryptString,
+  generateShortCode,
   generateToken,
   sha256Hex,
   timingSafeEqual,
 } from "./crypto";
+import { SHORT_CODE_LENGTH, SHORT_CODE_PATTERN } from "./types";
 
 const SECRET = "test-secret-key-0123456789";
 
@@ -57,6 +59,19 @@ describe("generateToken", () => {
   it("is unique across 100 generations", () => {
     const tokens = new Set(Array.from({ length: 100 }, () => generateToken()));
     expect(tokens.size).toBe(100);
+  });
+});
+
+describe("generateShortCode", () => {
+  it("is 8 base64url characters and matches the short code pattern", () => {
+    const code = generateShortCode();
+    expect(code).toHaveLength(SHORT_CODE_LENGTH);
+    expect(code).toMatch(SHORT_CODE_PATTERN);
+  });
+
+  it("is unique across 100 generations", () => {
+    const codes = new Set(Array.from({ length: 100 }, () => generateShortCode()));
+    expect(codes.size).toBe(100);
   });
 });
 
