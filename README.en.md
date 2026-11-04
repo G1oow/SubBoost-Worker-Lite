@@ -115,9 +115,9 @@ The repository-level `vercel.json` already sets everything up:
 | Setting | Value |
 | --- | --- |
 | Framework Preset | Other (`framework: null`) |
-| Build Command | `npm run worker:build` |
+| Build Command | `node scripts/build-vercel-demo.cjs` |
 | Output Directory | `worker/dist` |
-| Build env | `VITE_SUBBOOST_DEMO=1` (declared in `vercel.json` → `build.env`) |
+| Demo switch | Forced on by the build script; no environment variable needed on Vercel |
 
 ```powershell
 npm i -g vercel
@@ -128,10 +128,12 @@ vercel --prod     # publish
 
 Notes:
 
+- The demo switch does not rely on the Vercel dashboard: `scripts/build-vercel-demo.cjs` pins `VITE_SUBBOOST_DEMO=1` in the build environment and then verifies the output really contains the demo code. If it does not, the build fails instead of shipping a real admin UI that asks for `ADMIN_TOKEN`. As a second safety net, `resolveDemoMode` treats any build running inside Vercel (`VERCEL=1`) as a demo build by default.
+- Do not override Build Command / Install Command in the Vercel dashboard; that drifts from the committed `vercel.json`. To host a real admin UI on Vercel, set `VITE_SUBBOOST_DEMO=0` explicitly to disable the demo build.
 - The demo site needs no `ADMIN_TOKEN` / `ENCRYPTION_KEY`; every `/api/*` call is handled in the browser.
 - Seed data covers 3 manual sources, 2 subscriptions and 6 nodes, all on `example.com` with demo labels; node renames and YAML generation still work.
-- Edits only affect the current tab. Remote sources fail immediately in demo mode instead of fetching external URLs.
-- Regular Cloudflare builds are unaffected: without `VITE_SUBBOOST_DEMO=1` the demo code is tree-shaken away.
+- Edits only affect the current tab. Remote sources fail immediately in demo mode instead of fetching external URLs, and the header hides "Log out" so visitors cannot end up on the token gate.
+- Regular Cloudflare builds are unaffected: `npm run worker:build` locally or in CI (no `VERCEL`, no switch) still tree-shakes the demo code away.
 
 ## Screenshots
 

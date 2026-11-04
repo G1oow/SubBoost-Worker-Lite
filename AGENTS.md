@@ -90,26 +90,44 @@ npx wrangler dev --port 8799 --local
 
 实现位置与硬约定：
 
-- `vercel.json`（仓库根）是唯一部署配置：`buildCommand: npm run worker:build`、
-  `outputDirectory: worker/dist`、`build.env.VITE_SUBBOOST_DEMO=1`、SPA 回退与安全响应头。
-  不要改到 Vercel 控制台里另建一套，否则与仓库配置漂移。
+- `vercel.json`（仓库根）是唯一部署配置：`buildCommand: node scripts/build-vercel-demo.cjs`、
+  `outputDirectory: worker/dist`、SPA 回退与安全响应头。不要改到 Vercel 控制台里另建一套，
+  也不要在控制台里 override Build Command / Install Command，否则与仓库配置漂移。
+- 演示开关由仓库强制，不依赖 Vercel 控制台配置（这是硬约定）：
+  `scripts/build-vercel-demo.cjs` 在子进程环境里写死 `VITE_SUBBOOST_DEMO=1`，构建完成后用
+  `scripts/lib/vercel-demo-build.cjs` 校验产物里的演示标记，对不上就以非零码退出——
+  宁可部署失败，也不静默发出一份需要 `ADMIN_TOKEN` 的站点。
+  `worker/ui/src/lib/demo-mode.ts` 的 `resolveDemoMode` 是第二道保险：`VERCEL=1`
+  （Vercel 构建容器自带变量，不受控制台配置影响）且没有显式关闭时一律按演示构建。
+  `VITE_SUBBOOST_DEMO=0` / `false` 是唯一关闭方式，只用于以后真要在 Vercel 上托管正式管理端。
 - `worker/ui/src/demo/`：`demo-kv.ts`（内存 KV）、`demo-seed.ts`（种子数据）、
   `demo-backend.ts`（在内存 env 里调用 `worker/src/index.ts` 的真实路由，禁用远程抓取）。
   演示数据只能用 `example.com` / RFC 5737 / RFC 3849 保留地址，节点名必须带「演示」标记。
-- `worker/ui/vite.config.ts` 把 `VITE_SUBBOOST_DEMO` 折叠成构建期常量 `__SUBBOOST_DEMO__`；
+- `worker/ui/vite.config.ts` 调 `resolveDemoMode(process.env)` 并把结果折叠成构建期常量
+  `__SUBBOOST_DEMO__`，同时打印 `[subboost] 演示构建：已开启/已关闭` 便于在部署日志里核对；
   `worker/ui/src/app.tsx` 用**模块内本地常量**读它，分支才会被折叠。
   **禁止**在 `app.tsx` 顶层静态 import `src/demo/*`，演示代码一律走动态 `import()`，
   否则正式构建会把 Worker 路由塞进管理端产物。
-- `worker/ui/src/demo/demo-backend.test.ts` 守护这条链路（种子、YAML 生成、不持久化、不联网），
-  改动演示模式必须同步更新它。
+- `worker/ui/src/demo/demo-backend.test.ts` 守护演示后端（种子、YAML 生成、不持久化、不联网），
+  `worker/ui/src/lib/demo-mode.test.ts` 守护开关判定，`test/regression/tooling/vercel-demo-build.test.ts`
+  守护 Vercel 构建入口与产物断言；改动演示模式必须同步更新它们。
 
-改动后自检（正式构建里不该有任何演示痕迹）：
+改动后自检：
 
 ```powershell
+# 正式构建：不该有任何演示痕迹
 npm run worker:build
 Get-ChildItem worker/dist/assets/*.js | Select-String -Pattern 'demo-preview-token|演示模式'
 # 无输出 = 演示分支已摇掉；有输出说明摇树被破坏，先修再交付
+
+# 演示构建：脚本会自己断言产物，失败即非零码退出
+Remove-Item Env:VITE_SUBBOOST_DEMO -ErrorAction SilentlyContinue
+$env:VERCEL='1'; node scripts/build-vercel-demo.cjs
+# 成功时应看到「[vercel-demo] 产物已确认是演示构建」
 ```
+
+Vercel 部署日志里必须能看到 `[subboost] 演示构建：已开启` 与 `[vercel-demo] 产物已确认是演示构建`；
+看不到或出现断言失败，说明开关被外部配置改坏了，先修再合并 PR。
 
 本地查看演示构建：
 

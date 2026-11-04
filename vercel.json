@@ -1,13 +1,8 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "buildCommand": "npm run worker:build",
+  "buildCommand": "node scripts/build-vercel-demo.cjs",
   "outputDirectory": "worker/dist",
-  "build": {
-    "env": {
-      "VITE_SUBBOOST_DEMO": "1"
-    }
-  },
   "rewrites": [
     {
       "source": "/((?!assets/|favicon\\.svg|icon\\.png|apple-touch-icon\\.png).*)",

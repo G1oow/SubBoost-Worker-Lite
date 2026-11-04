@@ -20,7 +20,8 @@ export type AppNavItem = {
 export type AppShellProps = {
   title: string;
   version: string;
-  onLogout: () => void;
+  /** 演示构建没有登录态可退，不传就不渲染退出入口 */
+  onLogout?: () => void;
   children?: React.ReactNode;
   navItems?: AppNavItem[];
   activeNav?: string;
@@ -116,18 +117,27 @@ export function AppShell({
             >
               {theme === "dark" ? <Icon icon={Sun} /> : <Icon icon={Moon} />}
             </IconButton>
-            <IconButton
-              label="退出登录"
-              variant="ghost"
-              onClick={onLogout}
-              className="min-h-9 min-w-9 sm:hidden"
-            >
-              <Icon icon={LogOut} />
-            </IconButton>
-            <Button variant="ghost" size="sm" onClick={onLogout} className="hidden sm:inline-flex">
-              <Icon icon={LogOut} />
-              退出
-            </Button>
+            {onLogout ? (
+              <>
+                <IconButton
+                  label="退出登录"
+                  variant="ghost"
+                  onClick={onLogout}
+                  className="min-h-9 min-w-9 sm:hidden"
+                >
+                  <Icon icon={LogOut} />
+                </IconButton>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={onLogout}
+                  className="hidden sm:inline-flex"
+                >
+                  <Icon icon={LogOut} />
+                  退出
+                </Button>
+              </>
+            ) : null}
           </div>
         </div>
 
