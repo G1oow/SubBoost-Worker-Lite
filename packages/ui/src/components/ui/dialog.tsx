@@ -46,7 +46,7 @@ const DialogContent = React.forwardRef<
         ref={ref}
         className={cn(
           // 弹窗底色是不透明的（--surface 在明暗主题下都没有 alpha），
-          // 再叠 glass-card 的 backdrop-blur-xl 只会在每帧对整块背景做 24px 模糊，
+          // 所以不加 backdrop-blur：只会在每帧对整块背景做一次 24px 模糊，
           // 既看不出效果又拖慢开合动画。这里直接给不透明底色 + 边框阴影。
           // 窄屏改成贴底的抽屉形态：键盘弹出时内容区不会被顶出视口，拇指也够得到底部按钮。
           // dvh 而不是 vh：移动浏览器地址栏收起/展开时 vh 不变，会让弹窗下沿被遮住。

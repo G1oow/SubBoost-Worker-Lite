@@ -133,9 +133,10 @@
   100% { opacity: 1; }
 }
 
+/* 旧别名：同样只做淡入（不位移，理由见下方「管理端页面动效」的合成层说明） */
 @keyframes slideUp {
-  0% { translate: 0 10px; opacity: 0; }
-  100% { translate: 0 0; opacity: 1; }
+  0% { opacity: 0; }
+  100% { opacity: 1; }
 }
 
 @keyframes pulse-glow {
@@ -153,15 +154,12 @@
 }
 
 @layer components {
-  /* 毛玻璃卡片 */
-  .glass-card {
-    @apply bg-surface backdrop-blur-xl border border-ink/10 rounded-2xl shadow-(--glass-shadow);
-  }
-
-  .glass-card-hover {
-    @apply bg-surface backdrop-blur-xl border border-ink/10 rounded-2xl shadow-(--glass-shadow) transition-all duration-300 hover:bg-surface-raised hover:border-indigo-500/30;
-  }
-
+  /*
+   * 这里原本有一个毛玻璃卡片类：在不透明的 bg-surface 面板上再叠 24px 背景模糊。
+   * 面板本身没有 alpha，模糊完全看不出来，却要在出入场动画期间每帧对整块背景
+   * 重算一次 —— 那是卡片与 Toast「发虚 + 震颤」的主要来源，已整体删除。
+   * 真要毛玻璃感就用真正半透明的 bg-surface-popover，不要给不透明面板加模糊。
+   */
   /* 发光边框 */
   .glow-border {
     @apply relative;
@@ -423,70 +421,48 @@
   }
 }
 
-/* ===== 管理端页面动效 ===== */
-/* 页面入场：只动 opacity + translate，不动 scale。
-   scale 会改变元素尺寸，浏览器必须逐帧重新栅格化文字（字形缓存失效），
-   表现为文字在动画期间发虚、结束后突然变清晰，观感上像「动画跑过头又被拉回」。
-   translate 是合成层变换，文字栅格化一次即可，全程锐利且只占用合成线程。 */
+/* ===== 管理端页面动效 =====
+ *
+ * 入场只允许动 `opacity`，**不许** translate / scale / transform。
+ *
+ * 原因不是"重绘贵"，而是合成层重采样：
+ * 只要入场动画用了 translate 或 transform，元素就会被提升为独立合成层。
+ * Chrome 为这层只栅格化一次纹理，之后逐帧把这张纹理按**非整数设备像素**平移；
+ * 插值采样会把整块内容糊掉 ——
+ *   · 文字：字形边缘被双线性插值，看上去"发虚"，动画结束重新栅格化才突变清晰；
+ *   · 阴影：卡片阴影的柔和过渡带被抹平，看起来就像"动画期间阴影根本没渲染"。
+ * 位移只有 6–16px，为此牺牲整屏锐度不值得，所以入场统一改成原地淡入。
+ * 方向感与层次感由 `--animate-*` 的时长/easing 差异和 `.stagger-*` 的时序承担，
+ * 这些都不产生合成层。
+ *
+ * 纯装饰层（图标弹入、Toast 进度条、占比条）不含文字，仍可用 scale，
+ * 它们分别由 iconPop / toastProgress / barGrow 三个关键帧单独定义。
+ */
 @keyframes pageIn {
-  from {
-    opacity: 0;
-    translate: 0 8px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes rise {
-  from {
-    opacity: 0;
-    translate: 0 16px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* 弹入：只用 opacity + 位移，不用 scale。
-   scale 会让文字在动画期间逐帧重采样而发虚（实测锐度 -8.5%），
-   translate 则完全不影响锐度；方向感用位移表达就够了。 */
 @keyframes popIn {
-  from {
-    opacity: 0;
-    translate: 0 6px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    translate: 0 8px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
-/* 滚动容器内的列表项入场：从上方落入。
-   向下偏移会被滚动容器计入 scrollHeight，动画期间凭空冒出一条滚动条。
-   向上偏移只影响上方的溢出，不计入可滚动区域，所以永远撑不出滚动条。 */
+/* 列表项入场。以前向上位移是为了避免滚动容器动画期间冒出滚动条；
+   现在不做位移，这条约束自然消失，滚动容器内外共用同一套淡入。 */
 @keyframes settleIn {
-  from {
-    opacity: 0;
-    translate: 0 -6px;
-  }
-  to {
-    opacity: 1;
-    translate: 0 0;
-  }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 @keyframes shimmer {
   from {
@@ -526,11 +502,15 @@
   }
 }
 
-/* 覆盖层、弹窗、Toast 的进出场。
+/* 覆盖层、弹窗、菜单、Toast 的进出场。
    这些元素由 Radix Presence 控制挂载：它监听 animationend 决定何时真正卸载，
    所以必须用 data-[state=closed] 上的动画来触发退出，动画结束即移除。
-   关键帧只驱动 opacity / scale / translate（独立 CSS 属性），
-   不去写 transform，避免和元素自身的 translate-* 定位互相覆盖。 */
+
+   与页面入场同样的理由（见上方「管理端页面动效」的说明）：这些面板里全是文字，
+   只驱动 opacity。曾经用 translate 做"从触发器一侧滑出"，代价是整块面板在
+   出入场期间被合成层重采样 —— 文字发虚、面板阴影被抹平。
+   方向感改由遮罩层（overlayIn/overlayOut）与 scale 无关的透明度节奏承担。
+   注意：**不要**在关键帧里写 transform，它会和元素自身的 translate-* 定位抢属性。 */
 @keyframes overlayIn {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -541,49 +521,34 @@
   to { opacity: 0; }
 }
 
-/* 弹窗：只做 opacity + 位移，不用 scale。
- *
- * 实测（同字号同颜色，300x120 单元格，相邻像素亮度梯度均值）：
- *   无变换            25.535
- *   scale: 0.96       23.372   ← 变软 8.5%
- *   transform：scale  23.372   ← 与上面同值，说明是缩放本身而不是写法
- *   translate: 0 6px  25.535   ← 完全不变
- *   opacity: 0.6      14.764   ← 这是透明度造成的对比度下降，不是模糊
- *
- * 缩放期间浏览器要把已经栅格化的文字位图重新采样到新尺寸，
- * 每帧一次，字形边缘被插值糊掉；动画结束回到 1 时再按原尺寸重栅格化，
- * 所以观感是「动画中发虚、最后一帧突然变清晰」。
- * 位移只是整块平移，位图原样移动，锐度不受影响 —— 所以改用位移表达方向感。
- */
 @keyframes modalIn {
-  from { opacity: 0; translate: 0 8px; }
-  to { opacity: 1; translate: 0 0; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes modalOut {
-  from { opacity: 1; translate: 0 0; }
-  to { opacity: 0; translate: 0 4px; }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
-/* 下拉内容：同样只用位移，从触发器那一侧滑出。 */
 @keyframes menuIn {
-  from { opacity: 0; translate: 0 -6px; }
-  to { opacity: 1; translate: 0 0; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes menuOut {
-  from { opacity: 1; translate: 0 0; }
-  to { opacity: 0; translate: 0 -2px; }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes toastIn {
-  from { opacity: 0; translate: 0 12px; }
-  to { opacity: 1; translate: 0 0; }
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @keyframes toastOut {
-  from { opacity: 1; translate: 0 0; }
-  to { opacity: 0; translate: 0 6px; }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes iconPop {
@@ -608,18 +573,24 @@
   .stagger-7 { animation-delay: 280ms; }
   .stagger-8 { animation-delay: 320ms; }
 
-  /* 悬停微抬升 */
-  /* 悬停微抬升 */
+  /*
+   * 悬停微抬升。
+   *
+   * 用独立的 translate 属性而不是 transform：CSS 动画里的 translate 由合成线程承担，
+   * 元素被提升为合成层后文字只栅格化一次；写 transform 则会与元素自身的
+   * translate-* 定位争用同一属性，过渡期间还会逐帧重绘整个元素（文字发虚）。
+   * 同理不把 box-shadow 放进 transition —— 大范围模糊阴影每帧重算就是"震颤"。
+   */
   .hover-lift {
     transition:
-      transform 0.25s cubic-bezier(0.22, 1, 0.36, 1),
-      box-shadow 0.25s cubic-bezier(0.22, 1, 0.36, 1),
+      translate 0.25s cubic-bezier(0.22, 1, 0.36, 1),
       border-color 0.25s ease;
   }
 
   .hover-lift:hover {
-    transform: translateY(-2px);
+    translate: 0 -2px;
   }
+
 
   /* 骨架屏 */
   .skeleton {

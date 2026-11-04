@@ -106,8 +106,7 @@ export function NodeRenameEditor({
               <MotionItem
                 key={node.key}
                 itemKey={node.key}
-                /* 容器可滚动：向上入场，避免动画期间撑出滚动条 */
-                enterFrom="up"
+                /* 入场只淡入（不位移），滚动容器内也不会撑出滚动条 */
                 className={cn(
                   "flex items-center gap-2 rounded-xl border px-2.5 py-2 transition-colors",
                   renamed ? "border-primary-500/40 bg-primary-500/10" : "border-ink/10 bg-ink/5"

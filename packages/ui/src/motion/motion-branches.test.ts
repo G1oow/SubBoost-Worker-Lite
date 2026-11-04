@@ -24,15 +24,17 @@ describe("grow bar markup", () => {
     expect(html).toContain("rounded-full");
   });
 
-  it("keeps the label out of layout so the bar still hugs the row bottom", () => {
+  it("keeps the bar free of a visual number label", () => {
     const html = renderToStaticMarkup(React.createElement(GrowBar, { percent: 60, count: 3 }));
 
-    // 标签是绝对定位：若占布局高度，每行卡片高度会随数字有无而跳动
-    expect(html).toContain("absolute");
-    expect(html).toContain("-translate-x-full");
-    // 右缘对齐条末端，才叫"骑在末端上方"
-    expect(html).toContain("whitespace-nowrap");
+    // 条上方的数字标签已删除：它要逐帧写 left（布局属性）并改 textContent，
+    // 是刷新状态页「文字抖动」的直接来源。数值信息由行右侧的百分比与指标格承担。
+    expect(html).not.toContain("-translate-x-full");
+    expect(html).not.toContain("absolute");
+    // 读屏仍然需要稳定终值
+    expect(html).toContain("sr-only");
   });
+
 
   it("accepts custom track height and fill color", () => {
     const html = renderToStaticMarkup(

@@ -45,7 +45,11 @@
       0 20px 44px -14px color-mix(in oklab, #000 75%, transparent);
     --glass-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
     --popover-shadow: 0 25px 50px -12px color-mix(in oklab, #000 40%, transparent);
-    --header-bg: color-mix(in oklab, #000 50%, transparent);
+    /* 页头与移动端底栏：纯实心黑，不含任何 alpha。
+       半透明（哪怕 92%）在滚动时都会让内容从下面透出来，深色下看起来发灰、发脏；
+       实心色块没有任何混合，滚动时也不需要模糊或重绘补偿，最干净也最便宜。
+       页头靠 border-b 与内容区划界，不再叠额外阴影（实心面板上加阴影等于双线）。 */
+    --header-bg: #000000;
     --overlay: color-mix(in oklab, #000 70%, transparent);
     --popover-arrow: oklch(14.1% 0.005 285.823);
     --date-input-scheme: dark;
@@ -318,7 +322,8 @@
       0 18px 36px -16px rgba(37, 99, 235, 0.24);
     --glass-shadow: var(--surface-shadow);
     --popover-shadow: 0 20px 40px -16px rgba(15, 23, 42, 0.28);
-    --header-bg: rgba(255, 255, 255, 0.75);
+    /* 同深色主题：实心白、零 alpha。浅色主题下黑色页头会让整页前景色失效 */
+    --header-bg: #ffffff;
     --overlay: rgba(15, 23, 42, 0.35);
     --popover-arrow: #fff;
     --date-input-scheme: light;

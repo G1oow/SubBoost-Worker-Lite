@@ -46,13 +46,6 @@ function scaleXOf(element: HTMLElement): number {
   return 1;
 }
 
-/** 从 `max(1rem, 42.5%)` 这类写法里取出百分比数值 */
-function percentFromLeft(element: HTMLElement): number | null {
-  const raw = element.style.left;
-  const matched = /([-\d.]+)%/u.exec(raw);
-  return matched ? Number.parseFloat(matched[1]) : null;
-}
-
 /** 让 Motion 的弹簧推进若干帧 */
 async function advance(frames = 40) {
   for (let i = 0; i < frames; i += 1) {
@@ -61,9 +54,6 @@ async function advance(frames = 40) {
     });
   }
 }
-
-const countNode = (container: HTMLElement) =>
-  container.querySelector('span[aria-hidden="true"] > span') as HTMLElement | null;
 
 const fillOf = (container: HTMLElement) => container.querySelector(".origin-left") as HTMLElement;
 
@@ -78,18 +68,6 @@ afterEach(() => {
 });
 
 describe("GrowBar under a DOM", () => {
-  it("writes the animating count into the text node as the spring advances", async () => {
-    const { GrowBar } = await loadGrowBar();
-    const { container } = render(React.createElement(GrowBar, { percent: 100, count: 7 }));
-
-    expect(countNode(container)?.textContent).toBe("0");
-
-    await advance(80);
-
-    // 弹簧收敛后必须精确落在目标数上
-    expect(countNode(container)?.textContent).toBe("7");
-  });
-
   it("scales the fill to the target percentage and lands exactly on it", async () => {
     const { GrowBar } = await loadGrowBar();
     const { container } = render(React.createElement(GrowBar, { percent: 40, count: 2 }));
@@ -100,27 +78,30 @@ describe("GrowBar under a DOM", () => {
     expect(scaleXOf(fillOf(container))).toBeCloseTo(0.4, 2);
   });
 
-  it("keeps the label position tied to the same progress as the fill", async () => {
+  it("renders no visual number on the bar and hands the count to assistive tech", async () => {
     const { GrowBar } = await loadGrowBar();
     const { container } = render(React.createElement(GrowBar, { percent: 60, count: 3 }));
 
-    const fill = fillOf(container);
-    const label = container.querySelector('span[aria-hidden="true"]') as HTMLElement;
+    await advance(20);
 
-    // 采样多个时刻：两处要么都是终值，要么都在途中，不能一个到位另一个没到
-    for (let i = 0; i < 5; i += 1) {
-      await advance(8);
-      const fromFill = scaleXOf(fill) * 100;
-      const fromLabel = percentFromLeft(label);
-      if (fromLabel !== null) {
-        expect(Math.abs(fromFill - fromLabel)).toBeLessThan(1.5);
-      }
-    }
+    // 条上方的数字标签已移除：DOM 里只剩 sr-only 这一处文本。
+    // 视觉数字要逐帧改 textContent 并写 left 定位，是"文字抖动"的直接来源。
+    const texts = container.querySelectorAll("span");
+    expect(texts).toHaveLength(1);
+    expect(texts[0]?.className).toBe("sr-only");
+    expect(texts[0]?.textContent).toBe("3");
+    // 也不能留下空出来的绝对定位标签
+    expect(container.querySelector(".-translate-x-full")).toBeNull();
+  });
 
-    // 收尾时两者都精确等于 60%
-    await advance(80);
-    expect(scaleXOf(fill) * 100).toBeCloseTo(60, 1);
-    expect(percentFromLeft(label)).toBeCloseTo(60, 1);
+  it("omits the assistive-tech text when no count is given", async () => {
+    const { GrowBar } = await loadGrowBar();
+    const { container } = render(React.createElement(GrowBar, { percent: 30 }));
+
+    await advance(20);
+
+    expect(container.querySelector(".sr-only")).toBeNull();
+    expect(scaleXOf(fillOf(container))).toBeCloseTo(0.3, 2);
   });
 
   it("stops the animation on unmount instead of writing into a detached node", async () => {
@@ -154,14 +135,14 @@ describe("GrowBar under a DOM", () => {
     expect(after).toBeCloseTo(0.9, 2);
   });
 
-  it("treats a zero target as zero fill and zero count", async () => {
+  it("treats a zero target as zero fill", async () => {
     const { GrowBar } = await loadGrowBar();
     const { container } = render(React.createElement(GrowBar, { percent: 0, count: 0 }));
 
     await advance(20);
 
     expect(scaleXOf(fillOf(container))).toBeCloseTo(0, 2);
-    expect(countNode(container)?.textContent).toBe("0");
+    expect(container.querySelector(".sr-only")?.textContent).toBe("0");
   });
 
   it("clamps an out-of-range percentage instead of overflowing the track", async () => {

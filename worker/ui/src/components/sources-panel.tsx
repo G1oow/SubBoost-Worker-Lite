@@ -322,7 +322,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
               return (
                 <MotionItem as="li" key={source.id} itemKey={source.id}>
                   {/* 窄屏改成上下两段：文本一行、操作一行贴右，避免长源名把三个图标挤出屏幕 */}
-                  <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:flex-row sm:items-center sm:gap-3 sm:px-4">
+                  <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-medium text-fg">{source.name}</span>

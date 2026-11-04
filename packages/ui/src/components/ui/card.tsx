@@ -11,7 +11,9 @@ const Card = React.forwardRef<
     ref={ref}
     className={cn(
       // 移动端留 16px 内边距：24px 在 375px 屏上会吃掉近 1/7 的内容宽度
-      "rounded-2xl border border-card-border bg-surface p-4 shadow-(--surface-shadow) transition-[border-color,box-shadow] duration-300 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:p-6",
+      // hover 只过渡 border-color：阴影是 0 12px 32px 的大范围模糊，
+      // 放进 transition 会让 hover 期间每帧重算整块阴影，观感是卡片在"喘"。
+      "rounded-2xl border border-card-border bg-surface p-4 shadow-(--surface-shadow) transition-[border-color] duration-200 hover:border-card-border-hover sm:p-6",
       className
     )}
     {...props}
