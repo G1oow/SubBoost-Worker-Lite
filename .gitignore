@@ -21,3 +21,6 @@ worker/dist/
 .dev.vars
 # 部署脚本生成的临时配置（含真实 KV namespace id），禁止提交
 .wrangler.deploy.jsonc
+# Vercel CLI 的本地链接信息与它生成的 .env.local（含 VERCEL_OIDC_TOKEN，禁止提交）
+.vercel
+.env.local

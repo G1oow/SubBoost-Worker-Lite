@@ -12,5 +12,7 @@
       "@subboost/ui/*": ["../../packages/ui/src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts"]
+  // ../src/env.d.ts 提供 Env / KVNamespace 等最小 Worker 全局声明：
+  // 演示模式（src/demo）复用 worker/src 的真实路由，需要这些类型。
+  "include": ["src/**/*.ts", "src/**/*.tsx", "vite.config.ts", "../src/env.d.ts"]
 }
