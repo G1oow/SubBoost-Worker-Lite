@@ -21,27 +21,47 @@ afterEach(() => {
   cleanup();
 });
 
+/** 让 Motion 推进若干帧（jsdom 不做布局，但 transform 会被写进内联样式） */
+async function ticks(times = 2) {
+  for (let i = 0; i < times; i += 1) {
+    await act(async () => {
+      await new Promise((resolve) => requestAnimationFrame(() => resolve(null)));
+    });
+  }
+}
+
+function scaleXOf(element: HTMLElement): number {
+  const raw = element.style.transform || getComputedStyle(element).transform;
+  if (!raw || raw === "none") return 1;
+  const matrix = /matrix\(([^,]+),/u.exec(raw);
+  if (matrix) return Number.parseFloat(matrix[1]);
+  const scaleX = /scaleX\(([-\d.]+)\)/u.exec(raw);
+  if (scaleX) return Number.parseFloat(scaleX[1]);
+  return 1;
+}
+
 describe("GrowBar with reduced motion", () => {
-  it("lands on the target immediately instead of animating", async () => {
+  it("lands on the target within a couple of frames instead of animating", async () => {
     const { GrowBar } = await import("./grow-bar");
     const { container } = render(React.createElement(GrowBar, { percent: 80, count: 4 }));
 
-    // 不推进请求帧：减少动态效果时不该有增长过程，effect 里直接写入终值
-    await act(async () => {});
+    // 只要两帧：真的在跑弹簧的话，两帧内不可能推进到 80%
+    await ticks(2);
 
-    const label = container.querySelector('span[aria-hidden="true"] > span');
-    expect(label?.textContent).toBe("4");
+    const fill = container.querySelector(".origin-left") as HTMLElement;
+    expect(scaleXOf(fill)).toBeCloseTo(0.8, 2);
+    // 读屏拿到的仍是稳定终值
+    expect(container.querySelector(".sr-only")?.textContent).toBe("4");
   });
 
   it("still applies the final fill width", async () => {
     const { GrowBar } = await import("./grow-bar");
     const { container } = render(React.createElement(GrowBar, { percent: 55, count: 3 }));
 
-    await act(async () => {});
+    await ticks(2);
 
     const fill = container.querySelector(".origin-left") as HTMLElement;
-    const raw = fill.style.transform || getComputedStyle(fill).transform;
-    // 终值必须一次到位：65% 之类的中间值都不算通过
-    expect(raw).toContain("0.55");
+    // 终值必须一次到位：27% 之类的中间值都不算通过
+    expect(scaleXOf(fill)).toBeCloseTo(0.55, 2);
   });
 });

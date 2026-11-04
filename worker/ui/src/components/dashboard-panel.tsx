@@ -48,10 +48,14 @@ export type DashboardPanelProps = {
 };
 
 function AnimatedCount({ value, className }: { value: number; className?: string }) {
-  const animated = useAnimatedNumber(value);
-  return <span className={cn("tabular-nums", className)}>{formatCount(animated)}</span>;
+  // 动画由 rAF 直接写文本，不经过 React state；首帧与 SSR 都是终值
+  const [attachNumber, display] = useAnimatedNumber(value);
+  return (
+    <span ref={attachNumber} className={cn("tabular-nums", className)}>
+      {formatCount(display)}
+    </span>
+  );
 }
-
 function StatCard({
   label,
   value,

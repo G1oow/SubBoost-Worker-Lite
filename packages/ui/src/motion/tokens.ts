@@ -13,10 +13,11 @@
  * 2. spring 的实际时长取决于参数组合，多条列表项同时进场时收尾参差；
  *    tween 的时长是确定的，成组动画的结束时刻可以对齐。
  *
- * 为什么不用 scale：
- * scale 改变元素尺寸，浏览器必须逐帧重新栅格化文字和图标（字形缓存失效），
- * 表现为动画期间文字发虚、轻微抖动。translate 是合成层变换，栅格化一次即可，
- * 全程锐利且只占用合成线程。所以进场只动 opacity + y。
+ * 为什么这里连位移都不用（只动 opacity）：
+ * 位移（translate/y）会把元素提升为独立合成层，Chrome 只栅格化一次纹理，
+ * 之后按非整数设备像素逐帧平移，插值采样把整块内容糊掉 —— 文字边缘发虚、
+ * 卡片阴影的柔和过渡被抹平（看起来像"动画期间没渲染阴影"）。入场位移只有几像素，
+ * 不值得为此牺牲整屏锐度。scale 的问题更严重：它还要改变尺寸、逐帧重采样字形。
  */
 
 /** 统一的 ease-out 曲线：起步快、收尾缓，末帧精确落在终值上 */
@@ -37,22 +38,15 @@ export const LIST_ITEM_EXIT_TRANSITION = { duration: 0.16, ease: EASE_IN } as co
  * 行内文字跟着抖，正是要消除的抖动来源。
  */
 export const LIST_LAYOUT_TRANSITION = { duration: 0.24, ease: EASE_OUT } as const;
-
 /**
- * 列表项进场：淡入 + 轻微上移。
- * 刻意不写 scale：见文件头对栅格化的说明。
+ * 列表项进场：只淡入，不写 y。
+ * 位移会触发合成层重采样（见文件头说明），行内文字在动画期间发虚。
  * 退场时长写在 exit 目标对象里：Motion 没有顶层的 exitTransition prop。
  */
 export const LIST_ITEM_MOTION = {
-  initial: { opacity: 0, y: 8 },
-  /**
-   * 向上入场：滚动容器内专用。
-   * 向下的位移会被容器的 scrollHeight 计入，动画期间会凭空出现滚动条；
-   * 向上偏移只影响上方溢出，不计入可滚动区域。
-   */
-  initialUp: { opacity: 0, y: -6 },
-  animate: { opacity: 1, y: 0 },
-  exit: { opacity: 0, y: -6, transition: LIST_ITEM_EXIT_TRANSITION },
+  initial: { opacity: 0 },
+  animate: { opacity: 1 },
+  exit: { opacity: 0, transition: LIST_ITEM_EXIT_TRANSITION },
 } as const;
 
 /** 收起/展开的内容区：高度由内容决定，只做淡入与位移 */

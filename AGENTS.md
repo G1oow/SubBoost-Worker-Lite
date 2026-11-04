@@ -242,10 +242,13 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 
 `packages/ui/src/styles/motion.test.ts` 会守护动效约定：
 
-1. **不要在整页/弹窗/菜单的关键帧里使用 `transform`**，改用独立的 `opacity` /
-   `translate` / `scale` 属性。`transform: scale()` 会让文字逐帧重新栅格化，
-   表现为动画期间发虚、结束时突变清晰，观感像"跑过头又被拉回"。
-2. 整页入场（`pageIn`）**不得使用 `scale`**，用 `translate` 位移即可。
+1. **承载文字的入场关键帧只能驱动 `opacity`**，不许出现 `transform` / `translate` /
+   `scale`。任何位移或缩放都会把元素提升为独立合成层，Chrome 为这层只栅格化一次纹理，
+   之后按非整数设备像素逐帧平移，插值采样会把整块内容糊掉：文字边缘发虚、卡片阴影的
+   柔和过渡被抹平（看起来像"动画期间没渲染阴影"），动画结束重新栅格化才突变清晰。
+   方向感与层次感交给时长/easing 差异和 `.stagger-*` 时序，它们不产生合成层。
+2. 纯色块装饰（`iconPop`、`barGrow`、`toastProgress`）不含文字，仍可用 `scale`；
+   新增这类关键帧时不要让它包住文字。
 3. Radix 组件的退场动画必须挂在 `data-[state=closed]` 上，Radix Presence 依赖
    `animationend` 才卸载节点；只写进场动画等于关闭时硬切。
 4. 新增动效通过 `@theme` 的 `--animate-*` 令牌注册，并在 `globals.css` 定义对应

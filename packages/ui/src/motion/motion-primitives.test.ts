@@ -118,17 +118,16 @@ describe("loading button", () => {
 });
 
 describe("grow bar", () => {
-  it("shows a bare number and hides the animating text from assistive tech", () => {
+  it("keeps the count out of the visual layer and only exposes it to assistive tech", () => {
     const html = renderToStaticMarkup(
       React.createElement(GrowBar, { percent: 40, count: 2 })
     );
 
-    // 视觉数字逐帧变化，读屏只该读到最终值
+    // 视觉数字已移除（逐帧写 left + textContent 会导致文字抖动）；
+    // 读屏仍读到稳定终值 2
     expect(html).toContain('class="sr-only"');
     expect(html).toContain(">2</span>");
-    // 动画期数字由 ref 直接写文本，静态渲染时应从 0 起步
-    expect(html).toContain(">0</span>");
-    expect(html).toContain('aria-hidden="true"');
+    expect(html).not.toContain('aria-hidden="true"');
     // 数字只显示数值，不再附带单位
     expect(html).not.toContain("个");
   });
@@ -167,12 +166,14 @@ describe("grow bar spring", () => {
     expect(GROW_BAR_SPRING.mass).toBe(1);
   });
 
-  it("drives fill and label from a single progress value", () => {
+  it("drives the fill from a single progress value and never the layout", () => {
     const source = readFileSync(join(__dirname, "grow-bar.tsx"), "utf8");
-    // 条宽与标签位置必须都是同一个 progress 的纯函数，不能各跑一条动画
+    // 填充宽度必须是 progress 的纯函数
     expect(source).toMatch(/useTransform\(progress,\s*\(value\)\s*=>\s*value\s*\/\s*100\)/u);
-    expect(source).toMatch(/useTransform\(progress,\s*\(value\)\s*=>\s*`max\(1rem/u);
     // 只允许一个 animate 目标，出现第二个就是又拆成了两条独立动画
     expect(source.match(/animate\(/gu)).toHaveLength(1);
+    // 不再逐帧写 left / 改 textContent：那是布局与重排，正是抖动的来源
+    expect(source).not.toMatch(/style=\{\{\s*left\s/u);
+    expect(source).not.toMatch(/textContent\s*=/u);
   });
 });

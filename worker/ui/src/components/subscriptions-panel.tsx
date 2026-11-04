@@ -294,7 +294,7 @@ export function SubscriptionsPanel({
             {state.subscriptions.map((subscription) => (
               <MotionItem as="li" key={subscription.id} itemKey={subscription.id}>
                 {/* 窄屏把五个操作收到第二行并贴右：一行放不下名称 + 链接 + 五个图标 */}
-                <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,box-shadow] duration-200 hover:border-card-border-hover hover:shadow-(--card-shadow-hover) sm:flex-row sm:items-center sm:gap-3 sm:px-4">
+                <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:px-4">
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       {/* 名称自己可收缩：长名称先让位，而不是把源名胶囊挤出可视区 */}

@@ -41,18 +41,19 @@ const TONE_STYLE: Record<RefreshTone, { box: string; icon: React.ReactNode }> = 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-xl border border-card-border bg-surface px-3 py-2.5">
-      <p className="text-[11px] text-fg-45">{label}</p>
+      <p className="text-[11px] text-fg-50">{label}</p>
       <p className="mt-1 truncate text-base font-semibold leading-none tabular-nums text-fg sm:text-lg">{value}</p>
-      {hint ? <p className="mt-1 truncate text-[11px] text-fg-40">{hint}</p> : null}
+      {hint ? <p className="mt-1 truncate text-[11px] tabular-nums text-fg-40">{hint}</p> : null}
     </div>
   );
 }
 
+
 /**
- * 一条结果：状态点 + 名称 + 占比，下面一条增长条，节点数骑在条的末端上方。
+ * 一条结果：状态点 + 名称 + 占比，下面一条增长条。
  *
- * 节点数从右列移到条末端，是因为它和条表达同一个量（该条占多少节点）。
- * 放在条的终点，视线顺着填充方向落到数字上，不需要在两个位置之间来回对照。
+ * 条上不再骑节点数：占比已经在行右侧，节点总数在顶部指标格里，
+ * 条只需要表达"这一项占多少"，数字贴上去反而让条与文字互相挤压。
  */
 function EntryRow({ entry }: { entry: RefreshEntry }) {
   return (
@@ -72,9 +73,8 @@ function EntryRow({ entry }: { entry: RefreshEntry }) {
           <span className="shrink-0 text-xs tabular-nums text-fg-50">{entry.share}%</span>
         </div>
 
-        {/* 数字骑在条上方，留出约 16px 的顶部空间 */}
         <GrowBar
-          className="mt-4"
+          className="mt-3"
           percent={entry.share}
           count={entry.nodeCount}
           fillClassName={entry.ok ? "bg-gradient-to-r from-primary-500 to-indigo-400" : "bg-red-400"}
@@ -154,7 +154,7 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
         ) : (
           <>
             {/*
-              汇总条：结论文字 + 一条按"成功占比"增长的进度条，节点总数骑在条末端。
+              汇总条：结论文字 + 一条按"成功占比"增长的进度条。
               条的百分比 = 成功对象占全部对象的比例，全部成功时满格。
             */}
             <div className={cn("rounded-xl border px-4 py-3", TONE_STYLE[board.tone].box)}>
@@ -166,7 +166,7 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
                 </div>
               </div>
               <GrowBar
-                className="mt-4"
+                className="mt-3"
                 percent={board.total !== 0 ? Math.round((board.okCount / board.total) * 100) : 0}
                 count={board.totalNodes}
                 fillClassName={

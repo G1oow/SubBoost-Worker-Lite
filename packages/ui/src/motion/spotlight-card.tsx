@@ -57,7 +57,9 @@ export function SpotlightCard({
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
       className={cn(
-        "group/spotlight relative overflow-hidden rounded-2xl border border-card-border bg-surface shadow-(--surface-shadow) transition-[border-color,box-shadow] duration-300 hover:border-primary-500/40 hover:shadow-(--card-shadow-hover)",
+        // hover 只过渡边框：光斑本身用 opacity 过渡（纯合成层），
+        // 不再叠 hover 阴影 —— 大范围模糊阴影进 transition 会逐帧重算整卡。
+        "group/spotlight relative overflow-hidden rounded-2xl border border-card-border bg-surface shadow-(--surface-shadow) transition-[border-color] duration-200 hover:border-primary-500/40",
         className
       )}
       {...props}

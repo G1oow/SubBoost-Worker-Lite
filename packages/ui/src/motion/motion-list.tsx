@@ -60,16 +60,15 @@ export type MotionItemProps = {
    * layout 测量出来的位置和实际渲染不一致，删除时会看到行先跳一下再滑。
    */
   layout?: boolean;
-  /**
-   * 入场位移方向，默认向下（`y: 8 → 0`）。
-   * 放在滚动容器里时必须传 `"up"`：向下的位移会被计入容器的 scrollHeight，
-   * 动画期间凭空冒出一条滚动条。向上偏移只影响上方溢出，不计入可滚动区域。
-   */
-  enterFrom?: "down" | "up";
 };
+
 
 /**
  * 列表中的单项：进场、离场与（可选）FLIP 重排。
+ *
+ * 进场只淡入，不做位移（以前是 `y: 8 → 0`）：位移会被提升为合成层并按非整数
+ * 设备像素平移，整块纹理被插值采样 —— 行内文字在动画期间发虚。顺带的好处是
+ * 向下的位移不再被滚动容器计入 scrollHeight，容器内外可以共用同一套入场。
  *
  * `layout="position"` 只插值位置，不插值尺寸。用完整的 `layout` 时 Motion 会用
  * scaleX/scaleY 模拟宽高变化，行内文字随之被横向或纵向压扁——这也是"文字抖动"
@@ -81,19 +80,24 @@ export function MotionItem({
   children,
   itemKey,
   layout = as !== "tr",
-  enterFrom = "down",
 }: MotionItemProps) {
   const Component = motion[as];
   return (
     <Component
       key={itemKey}
-      initial={enterFrom === "up" ? LIST_ITEM_MOTION.initialUp : LIST_ITEM_MOTION.initial}
+      initial={LIST_ITEM_MOTION.initial}
       animate={LIST_ITEM_MOTION.animate}
       exit={LIST_ITEM_MOTION.exit}
       transition={{
         ...LIST_ITEM_TRANSITION,
         layout: LIST_LAYOUT_TRANSITION,
       }}
+      /*
+       * layout="position" 只插值位置，不插值尺寸。
+       * 传布尔 true 时 Motion 会用 scaleX/scaleY 模拟宽高变化，
+       * 行内文字随之被横向或纵向压扁 —— 这也是"文字抖动"的一个来源。
+       */
+      layout={layout ? "position" : false}
       className={cn(className)}
     >
       {children}

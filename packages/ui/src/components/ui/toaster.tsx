@@ -37,7 +37,10 @@ const Toast = React.forwardRef<
   <ToastPrimitives.Root
     ref={ref}
     className={cn(
-      "toast-swipe group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden border p-3.5 shadow-lg transition-all glass-card sm:p-4",
+      // 面板底色是不透明的（--surface 在明暗主题下都没有 alpha），
+      // 不要叠 backdrop-blur：看不出效果，却要在进出场每帧对整块背景做一次模糊。
+      // 也不要用 transition-all：它会把 shadow / 模糊 / 布局属性一起纳入过渡。
+      "toast-swipe group pointer-events-auto relative flex w-full items-start gap-3 overflow-hidden rounded-xl border border-card-border bg-surface p-3.5 shadow-(--popover-shadow) transition-colors sm:p-4",
       "data-[state=open]:animate-toast-in data-[state=closed]:animate-toast-out",
       "data-[swipe=end]:animate-toast-out",
       "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:origin-left after:content-['']",

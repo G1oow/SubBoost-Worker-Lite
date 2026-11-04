@@ -68,12 +68,17 @@ export function AppShell({
 
   return (
     <div className="min-h-dvh bg-page text-fg">
-      <header className="sticky top-0 z-30 border-b border-ink/10 bg-header">
-        {/*
-          窄屏只留一行：品牌 + 截断的标题 + 三个图标按钮。
-          刷新/退出在桌面用带文字的按钮，移动端换成 IconButton 换行不换位置，
-          否则 375px 下页头会被挤成两行并把标题压没。
-        */}
+      {/*
+        页头不做常驻的"顶栏"：不 sticky、不加底板、不加分隔线、没有滚动动画。
+        理由：只要它常驻在视口顶部，就一定会压住内容，而且任何收缩/淡入淡出
+        都会和"内容静止不动"的阅读节奏打架，观感是多余的噪音。
+        现在它就是页面最上面的一块普通内容，随页面一起滚走，永不遮挡画面。
+
+        结构保持原样，位置不动：
+        - 第一行：品牌 + 标题 + 版本徽章，右侧是刷新 / 主题 / 退出；
+        - 第二行：页面切换胶囊独占一行（比挤在页头里更好点，命中面积更大）。
+      */}
+      <header>
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <BrandMark className="h-8 w-8 shrink-0 shadow-(--btn-primary-shadow) transition-transform duration-300 hover:rotate-6 sm:h-9 sm:w-9" />
@@ -141,7 +146,7 @@ export function AppShell({
           </div>
         </div>
 
-        {/* 桌面导航：胶囊分段控件。移动端换成底部 tab 栏（见下方），这里整块隐藏 */}
+        {/* 桌面导航：胶囊分段控件独占一行。移动端换成底部 tab 栏（见下方），这里整块隐藏 */}
         {navOptions.length > 0 ? (
           <div className="mx-auto hidden max-w-6xl px-4 pb-2 sm:block sm:px-6">
             <SegmentedControl
@@ -159,7 +164,7 @@ export function AppShell({
 
       {/* 底部 tab 栏是 fixed 的，主区域必须留出等高的下内边距，否则最后一张卡被挡住 */}
       <main className="mx-auto max-w-6xl px-3 pb-28 pt-4 sm:px-6 sm:pb-6 sm:pt-6">
-        {/* key 换页时重新挂载，触发一次 pageIn 入场；动画只动 opacity/translate */}
+        {/* key 换页时重新挂载，触发一次 pageIn 入场；动画只动 opacity */}
         <div key={activeNav ?? "page"} className={cn("page-content animate-page-in space-y-4 sm:space-y-6")}>
           {children}
         </div>
@@ -173,11 +178,12 @@ export function AppShell({
         移动端底部 tab 栏：五个页面在拇指可达区，且不会像横向胶囊那样被压扁。
         用 nav + aria-current 表达“当前页”，与桌面 tablist 的语义互补而不是重复：
         两者靠 hidden/sm:hidden 互斥，任一断点下只有一套进入无障碍树。
+        底栏常驻压着内容，所以保留实心表面（--header-bg）。
       */}
       {navOptions.length > 0 ? (
         <nav
           aria-label="主导航"
-          className="fixed inset-x-0 bottom-0 z-40 border-t border-ink/10 bg-header pb-[env(safe-area-inset-bottom)] sm:hidden"
+          className="fixed inset-x-0 bottom-0 z-40 border-t border-card-border bg-header pb-[env(safe-area-inset-bottom)] sm:hidden"
         >
           <ul className="flex items-stretch">
             {navOptions.map((option) => {

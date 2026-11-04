@@ -187,3 +187,28 @@ describe("panel layout on mobile", () => {
     expect(source).toContain("grid grid-cols-2 gap-2 sm:grid-cols-4");
   });
 });
+
+describe("page header", () => {
+  it("does not stick the header to the viewport", () => {
+    const source = readWorkerUi("components/app-shell.tsx");
+    const headerTag = /<header[\s\S]*?>/u.exec(source)?.[0] ?? "";
+    expect(headerTag).not.toBe("");
+    // 常驻页头一定会压住内容：它只能是页面顶部的普通内容，随页面一起滚走
+    expect(headerTag, "页头不得 sticky").not.toContain("sticky");
+    expect(headerTag, "页头不得 fixed").not.toContain("fixed");
+    // 也不要有底板与分隔线（背景不做硬性存在）
+    expect(headerTag).not.toContain("bg-header");
+    expect(headerTag).not.toContain("border-b");
+    // 不做滚动动画：源码里出现 scrollY 就是又想把页头接到滚动事件上
+    expect(source).not.toContain("scrollY");
+    expect(source).not.toContain("useScrollHeaderPhase");
+  });
+
+  it("keeps the page-switch pill on its own full-width row", () => {
+    const source = readWorkerUi("components/app-shell.tsx");
+    // 胶囊独占第二行：不与品牌行挤一起，也不收成图标，命中面积才够
+    expect(source).toContain("mx-auto hidden max-w-6xl px-4 pb-2 sm:block sm:px-6");
+    expect(source).toContain('optionClassName="px-3 py-2"');
+    expect(source).not.toContain("optionLabelClassName");
+  });
+});

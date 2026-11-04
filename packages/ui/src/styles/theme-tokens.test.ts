@@ -83,3 +83,23 @@ describe("theme token parity", () => {
     expect(darkNames.has("--surface-popover")).toBe(true);
   });
 });
+
+describe("opaque chrome", () => {
+  /**
+   * 页头与移动端底栏是全站唯一的常驻色块，必须是实心色：
+   * 一旦带上 alpha，滚动时内容会从它下面透出来，深色下明显发灰发脏，
+   * 而且只能靠 backdrop-blur 补救 —— 那条路已经在 globals.css 里被禁掉了。
+   */
+  it("keeps the header bar fully opaque in both themes", () => {
+    const values = [...themeCss.matchAll(/--header-bg:\s*([^;]+);/gu)].map((match) => match[1].trim());
+    // 深色与浅色各一处
+    expect(values).toHaveLength(2);
+    for (const value of values) {
+      expect(value, `--header-bg 不得带 alpha：${value}`).not.toMatch(
+        /transparent|rgba?\(|color-mix\(/iu
+      );
+      // 只接受实心十六进制色值
+      expect(value).toMatch(/^#(?:[\da-f]{3}|[\da-f]{6})$/iu);
+    }
+  });
+});
