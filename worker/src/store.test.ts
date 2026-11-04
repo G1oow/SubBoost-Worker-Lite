@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { buildDefaultUserConfig } from "@subboost/core/config/defaults";
-import { createStore, snapshotKey, tokenIndexKey } from "./store";
+import { createStore, shortCodeKey, snapshotKey, tokenIndexKey } from "./store";
 import { MemoryKV } from "./test-utils/memory-kv";
 import { KEY_SOURCES, TTL_CACHE, TTL_LOCK, TTL_SNAPSHOT } from "./types";
 
@@ -139,6 +139,67 @@ describe("createStore subscriptions", () => {
     await expect(store.deleteSubscription(dto.id)).resolves.toBe(true);
     await expect(store.findSubscriptionByToken(token)).resolves.toBeNull();
     await expect(store.getCache(dto.id)).resolves.toBeNull();
+  });
+
+  it("creates an idempotent short link and indexes the code", async () => {
+    const { dto } = await store.createSubscription({ name: "default", sourceIds: [] });
+    const origin = "https://worker.example.com";
+
+    const first = await store.createShortLink(dto.id, origin);
+    expect(first?.shortLink).toMatch(/^https:\/\/worker\.example\.com\/s\/[A-Za-z0-9_-]{8}$/);
+    const code = (first?.shortLink as string).split("/s/").pop() as string;
+    expect(kv.raw(shortCodeKey(code))).toBe(dto.id);
+    await expect(store.findSubscriptionByShortCode(code)).resolves.toMatchObject({ id: dto.id });
+
+    // 幂等：重复生成返回同一个短码，也不会多出一条订阅记录
+    const second = await store.createShortLink(dto.id, origin);
+    expect(second?.shortLink).toBe(first?.shortLink);
+    await expect(store.listStoredSubscriptions()).resolves.toHaveLength(1);
+  });
+
+  it("revokes the short link and drops its index", async () => {
+    const { dto } = await store.createSubscription({ name: "default", sourceIds: [] });
+    const origin = "https://worker.example.com";
+    const created = await store.createShortLink(dto.id, origin);
+    const code = (created?.shortLink as string).split("/s/").pop() as string;
+
+    const revoked = await store.revokeShortLink(dto.id, origin);
+    expect(revoked?.shortLink).toBeUndefined();
+    expect(kv.has(shortCodeKey(code))).toBe(false);
+    await expect(store.findSubscriptionByShortCode(code)).resolves.toBeNull();
+
+    // 重复撤销与未知订阅
+    await expect(store.revokeShortLink(dto.id, origin)).resolves.toMatchObject({ id: dto.id });
+    await expect(store.createShortLink("missing", origin)).resolves.toBeNull();
+    await expect(store.revokeShortLink("missing", origin)).resolves.toBeNull();
+  });
+
+  it("drops the short link when rotating the token", async () => {
+    const { dto } = await store.createSubscription({ name: "default", sourceIds: [] });
+    const created = await store.createShortLink(dto.id, "https://worker.example.com");
+    const code = (created?.shortLink as string).split("/s/").pop() as string;
+
+    const rotated = await store.rotateSubscriptionToken(dto.id, "https://worker.example.com");
+    expect(rotated?.shortLink).toBeUndefined();
+    await expect(store.findSubscriptionByShortCode(code)).resolves.toBeNull();
+    expect(kv.has(shortCodeKey(code))).toBe(false);
+  });
+
+  it("drops the short link when deleting the subscription", async () => {
+    const { dto } = await store.createSubscription({ name: "default", sourceIds: [] });
+    const created = await store.createShortLink(dto.id, "https://worker.example.com");
+    const code = (created?.shortLink as string).split("/s/").pop() as string;
+
+    await expect(store.deleteSubscription(dto.id)).resolves.toBe(true);
+    expect(kv.has(shortCodeKey(code))).toBe(false);
+    await expect(store.findSubscriptionByShortCode(code)).resolves.toBeNull();
+  });
+
+  it("rejects malformed short codes without a KV read", async () => {
+    const before = kv.operationCount;
+    await expect(store.findSubscriptionByShortCode("../../etc/passwd")).resolves.toBeNull();
+    await expect(store.findSubscriptionByShortCode("short")).resolves.toBeNull();
+    expect(kv.operationCount).toBe(before);
   });
 });
 

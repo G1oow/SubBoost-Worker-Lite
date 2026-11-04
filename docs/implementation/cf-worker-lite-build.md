@@ -250,7 +250,7 @@ lint：通过（eslint local packages --max-warnings=0 + check-ui-consistency，
     "directory": "./dist",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/api/*", "/sub/*"]
+    "run_worker_first": ["/api/*", "/sub/*", "/s/*"]
   },
   "kv_namespaces": [{ "binding": "SUBBOOST_KV", "id": "<真实 KV namespace id，见部署文档>" }],
   "triggers": { "crons": ["0 */12 * * *"] },
@@ -697,17 +697,22 @@ export async function requireAdmin(request: Request, env: Env): Promise<void>;
 | PATCH | `/api/subscriptions/:id` | 是 | `{ name?, sourceIds? }`，上限 64 KiB；`sourceIds` 必须引用现存源 | `200 { subscription }`；源不存在 `400 VALIDATION_ERROR`；清空该订阅的 YAML 缓存 |
 | DELETE | `/api/subscriptions/:id` | 是 | 无 | `204` |
 | POST | `/api/subscriptions/:id/rotate` | 是 | 无 | `200 { subscription }` |
+| POST | `/api/subscriptions/:id/short-link` | 是 | 无 | `200 { subscription }`（`shortLink` = `<origin>/s/<8 位 base64url>`）；已有短链时幂等返回同一条；订阅不存在 `404 NOT_FOUND` |
+| DELETE | `/api/subscriptions/:id/short-link` | 是 | 无 | `200 { subscription }`（无 `shortLink`）；本来没有短链也返回成功；订阅不存在 `404 NOT_FOUND` |
 | GET | `/api/sources/:id/nodes` | 是 | 无 | `200 { source, fetchedAt, nodeCount, renamedCount, nodes, parseErrors }`；手动源无快照时即时解析 `manualText`；源不存在 `404` |
 | POST | `/api/nodes/parse` | 是 | `{ text, renames? }`，上限 1 MiB | `200 { nodes, totalParsed, totalFailed, errors }`；空文本返回空列表 |
 | GET | `/api/dashboard` | 是 | 无 | `200 DashboardStats`（源/订阅计数、节点总数、协议分布、逐源健康、最近刷新摘要、提醒） |
 | POST | `/api/refresh` | 是 | 无 | `200 { status }`；持锁 `409 REFRESH_IN_PROGRESS` |
 | GET、HEAD | `/sub/:token` | 否 | 无 | `200` YAML；`404` `Not found`；`503` `No nodes available` + `Retry-After: 600` |
+| GET、HEAD | `/s/:code` | 否 | 无 | 与 `/sub/:token` 完全一致（同一份缓存、同一 ETag）；短码不合 `^[A-Za-z0-9_-]{8}$` 时直接 `404` `Not found`，不查 KV |
 | 其他 `/api/*` | | | | `404 NOT_FOUND` JSON |
 | 其他路径 | | | | `env.ASSETS.fetch(request)` |
 
 `SourceInput` 校验顺序：数量 ≤ 50 → 每项 `name` 1 到 80 字符 → `kind` 合法 → remote 的 `url` 通过 `validatePublicHttpUrl` → manual 的 `manualText` ≤ 512 KiB 且 `parseSubscription` 得到 ≥1 节点 → `userAgent` 若存在 1 到 200 字符 → `nodeRenames` 逐项过滤（key 必须是 16 位小写十六进制，名称 trim 后 1 到 120 字符，最多 4000 条；无有效项时不落库）。错误消息格式：`第 <index+1> 个源：<原因>`。所有源的 `manualText` 之和同时受请求体 1 MiB 上限约束，超出时在读体阶段返回 413。
 
 `/sub/*` 的非 200 响应体一律为纯文本（`Not found`、`No nodes available`、`Internal error`），不使用 JSON 错误体；`/api/*` 的错误一律为 JSON 错误体。
+
+**订阅短链（`shortCode`）**：每条订阅最多一条，`StoredSubscription.shortCode` 为 8 字符 base64url（6 随机字节，48 bit 熵），索引 `short:<code>` -> `subscriptionId`。`findSubscriptionByShortCode` 命中索引后还要与订阅记录里的 `shortCode` 双条件对齐，残留索引不会复活已撤销的短链。短码不加密（是随机生成的公开定位符，不是秘密材料）。撤销（`DELETE` 短链）、删除订阅、轮换 token 都会清掉短码与索引；轮换连带撤销是刻意的，否则「旧链接立即失效」对已泄露的短链不成立。`/s/*` 必须列入 `wrangler.jsonc` 的 `assets.run_worker_first`，否则会被 SPA 回退成 `index.html`。
 
 `app.version` 取 `worker/package.json` 的 `version`，通过 Vite/wrangler 构建时的 `import pkg from "../package.json"` 读取（`resolveJsonModule` 已在基线 tsconfig 开启）。
 

@@ -510,6 +510,165 @@ describe("router /sub", () => {
   });
 });
 
+describe("router short links", () => {
+  async function createSubscription(h: Harness) {
+    await h.store.saveSources([{ name: "m", kind: "manual", manualText: SS }]);
+    const { dto, token } = await h.store.createSubscription({ name: "myprofile", sourceIds: [] });
+    return { dto, token };
+  }
+
+  async function createShortLink(h: Harness, id: string): Promise<string> {
+    const response = await route(
+      apiRequest(`/api/subscriptions/${id}/short-link`, { method: "POST" }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    const { subscription } = (await response.json()) as { subscription: { shortLink: string } };
+    return subscription.shortLink;
+  }
+
+  function shortCodeOf(shortLink: string): string {
+    return shortLink.split("/s/").pop() as string;
+  }
+
+  it("creates a short link, is idempotent, and exposes it in /api/state", async () => {
+    const h = createHarness();
+    const { dto } = await createSubscription(h);
+
+    const shortLink = await createShortLink(h, dto.id);
+    expect(shortLink).toMatch(/^https:\/\/worker\.example\.com\/s\/[A-Za-z0-9_-]{8}$/);
+    // 幂等：重复生成返回同一个短码
+    await expect(createShortLink(h, dto.id)).resolves.toBe(shortLink);
+
+    const state = await route(apiRequest("/api/state"), h.env, h.deps);
+    const body = (await state.json()) as { subscriptions: Array<{ shortLink?: string }> };
+    expect(body.subscriptions[0]?.shortLink).toBe(shortLink);
+  });
+
+  it("serves the same YAML, ETag and headers as /sub/<token>", async () => {
+    const h = createHarness();
+    const { dto, token } = await createSubscription(h);
+    const code = shortCodeOf(await createShortLink(h, dto.id));
+
+    const viaToken = await route(
+      new Request(`https://worker.example.com/sub/${token}`),
+      h.env,
+      h.deps
+    );
+    const viaShort = await route(
+      new Request(`https://worker.example.com/s/${code}`),
+      h.env,
+      h.deps
+    );
+
+    expect(viaShort.status).toBe(200);
+    expect(viaShort.headers.get("content-type")).toContain("text/yaml");
+    expect(viaShort.headers.get("cache-control")).toBe("private, no-cache");
+    expect(viaShort.headers.get("x-robots-tag")).toBe("noindex");
+    expect(viaShort.headers.get("content-disposition")).toContain("myprofile");
+    // 两条链接指向同一份缓存，ETag 必须一致，客户端才拿得到 304
+    expect(viaShort.headers.get("etag")).toBe(viaToken.headers.get("etag"));
+
+    const parsed = yaml.load(await viaShort.text()) as { proxies: unknown[] };
+    expect(parsed.proxies).toHaveLength(1);
+  });
+
+  it("returns 304 for a matching If-None-Match and an empty body for HEAD", async () => {
+    const h = createHarness();
+    const { dto } = await createSubscription(h);
+    const code = shortCodeOf(await createShortLink(h, dto.id));
+
+    const first = await route(new Request(`https://worker.example.com/s/${code}`), h.env, h.deps);
+    const etag = first.headers.get("etag") as string;
+    const second = await route(
+      new Request(`https://worker.example.com/s/${code}`, { headers: { "if-none-match": etag } }),
+      h.env,
+      h.deps
+    );
+    expect(second.status).toBe(304);
+    expect(await second.text()).toBe("");
+
+    const head = await route(
+      new Request(`https://worker.example.com/s/${code}`, { method: "HEAD" }),
+      h.env,
+      h.deps
+    );
+    expect(head.status).toBe(200);
+    expect(await head.text()).toBe("");
+  });
+
+  it("returns 404 Not found for unknown or malformed codes", async () => {
+    const h = createHarness();
+    // 长度不足、长度超限与含非法字符：都必须在查 KV 之前被拒
+    for (const bad of ["short", "abcdefghi", "abc.def1"]) {
+      const response = await route(
+        new Request(`https://worker.example.com/s/${bad}`),
+        h.env,
+        h.deps
+      );
+      expect(response.status).toBe(404);
+      expect(await response.text()).toBe("Not found");
+    }
+  });
+
+  it("stops serving the short link after revoking but keeps /sub/<token> alive", async () => {
+    const h = createHarness();
+    const { dto, token } = await createSubscription(h);
+    const code = shortCodeOf(await createShortLink(h, dto.id));
+
+    const revoked = await route(
+      apiRequest(`/api/subscriptions/${dto.id}/short-link`, { method: "DELETE" }),
+      h.env,
+      h.deps
+    );
+    expect(revoked.status).toBe(200);
+    const body = (await revoked.json()) as { subscription: { shortLink?: string } };
+    expect(body.subscription.shortLink).toBeUndefined();
+
+    const gone = await route(new Request(`https://worker.example.com/s/${code}`), h.env, h.deps);
+    expect(gone.status).toBe(404);
+
+    const stillWorks = await route(
+      new Request(`https://worker.example.com/sub/${token}`),
+      h.env,
+      h.deps
+    );
+    expect(stillWorks.status).toBe(200);
+  });
+
+  it("drops the short link when the token is rotated", async () => {
+    const h = createHarness();
+    const { dto } = await createSubscription(h);
+    const code = shortCodeOf(await createShortLink(h, dto.id));
+
+    const rotated = await route(
+      apiRequest(`/api/subscriptions/${dto.id}/rotate`, { method: "POST" }),
+      h.env,
+      h.deps
+    );
+    expect(rotated.status).toBe(200);
+    const body = (await rotated.json()) as { subscription: { shortLink?: string } };
+    expect(body.subscription.shortLink).toBeUndefined();
+
+    const gone = await route(new Request(`https://worker.example.com/s/${code}`), h.env, h.deps);
+    expect(gone.status).toBe(404);
+  });
+
+  it("returns 404 JSON for an unknown subscription", async () => {
+    const h = createHarness();
+    for (const method of ["POST", "DELETE"]) {
+      const response = await route(
+        apiRequest("/api/subscriptions/missing/short-link", { method }),
+        h.env,
+        h.deps
+      );
+      expect(response.status).toBe(404);
+      expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
+    }
+  });
+});
+
 describe("router fallthrough", () => {
   it("returns 404 JSON for an unknown /api route", async () => {
     const h = createHarness();

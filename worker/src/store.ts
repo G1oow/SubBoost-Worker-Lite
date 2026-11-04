@@ -1,5 +1,5 @@
 import { buildDefaultUserConfig } from "@subboost/core/config/defaults";
-import { decryptString, encryptString, generateToken, sha256Hex } from "./crypto";
+import { decryptString, encryptString, generateShortCode, generateToken, sha256Hex } from "./crypto";
 import { ApiError } from "./errors";
 import {
   KEY_CONFIG,
@@ -7,6 +7,7 @@ import {
   KEY_SOURCES,
   KEY_STATUS,
   KEY_SUBS,
+  SHORT_CODE_PATTERN,
   TTL_CACHE,
   TTL_LOCK,
   TTL_SNAPSHOT,
@@ -23,6 +24,14 @@ import {
 
 export function tokenIndexKey(tokenHash: string): string {
   return `tokidx:${tokenHash}`;
+}
+
+/**
+ * 短链索引：`short:{code}` -> subscriptionId。
+ * 命中后再回订阅记录按 shortCode 双条件校验，避免残留索引指向已撤销的短链。
+ */
+export function shortCodeKey(code: string): string {
+  return `short:${code}`;
 }
 
 export function snapshotKey(sourceId: string): string {
@@ -194,6 +203,8 @@ export function createStore(env: Env) {
       name: stored.name,
       sourceIds: stored.sourceIds,
       link: `${origin}/sub/${token}`,
+      // 创建订阅时 origin 为空，此时不产出半截短链
+      ...(stored.shortCode && origin ? { shortLink: `${origin}/s/${stored.shortCode}` } : {}),
       createdAt: stored.createdAt,
       updatedAt: stored.updatedAt,
     };
@@ -240,9 +251,14 @@ export function createStore(env: Env) {
     await writeSubscriptions(subs.filter((item) => item.id !== id));
     await kv.delete(tokenIndexKey(target.tokenHash));
     await kv.delete(cacheKey(id));
+    if (target.shortCode) await kv.delete(shortCodeKey(target.shortCode));
     return true;
   }
 
+  /**
+   * 轮换 token。短链同样是一条访问凭据，轮换时一并撤销，
+   * 否则「旧链接立即失效」对已经泄露的短链不成立。
+   */
   async function rotateSubscriptionToken(
     id: string,
     origin: string
@@ -253,19 +269,22 @@ export function createStore(env: Env) {
     if (index < 0) return null;
 
     const previous = subs[index];
+    const { shortCode } = previous;
     const token = generateToken();
     const tokenHash = await sha256Hex(token);
-    const updated: StoredSubscription = {
+    const rotated: StoredSubscription = {
       ...previous,
       tokenHash,
       tokenEnc: await encryptString(token, secret),
       updatedAt: new Date().toISOString(),
     };
-    subs[index] = updated;
+    delete rotated.shortCode;
+    subs[index] = rotated;
     await writeSubscriptions(subs);
     await kv.delete(tokenIndexKey(previous.tokenHash));
-    await kv.put(tokenIndexKey(tokenHash), updated.id);
-    return toSubscriptionDto(updated, origin);
+    await kv.put(tokenIndexKey(tokenHash), rotated.id);
+    if (shortCode) await kv.delete(shortCodeKey(shortCode));
+    return toSubscriptionDto(rotated, origin);
   }
 
   /**
@@ -301,6 +320,74 @@ export function createStore(env: Env) {
     const subs = await listStoredSubscriptions();
     const target = subs.find((item) => item.id === id && item.tokenHash === tokenHash);
     return target ?? null;
+  }
+
+  /**
+   * 为订阅生成短链。同一订阅最多保留一条，重复调用幂等返回现有短码。
+   * 短码是 8 字符 base64url（48 bit 熵），索引 `short:{code}` -> subscriptionId。
+   */
+  async function createShortLink(id: string, origin: string): Promise<SubscriptionDto | null> {
+    requireEncryptionKey(env);
+    const subs = await listStoredSubscriptions();
+    const index = subs.findIndex((item) => item.id === id);
+    if (index < 0) return null;
+
+    const previous = subs[index];
+    if (previous.shortCode) return toSubscriptionDto(previous, origin);
+
+    let code = "";
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      const candidate = generateShortCode();
+      if (await kv.get(shortCodeKey(candidate), "text")) continue;
+      code = candidate;
+      break;
+    }
+    if (!code) throw new ApiError(500, "INTERNAL_ERROR", "短链生成失败，请重试");
+
+    // 先占索引再写订阅记录：中途失败最多留下一条指向不存在订阅的索引，
+    // findSubscriptionByShortCode 的双条件校验会把它当成未命中。
+    await kv.put(shortCodeKey(code), previous.id);
+    const updated: StoredSubscription = {
+      ...previous,
+      shortCode: code,
+      updatedAt: new Date().toISOString(),
+    };
+    subs[index] = updated;
+    await writeSubscriptions(subs);
+    return toSubscriptionDto(updated, origin);
+  }
+
+  /** 撤销短链：清订阅记录里的短码并删索引。本来没有短链时幂等返回当前状态。 */
+  async function revokeShortLink(id: string, origin: string): Promise<SubscriptionDto | null> {
+    const subs = await listStoredSubscriptions();
+    const index = subs.findIndex((item) => item.id === id);
+    if (index < 0) return null;
+
+    const previous = subs[index];
+    if (!previous.shortCode) return toSubscriptionDto(previous, origin);
+
+    const { shortCode } = previous;
+    const updated: StoredSubscription = {
+      ...previous,
+      updatedAt: new Date().toISOString(),
+    };
+    delete updated.shortCode;
+    subs[index] = updated;
+    await writeSubscriptions(subs);
+    await kv.delete(shortCodeKey(shortCode));
+    return toSubscriptionDto(updated, origin);
+  }
+
+  /**
+   * 按短码解析订阅。索引命中后还要与订阅记录里的 shortCode 对齐，
+   * 这样残留索引（例如撤销时的写失败）不会把已经撤销的短链复活。
+   */
+  async function findSubscriptionByShortCode(code: string): Promise<StoredSubscription | null> {
+    if (!SHORT_CODE_PATTERN.test(code)) return null;
+    const id = await kv.get(shortCodeKey(code), "text");
+    if (!id) return null;
+    const subs = await listStoredSubscriptions();
+    return subs.find((item) => item.id === id && item.shortCode === code) ?? null;
   }
 
   async function getConfig(): Promise<{ config: Record<string, unknown>; isDefault: boolean }> {
@@ -411,6 +498,9 @@ export function createStore(env: Env) {
     updateSubscription,
     rotateSubscriptionToken,
     findSubscriptionByToken,
+    createShortLink,
+    revokeShortLink,
+    findSubscriptionByShortCode,
     getConfig,
     putConfig,
     resetConfig,

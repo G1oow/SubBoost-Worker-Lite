@@ -34,6 +34,13 @@ export const ON_DEMAND_SOFT_DEADLINE_MS = 20 * 1000;
 /** 按需生成时的抓取并发上限，与 Workers 同时 6 连接的限制对齐 */
 export const ON_DEMAND_CONCURRENCY = 6;
 
+/**
+ * 短链码：8 字符 base64url（`[A-Za-z0-9_-]`），作为 `/s/<code>` 的路径段。
+ * 每订阅最多一条，与 token 相互独立：撤销/轮换一边不影响另一边的其他语义。
+ */
+export const SHORT_CODE_LENGTH = 8;
+export const SHORT_CODE_PATTERN = /^[A-Za-z0-9_-]{8}$/;
+
 export type SourceKind = "remote" | "manual";
 
 export type SourceInput = {
@@ -93,6 +100,8 @@ export type StoredSubscription = {
   sourceIds: string[];
   createdAt: string;
   updatedAt: string;
+  // 已生成的短链码（不加密：随机生成的公开定位符，不是秘密材料）
+  shortCode?: string;
 };
 
 export type SubscriptionDto = {
@@ -100,6 +109,8 @@ export type SubscriptionDto = {
   name: string;
   sourceIds: string[];
   link: string;
+  // 已生成短链时才有值：`${origin}/s/${shortCode}`
+  shortLink?: string;
   createdAt: string;
   updatedAt: string;
 };

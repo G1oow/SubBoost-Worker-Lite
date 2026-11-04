@@ -28,6 +28,7 @@
 - **Encrypted at rest**: stored payloads such as subscription tokens are encrypted with AES-256-GCM, using a key derived from `ENCRYPTION_KEY` through HKDF-SHA256.
 - **Hardened upstream fetching**: scheme and credential validation, private network range blocking, and per-hop redirect checks capped at 3 hops.
 - **Nothing cached downstream**: API responses send `cache-control: no-store`, subscription responses are marked `private, no-cache` and advertise the refresh interval, error messages are sanitized, and subscription tokens can be rotated at any time.
+- **Optional short link**: each subscription can get an 8-character alias (`/s/<code>`) that serves exactly the same profile as the full link, which is handy to copy by hand or paste where space is tight. Short links can be revoked at any time and are dropped when a token is rotated.
 
 ## Architecture
 

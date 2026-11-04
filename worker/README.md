@@ -131,8 +131,17 @@ curl -s -H "Authorization: Bearer $T" $B/api/state      # 200，返回 app / sou
 然后在浏览器打开 `B`，输入 `ADMIN_TOKEN` 进入管理页：添加一个源，创建订阅，复制链接，再确认订阅输出：
 
 ```bash
-curl -s -D - "<订阅链接>" | head -20   # 200，头含 profile-update-interval: 12 与 cache-control: no-store，体为 YAML
+curl -s -D - "$B/sub/<订阅 token>" | head -20   # 200，头含 profile-update-interval: 12 与 cache-control: private, no-cache，体为 YAML
 ```
+
+在「分享订阅」弹窗点「生成短链」后，短链与原链接输出同一份 YAML，可再用短码复核一次：
+
+```bash
+curl -s -o /dev/null -w "%{http_code}\n" "$B/s/<短链码>"   # 200
+curl -s -D - "$B/s/<短链码>" | head -20                    # 头与上面一致，etag 相同
+```
+
+撤销短链后同一条 `curl` 应返回 404 `Not found`，而原链接仍为 200。
 
 以下两项本地无法验证，部署后必须复核：
 
@@ -151,6 +160,7 @@ curl -s -D - "<订阅链接>" | head -20   # 200，头含 profile-update-interva
 - 管理页提示 token 无效：输入值与 `ADMIN_TOKEN` 不一致，重新执行 `npx wrangler secret put ADMIN_TOKEN` 后再试。
 - 订阅返回 503 `No nodes available`：所有源抓取失败或尚未刷新，先在管理页点「立即刷新」并查看状态面板的错误信息。
 - 订阅生成慢或超限：Free 计划 CPU 限制所致，升级 Paid 或等待 Cron 预生成缓存。
+- 短链返回 404：短链被撤销过，或订阅 token 已轮换（轮换会一并撤销短链）。到「分享订阅」弹窗重新生成即可，原链接始终不受影响。
 
 ## 从 fork 仓库部署（Cloudflare 一键部署按钮 / Workers Builds）
 
