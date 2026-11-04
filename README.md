@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.8.1-green.svg" alt="Version 0.8.1">
+  <img src="https://img.shields.io/badge/version-0.9.0-green.svg" alt="Version 0.9.0">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="许可证 AGPL-3.0-only"></a>
 </p>
 <!-- markdownlint-enable MD033 MD041 -->

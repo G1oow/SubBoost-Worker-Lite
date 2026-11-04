@@ -257,6 +257,72 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 6. 尊重 `prefers-reduced-motion`，全局降级规则已存在，不要移除。
 7. 如果面板背景本身不透明，不要再叠 `backdrop-blur`——它没有视觉效果却要每帧
    对整块背景做模糊，是开合卡顿的常见原因。
+8. **常驻覆盖层（`fixed` / `sticky` 的页头、工具条、底栏）同样不许用位移**：
+   别用 `translate` / `transform` / `transition-[…translate…]` 做"滑入滑出"，也别把
+   半透明的常驻层留在 DOM 里等它淡入。它们会被提升为合成层，滚动期间按非整数设备
+   像素平移，压在下方的正文一起被插值采样 —— 表现就是"滚动时顶栏文字发虚、下方卡片
+   发虚"。常驻层只在需要时挂载，出场用只驱动 `opacity` 的关键帧（如 `animate-fade-in`），
+   表面用不透明 `bg-header`。守护见
+   `worker/ui/src/components/pinned-header.test.ts` 的 `FORBIDDEN_MOTION_CLASSES`。
+
+#### 已知陷阱：滚动时"文字发虚、卡片发虚"
+
+本仓库被这一类问题反复咬过，排错时按下面这条链路判断，不要凭感觉调 CSS。
+
+**症状**：动画进行中或页面滚动过程中，文字边缘发毛、卡片阴影变淡，整体像蒙了一层雾；
+停下（动画结束 / 滚动停止）又突然恢复锐利。用户通常只会说"发虚""模糊""阴影没渲染"。
+
+**机制**（Chrome 系如此，Firefox / Safari 同理）：
+
+1. 元素只要有非 `none` 的 `transform` / `translate` / `scale`（哪怕值就是 0），
+   或带 `will-change` / `filter` / `backdrop-filter`，就会被提升为**独立合成层**。
+2. 该层的内容只**栅格化一次**成纹理，之后由合成线程按矩阵平移。滚动与动画中的位移
+   常常落在**非整数设备像素**上，整块纹理被双线性插值采样：字形边缘被抹平 → 文字发虚；
+   卡片阴影的柔和过渡带被抹平 → 看起来"阴影根本没渲染"。
+3. 最严重的一种：常驻的 `fixed` / `sticky` 层（页头、工具条、底栏）带变换时会**长期**
+   压在滚动内容上，与之重叠的正文被 squash 进同一个合成层，于是**滚动期间整屏一起
+   被重采样**——顶栏文字和下面的卡片同时发虚，停下才清晰。
+
+**判定**（比肉眼可靠）。控制台里直接列会被提升为合成层的节点：
+
+```js
+[...document.querySelectorAll("*")].filter((el) => {
+  const s = getComputedStyle(el);
+  return s.transform !== "none" || s.translate !== "none" || s.scale !== "none"
+    || s.willChange !== "auto" || s.filter !== "none" || s.backdropFilter !== "none";
+});
+```
+
+再对照 DevTools → More tools → Layers：滚动期间被 squashed、或长期存在的合成层就是元凶。
+
+**正确写法**：
+
+- 承载文字的元素，入场/出场**只驱动 `opacity`**，关键帧与过渡一视同仁。
+- 常驻覆盖层**只在需要时挂载**，不要留一个 `opacity-0` 还带位移的空壳在 DOM 里等淡入。
+- 覆盖层表面用不透明主题令牌（`bg-header` / `bg-surface`），不靠背景模糊造质感。
+- 纯色块装饰（图标、占比条、进度条）没有可读文字，仍可用 `scale`，但不要让它包住文字。
+- hover 位移用独立的 `translate` 属性（见 `.hover-lift`），且不要把 `box-shadow` 放进过渡。
+
+**反例 / 正例**：
+
+```tsx
+// ❌ 常驻 + 位移 + 过渡：隐藏态也带 translate，整页在滚动期间被重采样
+<div className={cn("fixed inset-x-0 top-0 transition-[opacity,translate]",
+  pinned ? "translate-y-0 opacity-100" : "-translate-y-1 opacity-0")} />
+
+// ✅ 需要时才挂载；出场只跑只驱动 opacity 的关键帧，条上没有任何变换
+{pinned ? <div className="fixed inset-x-0 top-0 animate-fade-in bg-header" /> : null}
+```
+
+**守护断言**（改这三处时不要顺手放宽）：
+
+- `packages/ui/src/styles/motion.test.ts`：关键帧层面——不得出现 `transform` / `translate` /
+  `scale`，且必须驱动 `opacity`；
+- `worker/ui/src/components/pinned-header.test.ts`：常驻层层面——`FORBIDDEN_MOTION_CLASSES`
+  覆盖 `translate` / `transform` / `scale` / `transition`；
+- `worker/ui/src/components/mobile-layout.test.ts`：首帧不得渲染常驻固定层。
+
+**历史**：`c833f87`（入场关键帧去位移、页头不再常驻）与 `0.9.0` 的吸顶工具条（覆盖层去位移）。
 
 ### 测试
 
