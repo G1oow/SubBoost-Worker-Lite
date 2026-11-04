@@ -276,6 +276,8 @@ describe("PATCH /api/subscriptions/:id", () => {
     expect(response.status).toBe(400);
     const body = (await response.json()) as { error: string };
     expect(body.error).toContain("ghost");
+    // 只给一串 id 用户无从下手：错误里要说清「源可能已被删除」并提示刷新后重选
+    expect(body.error).toContain("源可能已被删除");
   });
 
   it("validates the new name and 404s for missing subscriptions", async () => {
