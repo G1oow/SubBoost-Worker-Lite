@@ -38,6 +38,10 @@ For parser, template, subscription output, or deployment changes, also run the f
 
 The app has a dark and a light theme with the same layout. Take colors from the theme tokens in `packages/ui/src/styles/theme.css` (for example `text-fg-60`, `bg-ink/5`, `border-ink/10`, `bg-surface`) instead of dark-only classes such as `text-white/60` or `bg-white/5`; `npm run lint` rejects the latter. Check UI changes in both themes.
 
+## Frontend
+
+UI work must follow [docs/frontend-guidelines.md](./frontend-guidelines.md): layer ownership, theme tokens, component wrappers, responsive rules, motion constraints, and the "known frontend pitfalls" table that pins every bug this project has already hit (blurry text while scrolling, page shifting when a dialog opens, janky page switches, missing light-theme tokens) to the test that guards it.
+
 ## Documentation
 
 - Keep `README.md` (Chinese, single file) in sync with the actual repo layout and commands.

@@ -201,6 +201,10 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 
 ## 代码约定
 
+前端（`worker/ui`、`packages/ui`）的完整规范见 [`docs/frontend-guidelines.md`](docs/frontend-guidelines.md)：
+分层归属、样式令牌、组件用法、响应式、动效约束与「已知前端坑」防回归清单都在那里。
+下面是必须先记住、且被脚本/测试强校验的硬约束；两处冲突时以该文档 + 守护测试为准。
+
 ### 通用
 
 - 延续现有架构与风格，不做无关重构；改动聚焦在任务范围内。
