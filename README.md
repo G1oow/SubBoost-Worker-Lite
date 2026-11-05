@@ -250,6 +250,7 @@ npm run worker:dev               # http://127.0.0.1:8787
 | 实施方案 | Workers-only 形态的设计取舍 | [docs/implementation/cf-worker-lite-plan.md](./docs/implementation/cf-worker-lite-plan.md) |
 | 构建手册 | 移植过程中处理的冲突与验收记录 | [docs/implementation/cf-worker-lite-build.md](./docs/implementation/cf-worker-lite-build.md) |
 | 贡献指南 | Issue / PR 规则、本地校验、UI 颜色约定 | [docs/CONTRIBUTING.md](./docs/CONTRIBUTING.md) |
+| 前端规范 | 分层归属、样式令牌、组件用法、响应式、动效、已知前端坑与守护测试 | [docs/frontend-guidelines.md](./docs/frontend-guidelines.md) |
 | 第三方声明 | 依赖与生态归属说明 | [docs/THIRD_PARTY_NOTICES.md](./docs/THIRD_PARTY_NOTICES.md) |
 
 ## 致谢
