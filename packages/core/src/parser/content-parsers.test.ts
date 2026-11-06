@@ -166,6 +166,18 @@ describe("content parser registry helpers", () => {
     expect(result.errors[0]).toContain("解析失败: ftp://not-supported");
   });
 
+  it("masks credentials in per-segment parse errors", () => {
+    const uuid = "11111111-1111-4111-8111-111111111111";
+    const result = parseLineBasedSubscriptionContent(
+      `anytls://${uuid}@[2001:db8::1]:443?security=reality&pbk=${"A".repeat(43)}`
+    );
+
+    expect(result.nodes).toHaveLength(0);
+    expect(result.errors[0]).toContain("AnyTLS 不支持 Reality 参数");
+    expect(result.errors[0]).toContain("***@");
+    expect(result.errors[0]).not.toContain(uuid);
+  });
+
   it("parses config lines and platform proxy lines", () => {
     const result = parseConfigLineSubscriptionContent(`
 ; comment

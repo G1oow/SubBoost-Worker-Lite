@@ -33,7 +33,14 @@ describe("additional protocol parser contracts", () => {
     expect(() => parseAnyTLS("http://bad")).toThrow("无效的 AnyTLS 链接");
     expect(() => parseAnyTLS("anytls://secret@:443")).toThrow("AnyTLS 配置缺少必要字段");
     expect(() => parseAnyTLS("anytls://secret@anytls.example.com:70000")).toThrow("无效的端口号");
-    expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?security=reality")).toThrow("AnyTLS 不支持 security=reality");
+    // 只有 security=reality 标记、没有 Reality 材料 → 按普通 TLS AnyTLS 保留
+    expect(parseAnyTLS("anytls://secret@anytls.example.com:443?security=reality")).toMatchObject({
+      type: "anytls",
+      server: "anytls.example.com",
+      port: 443,
+      password: "secret",
+      sni: "anytls.example.com",
+    });
     expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?type=ws")).toThrow("AnyTLS 不支持 type=ws");
     expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?path=/ws")).toThrow("AnyTLS 不支持传输层参数");
   });
@@ -88,7 +95,13 @@ describe("additional protocol parser contracts", () => {
       "AnyTLS 不支持 headerType=http"
     );
     expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?pbk=public")).toThrow(
-      "AnyTLS 不支持 Reality 参数"
+      "AnyTLS 不支持 Reality 参数: pbk"
+    );
+    expect(() =>
+      parseAnyTLS(`anytls://secret@anytls.example.com:443?security=reality&pbk=${"A".repeat(43)}`)
+    ).toThrow("Mihomo 不支持 anytls+reality");
+    expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?security=reality&sid=abcd")).toThrow(
+      "AnyTLS 不支持 Reality 参数: sid"
     );
     expect(() => parseAnyTLS("anytls://secret@anytls.example.com:443?serviceName=svc")).toThrow(
       "AnyTLS 不支持传输层参数"

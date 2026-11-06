@@ -1,6 +1,7 @@
 import { parseConfigLine } from "../config-line-parser";
 import type { ParseResult } from "@subboost/core/types/node";
 import { parsePlatformProxyLine } from "./parse-platform-proxy-line";
+import { redactSegmentCredentials } from "../redact";
 
 function buildParseResult(nodes: ParseResult["nodes"], errors: string[]): ParseResult {
   return {
@@ -13,7 +14,7 @@ function buildParseResult(nodes: ParseResult["nodes"], errors: string[]): ParseR
 
 function formatParseSegmentError(segment: string, error: unknown): string {
   const reason = error instanceof Error ? error.message : "未知错误";
-  return `解析失败: ${segment.substring(0, 80)}... - ${reason}`;
+  return `解析失败: ${redactSegmentCredentials(segment).substring(0, 80)}... - ${reason}`;
 }
 
 function buildSectionMap(content: string): Map<string, string[]> {

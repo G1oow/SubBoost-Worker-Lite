@@ -284,9 +284,15 @@ Direct Policy = direct
         config: "Y29uZmln",
       },
     });
-    expect(() => mustParseNode("anytls://secret@anytls.example.com:443?security=reality#Bad")).toThrow(
-      "AnyTLS 不支持 security=reality / reality-opts（Mihomo 不支持）"
-    );
+    // 只有 security=reality 标记、没有 Reality 材料 → 按普通 TLS AnyTLS 保留
+    expect(mustParseNode("anytls://secret@anytls.example.com:443?security=reality#Bad")).toMatchObject({
+      name: "Bad",
+      type: "anytls",
+      password: "secret",
+    });
+    expect(() =>
+      mustParseNode(`anytls://secret@anytls.example.com:443?security=reality&pbk=${"A".repeat(43)}#Bad`)
+    ).toThrow("AnyTLS 不支持 Reality 参数");
   });
 
   it("parses WireGuard address and peer fields", () => {
