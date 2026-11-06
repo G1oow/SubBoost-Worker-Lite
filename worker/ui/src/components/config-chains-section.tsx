@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, ChevronDown, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Plus, Trash2 } from "lucide-react";
 import { Badge, type BadgeProps } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -13,6 +13,8 @@ import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@subboost/ui/components/ui/select";
 import { Switch } from "@subboost/ui/components/ui/switch";
 import { cn } from "@subboost/ui/lib/utils";
+import { DisclosureChevron } from "@subboost/ui/motion/disclosure-chevron";
+import { MotionReveal } from "@subboost/ui/motion/motion-list";
 import type { ChainSelector, ProxyChain, ProxyGroupGroupType } from "@subboost/core/types/config";
 import { collectReservedGroupNames } from "@subboost/core/generator/index";
 import { normalizeRuleModelFromConfig } from "@subboost/core/rules/rule-model";
@@ -38,6 +40,7 @@ import {
   type ConfigRecord,
 } from "../lib/chain-editor";
 import type { ConfigPreviewChain, SourceDto } from "../lib/types";
+import { prefersReducedMotion } from "../lib/view-transition";
 
 export type ConfigChainsSectionProps = {
   config: ConfigRecord;
@@ -57,10 +60,16 @@ const TONE_BADGE: Record<ChainStatusTone, BadgeProps["variant"]> = {
 
 /** 一个源都不选时的语义提示：两句都带「全部已启用源」，避免用户以为会匹配不到节点 */
 const SELECTOR_ALL_SOURCES_HINT = "一个源都不选 = 全部已启用源";
+/** 与规则列表同一个时长：新建或挪动后高亮那一条，长列表里不至于找不到它去了哪 */
+const HIGHLIGHT_MS = 1600;
 
 function chainDisplayName(chain: ProxyChain, index: number): string {
   const name = chain.name.trim();
   return name || `第 ${index + 1} 条链`;
+}
+
+function chainDomId(id: string): string {
+  return `chain-${id}`;
 }
 
 export function ConfigChainsSection({ config, sources, previewChains, onChange }: ConfigChainsSectionProps) {
@@ -95,11 +104,49 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
    */
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
   const toggleExpanded = (id: string) => setExpandedId((current) => (current === id ? null : id));
+  const [highlightId, setHighlightId] = React.useState<string | null>(null);
+  /** 挪动后把焦点放回同一张卡片的同一个按钮：React 重排时会把该节点摘下再插回，焦点掉到 body */
+  const [focusTarget, setFocusTarget] = React.useState<{ id: string; label: string } | null>(null);
+
+  React.useEffect(() => {
+    if (!highlightId) return;
+    document.getElementById(chainDomId(highlightId))?.scrollIntoView({
+      block: "nearest",
+      behavior: prefersReducedMotion() ? "auto" : "smooth",
+    });
+    const timer = setTimeout(() => setHighlightId(null), HIGHLIGHT_MS);
+    return () => clearTimeout(timer);
+  }, [highlightId]);
+
+  React.useEffect(() => {
+    if (!focusTarget) return;
+    setFocusTarget(null);
+    // 挪到头/尾后原按钮会变成 disabled：Chrome 会让它失焦，这种情况同样要接管焦点
+    const active = document.activeElement;
+    if (active && active !== document.body && !(active instanceof HTMLButtonElement && active.disabled)) return;
+    const buttons = Array.from(
+      document.getElementById(chainDomId(focusTarget.id))?.querySelectorAll<HTMLButtonElement>("button") ?? []
+    ).filter((button) => !button.disabled);
+    const byLabel = (label: string) => buttons.find((button) => button.getAttribute("aria-label") === label);
+    // 到了头/尾就交给反方向的按钮，键盘用户还能接着挪回来
+    const opposite = focusTarget.label.startsWith("上移")
+      ? focusTarget.label.replace("上移", "下移")
+      : focusTarget.label.replace("下移", "上移");
+    (byLabel(focusTarget.label) ?? byLabel(opposite) ?? buttons[0])?.focus({ preventScroll: true });
+  }, [focusTarget]);
 
   const handleCreate = () => {
     const created = createChain(chains);
     applyChains([...chains, created]);
     setExpandedId(created.id);
+    setHighlightId(created.id);
+  };
+
+  const handleMove = (chain: ProxyChain, index: number, delta: -1 | 1) => {
+    applyChains(moveChain(chains, index, delta));
+    setHighlightId(chain.id);
+    // 未命名的链用序号兜底显示名，挪动后序号跟着变，所以按新位置取按钮名
+    setFocusTarget({ id: chain.id, label: `${delta < 0 ? "上移" : "下移"} ${chainDisplayName(chain, index + delta)}` });
   };
 
   const handleDelete = async (chain: ProxyChain, index: number) => {
@@ -125,9 +172,8 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
             <p className="text-xs leading-relaxed text-fg-45">
               {[
                 "严格两跳：前置 → 落地。",
-                "每条启用的链生成两个组：出口组（链名，成员是落地节点）与前置组（链名 + 后缀，成员是前置节点），",
+                "每条启用的链生成出口组（链名，成员是落地节点）与前置组（链名 + 后缀，成员是前置节点），",
                 "落地节点只能经出口组到达。",
-                `当前共 ${chains.length} 条链。`,
               ].join("")}
             </p>
           </div>
@@ -140,31 +186,27 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
           {merged.length === 0 ? (
             <EmptyState>还没有链式代理，点击「新建链」创建第一条。</EmptyState>
           ) : (
-            <ol aria-label="链式代理" className="space-y-3">
+            <ol aria-label="链式代理" className="space-y-2">
               {merged.map(({ chain, preview }, index) => (
-                <li key={chain.id}>
-                  <ChainCard
-                    chain={chain}
-                    index={index}
-                    total={merged.length}
-                    validation={validateChain(chain, chains, reservedGroupNames)}
-                    preview={preview}
-                    enabledSources={enabledSources}
-                    sourceNames={sourceNames}
-                    expanded={expandedId === chain.id}
-                    onToggleExpanded={() => toggleExpanded(chain.id)}
-                    onPatch={(patch) => applyChains(patchChain(chains, chain.id, patch))}
-                    onPatchSelector={(side, patch) =>
-                      applyChains(patchChainSelector(chains, chain.id, side, patch))
-                    }
-                    onToggleSource={(side, sourceId) =>
-                      applyChains(toggleChainSource(chains, chain.id, side, sourceId))
-                    }
-                    onToggleEnabled={(enabled) => applyChains(toggleChain(chains, chain.id, enabled))}
-                    onMove={(delta) => applyChains(moveChain(chains, index, delta))}
-                    onDelete={() => void handleDelete(chain, index)}
-                  />
-                </li>
+                <ChainCard
+                  key={chain.id}
+                  chain={chain}
+                  index={index}
+                  total={merged.length}
+                  validation={validateChain(chain, chains, reservedGroupNames)}
+                  preview={preview}
+                  enabledSources={enabledSources}
+                  sourceNames={sourceNames}
+                  expanded={expandedId === chain.id}
+                  highlighted={highlightId === chain.id}
+                  onToggleExpanded={() => toggleExpanded(chain.id)}
+                  onPatch={(patch) => applyChains(patchChain(chains, chain.id, patch))}
+                  onPatchSelector={(side, patch) => applyChains(patchChainSelector(chains, chain.id, side, patch))}
+                  onToggleSource={(side, sourceId) => applyChains(toggleChainSource(chains, chain.id, side, sourceId))}
+                  onToggleEnabled={(enabled) => applyChains(toggleChain(chains, chain.id, enabled))}
+                  onMove={(delta) => handleMove(chain, index, delta)}
+                  onDelete={() => void handleDelete(chain, index)}
+                />
               ))}
             </ol>
           )}
@@ -215,6 +257,8 @@ type ChainCardProps = {
   sourceNames: Map<string, string>;
   /** 卡片的折叠状态由父级持有：新建或点摘要行时只展开它，收起其余 */
   expanded: boolean;
+  /** 刚新建或刚挪动过：短暂高亮描边 */
+  highlighted: boolean;
   onToggleExpanded: () => void;
   onPatch: (patch: Partial<ProxyChain>) => void;
   onPatchSelector: (side: ChainSelectorSide, patch: Partial<ChainSelector>) => void;
@@ -224,6 +268,13 @@ type ChainCardProps = {
   onDelete: () => void;
 };
 
+/**
+ * 一条链 = 一个列表项，外观与规则行同一套（rounded-xl 描边、窄屏操作换到第二行贴右）。
+ *
+ * 摘要行在展开与收起时保持同一个结构：链名输入框放进正文，而不是把摘要行替换成输入框，
+ * 否则每次开合摘要行高度都会跳一下。正文由 MotionReveal 按需挂载并做高度 + 透明度过渡，
+ * 与仪表板的源节点折叠是同一套动效。
+ */
 function ChainCard({
   chain,
   index,
@@ -233,6 +284,7 @@ function ChainCard({
   enabledSources,
   sourceNames,
   expanded,
+  highlighted,
   onToggleExpanded,
   onPatch,
   onPatchSelector,
@@ -265,38 +317,30 @@ function ChainCard({
   };
 
   return (
-    <Card className={cn("overflow-hidden", !enabled && "border-dashed")} data-chain-card={chain.id}>
-      <CardHeader className="flex flex-col gap-3 pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-        <div className="flex min-w-0 flex-1 items-start gap-3">
-          <span
-            className="mt-2 w-5 shrink-0 text-right font-mono text-xs tabular-nums text-fg-45"
-            aria-hidden="true"
-          >
+    <li
+      id={chainDomId(chain.id)}
+      data-chain-card={chain.id}
+      className={cn(
+        "rounded-xl border bg-surface transition-[border-color,background-color] duration-200",
+        expanded ? "border-card-border-hover" : "border-card-border hover:border-card-border-hover",
+        !enabled && "border-dashed",
+        highlighted && "border-primary-400/70 bg-primary-500/10"
+      )}
+    >
+      <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
+        <div
+          {...summaryProps}
+          className="-mx-1 flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        >
+          <span className="w-5 shrink-0 text-right font-mono text-xs tabular-nums text-fg-45" aria-hidden="true">
             {index + 1}
           </span>
-          {expanded ? (
-            <FormField label="链名" className="min-w-0 flex-1" error={validation.nameError}>
-              <Input
-                value={chain.name}
-                onChange={(event) => onPatch({ name: event.target.value })}
-                placeholder="例如：落地美国"
-                aria-invalid={validation.nameError !== null}
-              />
-            </FormField>
-          ) : (
-            <div
-              {...summaryProps}
-              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg text-sm font-medium text-fg transition-colors duration-200 hover:text-fg-80"
-            >
-              <span className="truncate">{name}</span>
-            </div>
-          )}
+          <span className={cn("min-w-0 truncate text-sm font-medium", enabled ? "text-fg" : "text-fg-60")}>
+            {name}
+          </span>
         </div>
         <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
-          <span className="mr-1 text-xs text-fg-45" aria-hidden="true">
-            启用
-          </span>
-          <Switch checked={enabled} onCheckedChange={onToggleEnabled} aria-label={`启用 ${name}`} />
+          <Switch checked={enabled} onCheckedChange={onToggleEnabled} aria-label={`启用 ${name}`} className="mr-1" />
           <IconButton
             label={`上移 ${name}`}
             variant="ghost"
@@ -315,12 +359,7 @@ function ChainCard({
           >
             <Icon icon={ArrowDown} />
           </IconButton>
-          <IconButton
-            label={`删除 ${name}`}
-            variant="ghost"
-            onClick={onDelete}
-            className="min-h-9 min-w-9"
-          >
+          <IconButton label={`删除 ${name}`} variant="ghost" onClick={onDelete} className="min-h-9 min-w-9">
             <Icon icon={Trash2} />
           </IconButton>
           <IconButton
@@ -331,23 +370,29 @@ function ChainCard({
             onClick={onToggleExpanded}
             className="min-h-9 min-w-9"
           >
-            <Icon icon={ChevronDown} className={cn("motion-safe:transition-transform motion-safe:duration-200", expanded && "rotate-180")} />
+            <DisclosureChevron open={expanded} />
           </IconButton>
         </div>
-      </CardHeader>
+      </div>
 
-      {/* 状态行常驻：收起的卡片也要能看出这条链为什么不生成 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs sm:px-6" role="status">
+      {/* 状态行常驻：收起的卡片也要能看出这条链为什么不生成；桌面端左侧与链名对齐 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-3 text-xs sm:pl-11" role="status">
         <Badge variant={TONE_BADGE[status.tone]}>{status.label}</Badge>
-        <span className="text-fg-45">{status.description}</span>
         {preview ? (
-          <span className="text-fg-60">
-            {`· 前置 ${preview.relayCount} 个节点 · 落地 ${preview.landingCount} 个节点`}
+          <span className="tabular-nums text-fg-60">
+            {`前置 ${preview.relayCount} 个节点 · 落地 ${preview.landingCount} 个节点`}
           </span>
         ) : null}
+        <span className="text-fg-45">{status.description}</span>
         {preview?.error ? (
           <InlineNote variant="plain" alert>
             {preview.error}
+          </InlineNote>
+        ) : null}
+        {/* 链名错误展开时显示在输入框下面；收起后挪到这里，不至于藏起来 */}
+        {!expanded && validation.nameError ? (
+          <InlineNote variant="plain" alert>
+            {validation.nameError}
           </InlineNote>
         ) : null}
         {validation.nameConflictError ? (
@@ -362,9 +407,17 @@ function ChainCard({
         ) : null}
       </div>
 
-      {/* 正文只在展开时挂载：收起不该只是视觉隐藏，DOM 里也不留三分栏 */}
-      {expanded ? (
-        <CardContent id={bodyId} aria-labelledby={headerId} className="space-y-3">
+      {/* 正文按需挂载：收起后 DOM 里不留三分栏与十几个输入框 */}
+      <MotionReveal open={expanded} id={bodyId}>
+        <div aria-labelledby={headerId} className="space-y-3 border-t border-ink/10 p-3">
+          <FormField label="链名" className="sm:max-w-sm" error={validation.nameError}>
+            <Input
+              value={chain.name}
+              onChange={(event) => onPatch({ name: event.target.value })}
+              placeholder="例如：落地美国"
+              aria-invalid={validation.nameError !== null}
+            />
+          </FormField>
           <div className="grid gap-3 lg:grid-cols-3">
             <SelectorPanel
               side="relay"
@@ -395,9 +448,9 @@ function ChainCard({
               onPatch={onPatch}
             />
           </div>
-        </CardContent>
-      ) : null}
-    </Card>
+        </div>
+      </MotionReveal>
+    </li>
   );
 }
 
@@ -453,6 +506,8 @@ function SelectorPanel({
                 aria-pressed={checked}
                 onClick={() => onToggleSource(source.id)}
               >
+                {/* 勾选态不只靠颜色区分；对勾用 iconPop 弹入，与复制成功等瞬时反馈同一套 */}
+                {checked ? <Icon icon={Check} className="animate-icon-pop" /> : null}
                 <span className="break-all">{source.name}</span>
               </Button>
             );

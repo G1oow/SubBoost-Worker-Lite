@@ -148,6 +148,10 @@ packages/ui/src/        可复用能力：业务无关
 - 不要用 `Button size="icon"` 代替 `IconButton`。
 - 链接里不嵌套按钮：用 `Button asChild`。
 - 异步按钮用 `LoadingButton`，它自动处理 `disabled` / `aria-busy` / 旋转图标与等待文案。
+- 按钮动效只走颜色：hover 150ms 渐变，按下瞬间切到 `--btn-*-bg-active` 按压底色。
+  **不用 `active:scale`**（带文字的按钮被提升为合成层，按下那一下文字发虚），
+  **不用 `transition-all`**（会把 hover 阴影纳入过渡）。列表里的可点行同理，hover 不做位移。
+  守护：`packages/ui/src/styles/motion.test.ts`「button press feedback」。
 
 ### 表单
 
@@ -172,15 +176,22 @@ packages/ui/src/        可复用能力：业务无关
 同构条目（链式代理、未来的规则组等）一张卡片内有大量字段时，默认展开会把页面拉成几屏，
 必须做成可折叠。约定如下：
 
-- **正文按需挂载**，不用 `hidden` / 高度动画：收起时 DOM 里不留三分栏、不留十几个输入框。
+- **正文按需挂载**，不用 `hidden`：收起时 DOM 里不留三分栏、不留十几个输入框。
+  统一用 `MotionReveal`（`@subboost/ui/motion/motion-list`）包住正文：它只在展开时挂载，
+  开合做高度 + 透明度过渡（0.22s、`EASE_OUT`），退场播完再卸载。仪表板的源节点、
+  分流组开关、链式代理卡片都是这一套，不要再给正文套 `animate-fade-in` 之类的入场动画。
+- **摘要行开合前后结构不变**：不要把摘要行在展开时替换成输入框（例如链名），
+  可编辑字段放进正文，否则每次开合摘要行高度都会跳。
 - **折叠状态由父级持有**，一次只展开一条（或明确允许多开），收起其余；新建后自动展开这一条。
-- **摘要行给键盘入口**：收起时正文里的输入框不在了，摘要行要 `role="button"` + `tabIndex={0}`，
+- **摘要行给键盘入口**：摘要行要 `role="button"` + `tabIndex={0}`，
   处理 `Enter` / `空格`，并带 `aria-expanded`。展开态的 `aria-controls` 才指向正文 id，
   收起时留 `undefined`，避免指向不存在的节点。
-- **状态必须常驻在折叠区之外**：收起后仍要能看出这条为什么没生成（状态徽标、节点计数、冲突原因）。
-- 切换按钮用 `IconButton` + 轮换 `label`（`展开 X` / `收起 X`），图标 `rotate-180` 走
-  `motion-safe:transition-transform`（纯图标装饰，允许 transition）。
-- 折叠是显隐，**不是**入场动画，不要给卡片套 `animate-*`。
+- **状态必须常驻在折叠区之外**：收起后仍要能看出这条为什么没生成（状态徽标、节点计数、冲突原因、
+  链名为空这类字段错误）。
+- 箭头一律用 `DisclosureChevron`（`@subboost/ui/motion/disclosure-chevron`），不要手写
+  `ChevronDown` + `rotate-180` + 各自的时长：它的时长与曲线和 `MotionReveal` 对齐。
+  切换按钮用 `IconButton` + 轮换 `label`（`展开 X` / `收起 X`）。
+- 守护：`worker/ui/src/components/mobile-layout.test.ts`「disclosure motion」。
 
 
 ### 容器

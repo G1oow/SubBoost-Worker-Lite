@@ -128,6 +128,8 @@
     /* shared component tokens */
     --btn-primary-bg: color-mix(in oklab, var(--color-primary-500) 20%, transparent);
     --btn-primary-bg-hover: color-mix(in oklab, var(--color-primary-500) 30%, transparent);
+    /* 按压态：比 hover 再深一档。按钮按压不再缩放（scale 会让按钮文字发虚），只换底色 */
+    --btn-primary-bg-active: color-mix(in oklab, var(--color-primary-500) 40%, transparent);
     --btn-primary-border: color-mix(in oklab, var(--color-primary-500) 50%, transparent);
     --btn-primary-border-hover: color-mix(in oklab, var(--color-primary-400) 70%, transparent);
     --btn-primary-fg: #fff;
@@ -135,6 +137,7 @@
     --btn-primary-shadow-hover: 0 10px 15px -3px color-mix(in oklab, var(--color-primary-500) 20%, transparent), 0 4px 6px -4px color-mix(in oklab, var(--color-primary-500) 20%, transparent);
     --btn-danger-bg: color-mix(in oklab, var(--color-red-500) 20%, transparent);
     --btn-danger-bg-hover: color-mix(in oklab, var(--color-red-500) 30%, transparent);
+    --btn-danger-bg-active: color-mix(in oklab, var(--color-red-500) 40%, transparent);
     --btn-danger-border: color-mix(in oklab, var(--color-red-500) 50%, transparent);
     --btn-danger-border-hover: color-mix(in oklab, var(--color-red-400) 70%, transparent);
     --btn-danger-fg: #fff;
@@ -142,6 +145,7 @@
     --btn-danger-shadow-hover: 0 10px 15px -3px color-mix(in oklab, var(--color-red-500) 20%, transparent), 0 4px 6px -4px color-mix(in oklab, var(--color-red-500) 20%, transparent);
     --btn-outline-bg: color-mix(in oklab, #fff 5%, transparent);
     --btn-outline-bg-hover: color-mix(in oklab, #fff 10%, transparent);
+    --btn-outline-bg-active: color-mix(in oklab, #fff 15%, transparent);
     --btn-outline-border: color-mix(in oklab, #fff 15%, transparent);
     --btn-outline-fg: color-mix(in oklab, #fff 70%, transparent);
     --btn-outline-fg-hover: #fff;
@@ -399,6 +403,7 @@
 
     --btn-primary-bg: var(--btn-outline-bg);
     --btn-primary-bg-hover: var(--btn-outline-bg-hover);
+    --btn-primary-bg-active: #e6edfb;
     --btn-primary-border: #2563eb;
     --btn-primary-border-hover: #1d4ed8;
     --btn-primary-fg: #2563eb;
@@ -406,6 +411,7 @@
     --btn-primary-shadow-hover: var(--btn-outline-shadow);
     --btn-danger-bg: #fef2f2;
     --btn-danger-bg-hover: #fee2e2;
+    --btn-danger-bg-active: #fecaca;
     --btn-danger-border: #fca5a5;
     --btn-danger-border-hover: #f87171;
     --btn-danger-fg: #b91c1c;
@@ -413,6 +419,7 @@
     --btn-danger-shadow-hover: 0 1px 2px rgba(15, 23, 42, 0.08);
     --btn-outline-bg: #fff;
     --btn-outline-bg-hover: #f4f6fa;
+    --btn-outline-bg-active: #e9edf4;
     --btn-outline-border: #d5ddea;
     --btn-outline-fg: #334155;
     --btn-outline-fg-hover: #0f172a;
@@ -662,16 +669,19 @@
 
   --color-btn-primary: var(--btn-primary-bg);
   --color-btn-primary-hover: var(--btn-primary-bg-hover);
+  --color-btn-primary-active: var(--btn-primary-bg-active);
   --color-btn-primary-border: var(--btn-primary-border);
   --color-btn-primary-border-hover: var(--btn-primary-border-hover);
   --color-btn-primary-fg: var(--btn-primary-fg);
   --color-btn-danger: var(--btn-danger-bg);
   --color-btn-danger-hover: var(--btn-danger-bg-hover);
+  --color-btn-danger-active: var(--btn-danger-bg-active);
   --color-btn-danger-border: var(--btn-danger-border);
   --color-btn-danger-border-hover: var(--btn-danger-border-hover);
   --color-btn-danger-fg: var(--btn-danger-fg);
   --color-btn-outline: var(--btn-outline-bg);
   --color-btn-outline-hover: var(--btn-outline-bg-hover);
+  --color-btn-outline-active: var(--btn-outline-bg-active);
   --color-btn-outline-border: var(--btn-outline-border);
   --color-btn-outline-fg: var(--btn-outline-fg);
   --color-btn-outline-fg-hover: var(--btn-outline-fg-hover);

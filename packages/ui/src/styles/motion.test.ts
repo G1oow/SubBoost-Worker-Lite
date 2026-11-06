@@ -248,6 +248,28 @@ describe("compositing discipline", () => {
   });
 });
 
+describe("button press feedback", () => {
+  /**
+   * 按钮全站都在用，按压反馈只换底色：
+   * - active:scale 会把带文字的按钮提升为合成层，按下那一下文字发虚；
+   * - transition-all 会把 hover 阴影一起纳入过渡，每帧重算阴影。
+   */
+  const buttonSource = readFileSync(join(__dirname, "../components/ui/button.tsx"), "utf8");
+
+  it("does not scale or transition everything", () => {
+    expect(buttonSource).not.toMatch(/active:scale/u);
+    expect(buttonSource).not.toMatch(/transition-all/u);
+    expect(buttonSource).toContain("transition-[color,background-color,border-color,opacity]");
+  });
+
+  it("gives every filled variant a pressed background token", () => {
+    for (const token of ["btn-primary-active", "btn-danger-active", "btn-outline-active"]) {
+      expect(buttonSource).toContain(`active:bg-${token}`);
+    }
+    expect(buttonSource).toContain("active:bg-ink/10");
+  });
+});
+
 describe("FLIP layout semantics", () => {
   /**
    * 布尔 layout 会让 Motion 用 scaleX/scaleY 模拟宽高变化，

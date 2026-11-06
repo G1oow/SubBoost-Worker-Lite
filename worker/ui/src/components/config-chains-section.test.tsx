@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogHost } from "@subboost/ui/components/ui/confirm-dialog";
@@ -102,22 +103,27 @@ describe("折叠", () => {
     }
   });
 
-  it("点摘要行展开同一条，再点收起", () => {
+  it("点摘要行展开同一条，再点收起；摘要行在两种状态下是同一个节点", async () => {
     const { container } = renderSection();
     const card = cards(container)[0];
     const summary = within(card).getByRole("button", { name: "落地美国" });
 
-    // 展开时摘要行会被链名输入框替换，所以每次重新取摘要行
     fireEvent.click(summary);
     expect(within(card).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
+    // 链名输入框放在正文里，摘要行不被替换：开合时摘要行高度不跳
+    expect(within(card).getByRole("button", { name: "落地美国" })).toBe(summary);
+    expect(summary.getAttribute("aria-expanded")).toBe("true");
+    expect(summary.getAttribute("aria-controls")).toBe("chain-body-c1");
     expect(within(card).getByRole("button", { name: "收起 落地美国" }).getAttribute("aria-expanded")).toBe("true");
 
     fireEvent.click(within(card).getByRole("button", { name: "收起 落地美国" }));
-    expect(within(card).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull();
-    expect(within(card).getByRole("button", { name: "落地美国" }).getAttribute("aria-expanded")).toBe("false");
+    expect(summary.getAttribute("aria-expanded")).toBe("false");
+    expect(summary.getAttribute("aria-controls")).toBeNull();
+    // 正文播完退场动画（MotionReveal）后才卸载，最终不在 DOM 里
+    await waitFor(() => expect(within(card).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull());
   });
 
-  it("展开一条会收起另一条，避免整页同时铺开", () => {
+  it("展开一条会收起另一条，避免整页同时铺开", async () => {
     const { container } = renderSection();
     const [first, second] = cards(container);
 
@@ -125,8 +131,8 @@ describe("折叠", () => {
     expect(within(first).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
 
     expandCard(second);
-    expect(within(first).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull();
     expect(within(second).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
+    await waitFor(() => expect(within(first).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull());
   });
 
   it("摘要行可用键盘 Enter 与空格展开", () => {
@@ -136,17 +142,52 @@ describe("折叠", () => {
     fireEvent.keyDown(summary, { key: "Enter" });
     expect(within(cards(container)[0]).getByRole("button", { name: "收起 落地美国" })).toBeTruthy();
 
-    fireEvent.click(within(cards(container)[0]).getByRole("button", { name: "收起 落地美国" }));
-    expect(within(cards(container)[0]).getByRole("button", { name: "落地美国" })).toBeTruthy();
+    fireEvent.keyDown(summary, { key: " " });
+    expect(within(cards(container)[0]).getByRole("button", { name: "展开 落地美国" })).toBeTruthy();
   });
 
-  it("展开后链名是可编辑输入框，收起时退回纯文本", () => {
+  it("展开后链名是可编辑输入框，收起时只显示文字", () => {
     const { container } = renderSection();
     const card = cards(container)[0];
 
     expect(within(card).queryByLabelText("链名")).toBeNull();
     expandCard(card);
     expect(within(card).getByLabelText("链名")).toBeTruthy();
+  });
+
+  it("链名留空时，收起的卡片也在状态行里提示", () => {
+    const { container } = renderSection({
+      config: { proxyChains: [{ id: "c1", name: "", relay: { sourceIds: [] }, landing: { sourceIds: [] } }] },
+      previewChains: undefined,
+    });
+    const card = cards(container)[0];
+    expect(within(card).getByRole("status").textContent).toContain("请填写链名");
+
+    // 展开后错误跟着输入框走，状态行里不再重复
+    expandCard(card);
+    expect(within(card).getByRole("status").textContent).not.toContain("请填写链名");
+    expect(within(card).getByLabelText("链名").getAttribute("aria-invalid")).toBe("true");
+  });
+});
+
+describe("排序", () => {
+  /** 带状态的外壳：挪动要真的写回 config 才会重排 */
+  function StatefulSection() {
+    const [config, setConfig] = React.useState<Record<string, unknown>>(CONFIG);
+    return <ConfigChainsSection config={config} sources={SOURCES} onChange={setConfig} />;
+  }
+
+  it("挪动后焦点留在这张卡片上；挪到底时交给反方向的按钮", async () => {
+    Element.prototype.scrollIntoView = vi.fn();
+    const { container } = render(<StatefulSection />);
+    const down = within(cards(container)[0]).getByRole("button", { name: "下移 落地美国" });
+    down.focus();
+    fireEvent.click(down);
+
+    await waitFor(() => expect(cards(container).map((card) => card.dataset.chainCard)).toEqual(["c2", "c1"]));
+    // 已经在最后一条，「下移」变成 disabled，焦点落到「上移」上，键盘可以直接挪回去
+    await waitFor(() => expect(document.activeElement?.getAttribute("aria-label")).toBe("上移 落地美国"));
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
   });
 });
 

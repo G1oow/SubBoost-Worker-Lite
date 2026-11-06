@@ -275,6 +275,53 @@ describe("服务端试生成", () => {
   });
 });
 
+describe("页面布局与折叠", () => {
+  it("链式代理分段带数量徽标，子页切换走只淡入的入场", () => {
+    const config = {
+      ...STATE.config,
+      proxyChains: [{ id: "c1", name: "演示链", relay: { sourceIds: [] }, landing: { sourceIds: [] } }],
+    };
+    renderPanel({ state: { ...STATE, config } });
+    expect(screen.getByRole("tab", { name: /链式代理/u }).textContent).toContain("1");
+    const panel = screen.getByRole("tabpanel", { name: "规则" });
+    expect(panel.className).toContain("animate-page-in");
+    for (const pattern of FORBIDDEN_MOTION_CLASSES.slice(0, 3)) {
+      expect(panel.className).not.toMatch(pattern);
+    }
+  });
+
+  it("没有链时分段不显示徽标", () => {
+    renderPanel();
+    expect(screen.getByRole("tab", { name: "链式代理" }).textContent).toBe("链式代理");
+  });
+
+  it("分流组默认收起，展开后按分类显示开启数，再收起时正文退场后卸载", async () => {
+    renderPanel();
+    const toggle = screen.getByRole("button", { name: "调整分流组" });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.getAttribute("aria-controls")).toBeNull();
+    expect(document.getElementById("config-module-toggles")).toBeNull();
+
+    fireEvent.click(toggle);
+    const body = document.getElementById("config-module-toggles");
+    expect(body).not.toBeNull();
+    expect(toggle.getAttribute("aria-controls")).toBe("config-module-toggles");
+    // 每个分类标题旁边都有「开启数 / 总数」
+    const headings = Array.from(body!.querySelectorAll("h4")).map((node) => node.textContent ?? "");
+    expect(headings.length).toBeGreaterThan(0);
+    for (const heading of headings) expect(heading).toMatch(/\d+ \/ \d+$/u);
+
+    fireEvent.click(screen.getByRole("button", { name: "收起" }));
+    await waitFor(() => expect(document.getElementById("config-module-toggles")).toBeNull());
+  });
+
+  it("JSON 子页的格式化按钮在卡片头，与标题同排", () => {
+    renderPanel({ section: "json" });
+    const button = screen.getByRole("button", { name: "格式化" });
+    expect(button.closest("div.pb-4, [class*='pb-4']")?.textContent).toContain("高级 JSON");
+  });
+});
+
 describe("离开确认与导航", () => {
   const navItems = [
     { id: "dashboard", label: "仪表板" },

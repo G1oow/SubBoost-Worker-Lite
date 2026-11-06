@@ -2,7 +2,6 @@ import * as React from "react";
 import {
   ArrowDown,
   ArrowUp,
-  ChevronDown,
   Crosshair,
   FileUp,
   Library,
@@ -23,6 +22,8 @@ import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { Switch } from "@subboost/ui/components/ui/switch";
 import { SwitchField } from "@subboost/ui/components/ui/switch-field";
 import { cn } from "@subboost/ui/lib/utils";
+import { DisclosureChevron } from "@subboost/ui/motion/disclosure-chevron";
+import { MotionReveal } from "@subboost/ui/motion/motion-list";
 import {
   buildModuleToggleGroups,
   buildRuleEditorView,
@@ -198,7 +199,8 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
   return (
     <>
       <Card>
-        <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+        {/* 收起时卡片只剩标题行：去掉 CardHeader 自带的 pb-4，否则底部空出一截 */}
+        <CardHeader className="flex flex-col gap-3 pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
           <div className="space-y-1">
             <CardTitle>分流组</CardTitle>
             {/* 中文说明写成单个字符串：JSX 换行会在中文之间折出一个多余的空格 */}
@@ -210,44 +212,50 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
             variant="secondary"
             onClick={() => setModulesOpen((open) => !open)}
             aria-expanded={modulesOpen}
-            aria-controls="config-module-toggles"
+            aria-controls={modulesOpen ? "config-module-toggles" : undefined}
             className="w-full shrink-0 sm:w-auto"
           >
-            <Icon icon={ChevronDown} className={cn("transition-transform duration-200", modulesOpen && "rotate-180")} />
             {modulesOpen ? "收起" : "调整分流组"}
+            <DisclosureChevron open={modulesOpen} />
           </Button>
         </CardHeader>
-        {modulesOpen ? (
-          <CardContent id="config-module-toggles" className="animate-fade-in space-y-4">
-            {moduleGroups.map((group) => (
-              <section key={group.category} aria-label={group.label} className="space-y-2">
-                <h4 className="text-xs font-medium text-fg-45">{group.label}</h4>
-                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {group.modules.map((module) => (
-                    <SwitchField
-                      key={module.id}
-                      label={module.name}
-                      description={
-                        module.locked
-                          ? "必选，不能关闭"
-                          : [
-                              module.description,
-                              module.ruleCount > 0 ? `${module.ruleCount} 条规则` : "不含规则",
-                              module.references > 0 ? `被 ${module.references} 条规则当作目标` : "",
-                            ]
-                              .filter(Boolean)
-                              .join(" · ")
-                      }
-                      checked={module.enabled}
-                      disabled={module.locked}
-                      onCheckedChange={(checked) => onChange(setModuleEnabled(config, module.id, checked))}
-                    />
-                  ))}
-                </div>
-              </section>
-            ))}
+        <MotionReveal open={modulesOpen} id="config-module-toggles">
+          <CardContent className="space-y-4 pt-4">
+            {moduleGroups.map((group) => {
+              const enabledInGroup = group.modules.filter((module) => module.enabled).length;
+              return (
+                <section key={group.category} aria-label={group.label} className="space-y-2">
+                  <h4 className="flex items-baseline gap-2 text-xs font-medium text-fg-60">
+                    {group.label}
+                    <span className="font-normal tabular-nums text-fg-45">{`${enabledInGroup} / ${group.modules.length}`}</span>
+                  </h4>
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    {group.modules.map((module) => (
+                      <SwitchField
+                        key={module.id}
+                        label={module.name}
+                        description={
+                          module.locked
+                            ? "必选，不能关闭"
+                            : [
+                                module.description,
+                                module.ruleCount > 0 ? `${module.ruleCount} 条规则` : "不含规则",
+                                module.references > 0 ? `被 ${module.references} 条规则当作目标` : "",
+                              ]
+                                .filter(Boolean)
+                                .join(" · ")
+                        }
+                        checked={module.enabled}
+                        disabled={module.locked}
+                        onCheckedChange={(checked) => onChange(setModuleEnabled(config, module.id, checked))}
+                      />
+                    ))}
+                  </div>
+                </section>
+              );
+            })}
           </CardContent>
-        ) : null}
+        </MotionReveal>
       </Card>
 
       <Card>
@@ -256,10 +264,10 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
             <CardTitle>规则顺序</CardTitle>
             <p className="text-xs leading-relaxed text-fg-45">
               {[
-                `自上而下逐条匹配、命中即停。共输出 ${view.counts.lines} 条：内置 ${view.counts.builtin}`,
+                `共输出 ${view.counts.lines} 条：内置 ${view.counts.builtin}`,
                 view.counts.builtinDisabled > 0 ? `（另有 ${view.counts.builtinDisabled} 条已停用）` : "",
                 ` · 自定义 ${view.counts.customRules} · 规则集 ${view.counts.customRuleSets}。`,
-                "自定义条目可插到任意两条内置规则之间，内置规则之间的先后固定。",
+                "自上而下逐条匹配、命中即停；自定义条目可插到任意两条内置规则之间，内置规则之间的先后固定。",
               ].join("")}
             </p>
           </div>
