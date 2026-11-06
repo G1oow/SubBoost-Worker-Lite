@@ -36,10 +36,17 @@ describe("batch import current selections", () => {
     expect(parse(`${url}\n${url}`)).toMatchObject({ canImport: false, duplicateCount: 1 });
     expect(parse(url, { existingRuleSets: [{ id: "udemy", name: "udemy", path: url, behavior: "domain", target: "Proxy", noResolve: true }] }))
       .toMatchObject({ canImport: false, duplicateCount: 1 });
-    expect(parse(url, { defaultTarget: "DIRECT" })).toMatchObject({ canImport: false, errorCount: 1 });
     expect(parse("RULE-SET,unknown")).toMatchObject({ canImport: false, errorCount: 1 });
     expect(parse(url, { ruleSetTargetOptions: ["Other"] })).toMatchObject({ canImport: false, errorCount: 1 });
     expect(parse("value", { defaultType: "DOMAIN", defaultTarget: "" })).toMatchObject({ canImport: false, errorCount: 1 });
+  });
+  it("lets rule sets point straight at DIRECT or REJECT like any other rule", () => {
+    // mihomo 原生支持 RULE-SET,<name>,REJECT；需要限制时由调用方传 ruleSetTargetOptions
+    const direct = parse(url, { defaultTarget: "DIRECT" });
+    expect(direct).toMatchObject({ canImport: true, readyCount: 1 });
+    expect(direct.ruleSets[0]).toMatchObject({ id: "udemy", target: "DIRECT" });
+    expect(parse(url, { defaultTarget: "DIRECT", ruleSetTargetOptions: ["Proxy"] }))
+      .toMatchObject({ canImport: false, errorCount: 1 });
   });
   it("allocates readable unique IDs and removes unsafe filename characters", () => {
     expect(allocateRuleSetId("udemy", ["udemy", "udemy-2"])).toBe("udemy-3");
