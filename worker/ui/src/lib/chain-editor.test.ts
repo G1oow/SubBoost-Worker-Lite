@@ -281,6 +281,19 @@ describe("本地校验", () => {
     expect(validateChain(second, [first, second]).nameConflictError).not.toBeNull();
   });
 
+  it("链名撞上内置分组名时判为占用", () => {
+    const reserved = new Set(["🚀 节点选择", "⚡ 自动选择", "🐟 漏网之鱼", "⚡ 自动选择 · 前置"]);
+    const taken = validateChain(chain({ id: "a", name: "🚀 节点选择" }), [], reserved);
+    expect(taken.nameTakenError).toContain("已被内置分组");
+    expect(taken.ok).toBe(false);
+    // 前置组名撞上也算
+    const relayTaken = validateChain(chain({ id: "a", name: "⚡ 自动选择 · 前置" }), [], reserved);
+    expect(taken.nameTakenError).not.toBeNull();
+    expect(relayTaken.nameTakenError).toContain("已被内置分组");
+    // 不撞就通过
+    expect(validateChain(chain({ id: "a", name: "🇺🇸 自检链" }), [], reserved).nameTakenError).toBeNull();
+  });
+
   it("非法正则给出可读提示且不抛异常", () => {
     const result = validateChain(
       chain({

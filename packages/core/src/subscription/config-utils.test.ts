@@ -629,4 +629,15 @@ describe("normalizeProxyChains", () => {
       testUrl: "https://example.com/generate_204",
     });
   });
+
+  it("重复 id 按出现顺序补后缀，缺 id 按序号兜底", () => {
+    const chains = normalizeProxyChains([
+      { id: "dup", name: "A" },
+      { id: "dup", name: "B" },
+      { id: "dup", name: "C" },
+      { name: "无 id" },
+    ]);
+    expect(chains.map((item) => item.id)).toEqual(["dup", "dup-2", "dup-3", "chain-4"]);
+    expect(chains.map((item) => item.name)).toEqual(["A", "B", "C", "无 id"]);
+  });
 });

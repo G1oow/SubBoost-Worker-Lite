@@ -284,4 +284,39 @@ describe("状态文案", () => {
     expect(card.getByText("前置 · 匹配正则 不是有效的正则表达式")).toBeTruthy();
     expect(card.getByRole("status").textContent).toContain("正常");
   });
+
+  it("组类型下拉带可访问名，标签能关联到触发器", () => {
+    const { container } = renderSection();
+    const card = within(cards(container)[0]);
+    const exit = card.getByLabelText("出口组类型");
+    const relay = card.getByLabelText("前置组类型");
+    expect(exit.getAttribute("role")).toBe("combobox");
+    expect(relay.getAttribute("role")).toBe("combobox");
+  });
+
+  it("链名撞上内置分组名时本地就报占用", () => {
+    const { container } = renderSection({
+      config: { proxyChains: [{ id: "c1", name: "🚀 节点选择", relay: {}, landing: {} }] },
+      previewChains: undefined,
+    });
+    expect(within(cards(container)[0]).getByText(/已被内置分组/)).toBeTruthy();
+  });
+
+  it("勾选里的失效源会渲染成可取消的「已失效」项", () => {
+    const changes: Record<string, unknown>[] = [];
+    const { container } = renderSection({
+      config: {
+        proxyChains: [{ id: "c1", name: "落地美国", relay: { sourceIds: ["gone"] }, landing: {} }],
+      },
+      onChange: (next) => changes.push(next),
+    });
+    const card = within(cards(container)[0]);
+    const stale = card.getByRole("button", { name: "gone（已失效）" });
+    expect(stale.getAttribute("aria-pressed")).toBe("true");
+    expect(card.getByText("勾选里有已失效的源，取消掉才按剩下这些源筛选。")).toBeTruthy();
+
+    fireEvent.click(stale);
+    const chains = (changes.at(-1)?.proxyChains ?? []) as { relay: { sourceIds: string[] } }[];
+    expect(chains[0].relay.sourceIds).toEqual([]);
+  });
 });

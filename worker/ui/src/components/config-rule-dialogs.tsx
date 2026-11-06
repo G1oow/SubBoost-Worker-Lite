@@ -21,12 +21,11 @@ import { parseCustomRuleBatchImport } from "@subboost/core/rules/custom-rule-bat
 import { CUSTOM_RULE_TYPES } from "@subboost/core/rules/custom-rule-utils";
 import { normalizeRuleModelFromConfig } from "@subboost/core/rules/rule-model";
 import { ALL_RULES, RULE_CATEGORIES, type RuleSetInfo } from "@subboost/core/rules-database";
-import type { CustomRule, CustomRuleSet, RuleSetBehavior } from "@subboost/core/types/config";
+import type { CustomRule, RuleSetBehavior } from "@subboost/core/types/config";
 import {
   CUSTOM_RULE_TYPE_META,
   catalogRuleSetPath,
   findCatalogRuleSet,
-  fromTargetValue,
   inspectRuleSetLink,
   listRuleTargetNames,
   readCustomRules,
@@ -152,7 +151,8 @@ export function CustomRuleDialog({
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
-    const input: CustomRuleInput = { type, value, target: fromTargetValue(target), noResolve };
+    // target 保持下拉的 value 形状：落盘转换在 saveCustomRule 里统一做
+    const input: CustomRuleInput = { type, value, target, noResolve };
     const problem = validateCustomRuleInput(input, config, rule?.id);
     if (problem) {
       setError(problem);
@@ -333,7 +333,7 @@ export function CustomRuleSetDialog({
         name: name.trim() || fallbackName,
         behavior,
         path,
-        target: fromTargetValue(target),
+        target,
         noResolve,
         idHint,
       },
@@ -574,15 +574,28 @@ export function BatchImportDialog({
     const { parsed, valueByName } = result;
     const rules = [...parsed.rules];
     const ruleSets = [...parsed.ruleSets];
-    const toTarget = (name: CustomRule["target"]) =>
-      typeof name === "string" ? fromTargetValue(valueByName.get(name) ?? `raw:${name}`) : name;
+    // 导入条目里的 target 与对话框一致，都存下拉的 value，落盘时再由 fields 换回 ref
+    const toTarget = (target: CustomRule["target"]): RuleTargetValue =>
+      typeof target === "string" ? valueByName.get(target) ?? `raw:${target}` : `${target.kind}:${target.id}`;
     // 结果把规则与规则集分开放了，按原文行序重新交错，导入后的先后才与粘贴的文本一致
     const entries: ImportedEntry[] = parsed.items
       .filter((item) => item.status === "ready")
       .map((item): ImportedEntry | null => {
         if (item.rule?.type === "RULE-SET") {
           const ruleSet = ruleSets.shift();
-          return ruleSet ? { kind: "ruleSet", ruleSet: { ...ruleSet, target: toTarget(ruleSet.target) } as CustomRuleSet } : null;
+          return ruleSet
+            ? {
+                kind: "ruleSet",
+                ruleSet: {
+                  id: ruleSet.id,
+                  name: ruleSet.name,
+                  behavior: ruleSet.behavior,
+                  path: ruleSet.path,
+                  target: toTarget(ruleSet.target),
+                  noResolve: Boolean(ruleSet.noResolve),
+                },
+              }
+            : null;
         }
         const rule = rules.shift();
         return rule
