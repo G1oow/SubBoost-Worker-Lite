@@ -550,6 +550,25 @@ describe("subscription config utils", () => {
     expect(options.dialerProxyGroups).toBeUndefined();
   });
 
+  it("keeps the experimental cn rule position when its switches rely on defaults", () => {
+    // 配置没写 experimentalCnUseCnRuleSet / enabledGroups 时生成按默认值处理（开启、标准模板），
+    // 规范化顺序必须用同样的默认值，否则 special:experimental-cn 的位置会被当成无效 key 丢掉
+    const options = buildGenerateOptionsFromConfig(
+      {
+        customRules: [{ id: "tail", type: "DOMAIN-SUFFIX", value: "example.com", target: "DIRECT" }],
+        ruleOrder: ["module:global:geolocation-!cn", "special:experimental-cn", "custom-rule:tail"],
+      },
+      { nodes: [node()] },
+    );
+
+    expect((generateClashConfig(options).rules as string[]).slice(-4)).toEqual([
+      "RULE-SET,geolocation-!cn,🌍 非中国",
+      "RULE-SET,cn,🔒 国内服务",
+      "DOMAIN-SUFFIX,example.com,DIRECT",
+      "MATCH,🐟 漏网之鱼",
+    ]);
+  });
+
   it("restores persisted group listeners with stable targets and drops malformed entries", () => {
     const options = buildGenerateOptionsFromConfig(
       {
