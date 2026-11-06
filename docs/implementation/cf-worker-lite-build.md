@@ -697,7 +697,7 @@ export async function requireAdmin(request: Request, env: Env): Promise<void>;
 | PUT | `/api/sources` | 是 | `{ sources: SourceInput[] }`，上限 1 MiB | `200 { sources }` |
 | PUT | `/api/config` | 是 | JSON 对象，上限 1 MiB | `200 { config, configIsDefault: false }` |
 | DELETE | `/api/config` | 是 | 无 | `200 { config, configIsDefault: true }` |
-| POST | `/api/config/preview` | 是 | `{ config }`，上限 1 MiB | `200 { sourceCount, snapshotCount, nodeCount, proxyGroupCount, ruleProviderCount, rules }`；只读：用已启用源的现有快照试生成，不抓上游、不写快照/缓存/状态；生成失败 `400 VALIDATION_ERROR` |
+| POST | `/api/config/preview` | 是 | `{ config }`，上限 1 MiB | `200 { sourceCount, snapshotCount, nodeCount, proxyGroupCount, ruleProviderCount, rules, chains }`；`chains` 是每条链式代理的前置/落地匹配数与状态，只读：用已启用源的现有快照试生成，不抓上游、不写快照/缓存/状态；生成失败 `400 VALIDATION_ERROR` |
 | POST | `/api/subscriptions` | 是 | `{ name, sourceIds? }`，上限 64 KiB | `201 { subscription }` |
 | PATCH | `/api/subscriptions/:id` | 是 | `{ name?, sourceIds? }`，上限 64 KiB；`sourceIds` 必须引用现存源 | `200 { subscription }`；源不存在 `400 VALIDATION_ERROR`；清空该订阅的 YAML 缓存 |
 | DELETE | `/api/subscriptions/:id` | 是 | 无 | `204` |

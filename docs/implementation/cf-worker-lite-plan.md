@@ -112,11 +112,17 @@ SubBoost 当前的自托管形态是 `local/` 下的 Next.js 16 应用，依赖 
 - `PUT /api/config`：请求体必须是 JSON 对象，否则 `400 VALIDATION_ERROR`；保存后所有缓存视为过期（通过配置哈希失配触发重新生成，见 F6）。
 - `DELETE /api/config`：恢复默认。
 - `POST /api/config/preview`：请求体 `{ config }`，用草稿试生成一次并返回规则、代理组与节点计数；只读——节点取自全部已启用源的现有快照，不抓上游、不写快照/缓存/状态；生成失败（如基础 YAML 写错）返回 `400 VALIDATION_ERROR`。
-- 管理页分「规则」与「高级 JSON」两个子页（`#/config/rules`、`#/config/json`），共用一份草稿、只有一个保存：
+- 管理页分「规则 / 链式代理 / 高级 JSON」三个子页（`#/config/rules`、`#/config/chains`、`#/config/json`），共用一份草稿、只有一个保存：
   - 规则子页编辑分流组开关（🚀 节点选择、🐟 漏网之鱼锁定为开启）、内置规则的启停与目标（`builtinRuleEdits`）、自定义规则、自定义规则集（离线规则库或 .mrs 链接）与批量导入；规则目标限于已开启的分流组与 DIRECT/REJECT。
   - 列表即最终规则（带生成行号）：只有自定义规则/规则集可移动，可插到任意两条内置规则之间，内置规则之间的相对顺序固定；顺序有变化时写回覆盖全部模块（含未开启模块）的完整 `ruleOrder`。
   - 可视化只改自己负责的字段，其余字段原样保留；JSON 语法错误时不能切回可视化，也不能保存；有未保存的修改时离开页面需要确认，「恢复默认」需要确认。
+- 页面分「规则 / 链式代理 / 高级 JSON」三个子页（`#/config/rules|chains|json`），共用一份草稿、只有一个保存：
+  - 链式代理子页（v0.11.0）编辑顶层 `proxyChains: ProxyChain[]`，每条链一张三段卡片（前置 → 落地 → 出口组），带序号、上下移动、启停与删除确认；旧的 `dialerProxyGroups` 保持原样继续生效，界面上只读展示并提示可在高级 JSON 里编辑。
+  - 链是严格两跳：选择器按「源 + include/exclude 正则」选节点（`sourceIds` 为空 = 全部已启用源，正则为空 = 不限制），每条启用的链生成出口组（组名即链名，默认 `select`，成员是落地节点）与「<链名> · 前置」组（默认 `url-test`，成员是前置节点），落地节点的 `dialer-proxy` 指向前置组。
+  - 落地节点只能经出口组到达：其他分组的成员列表里，落地节点被出口组在原地顶替；⚡ 自动选择只剔除落地、不放入出口组（否则自动测速会退化成手选）。前置节点不做收敛，仍可直接单跳使用。
+  - 冲突在生成期消解、不拦保存：落地优先且靠前的链优先；任何链的落地都不会再被别的链当作前置（否则落地会经自己中转）。落地为空则整条链不生成；前置为空则前置组只放 `REJECT`，让链路显式失败而不是被 mihomo 当成直连。出口组/前置组与既有分组重名时该链跳过并给出原因。
 - 生成时持久化顺序里缺失的内置规则插回规范位置（紧贴其后第一条已在顺序里的内置规则之前），不再追加到 `geolocation-!cn` 之后。
+- `POST /api/config/preview` 额外返回 `chains`：每条链的前置/落地匹配数、出口组与前置组名、状态（`ok` / `empty-relay` / `empty-landing` / `disabled` / `invalid-regex` / `name-conflict` / `invalid`）与原因；预览与订阅生成共用同一份「已占用组名」集合，避免界面显示可生成、实际被跳过。
 
 #### F5 刷新管线
 
@@ -133,6 +139,7 @@ SubBoost 当前的自托管形态是 `local/` 下的 Next.js 16 应用，依赖 
 - remote 源：按 F8 做 SSRF 校验与手动重定向；成功后用 `parseSubscription` 解析；同时读取上游 `subscription-userinfo` 头保存到快照。
 - manual 源：直接解析存储的文本。
 - 保护性快照：解析得到 0 个节点或抓取失败时，不覆盖已有快照，仅在状态中记录错误。
+- 合并快照时给每个节点写入 `_sourceIds`（先记源再套用改名），供链式代理与分流组高级配置的按源过滤使用；`_` 前缀字段在 YAML 序列化时被丢弃，不会进订阅。陈旧源 id 不参与限定（命中不到现存源就不算过滤），避免删源后的旧配置把整组节点打空。
 - 每个源的快照写入 `nodes:<sourceId>`，TTL 7 天。
 - 所有源处理完后，对每条订阅重新生成 YAML 写入 `cache:<subId>`，TTL 48 小时。
 - 生成规则：按订阅的 `sourceIds` 顺序（空表示全部启用源按保存顺序）合并快照，按 `buildNodeContentKey` 去重保留首次出现，再调用 `generateClashYaml(buildGenerateOptionsFromConfig(config, { nodes }))`。节点重名由生成器内部 `ensureUniqueProxyNames` 处理。

@@ -23,7 +23,7 @@
 ## Highlights
 
 - **One link to distribute**: several upstream subscriptions plus manually added nodes are merged and deduplicated across sources into a single Clash/Mihomo profile.
-- **Admin panel inside the same Worker**: a token-protected SPA manages sources and subscriptions and reports refresh status. The generated config has a visual editor for group switches, custom rules and rule sets (with batch import) and the final rule order, validates drafts against existing snapshots before saving, and keeps an advanced JSON editor.
+- **Admin panel inside the same Worker**: a token-protected SPA manages sources and subscriptions and reports refresh status. The generated config has a visual editor for group switches, proxy chains (relay / landing / exit group cards), custom rules and rule sets (with batch import) and the final rule order, validates drafts against existing snapshots before saving, and keeps an advanced JSON editor.
 - **Pre-generated cache**: the Cron trigger `0 */12 * * *` fetches upstreams ahead of time, so subscriber requests are answered from KV.
 - **Encrypted at rest**: stored payloads such as subscription tokens are encrypted with AES-256-GCM, using a key derived from `ENCRYPTION_KEY` through HKDF-SHA256.
 - **Hardened upstream fetching**: scheme and credential validation, private network range blocking, and per-hop redirect checks capped at 3 hops.
