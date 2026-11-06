@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.9.2" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.10.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -193,6 +193,71 @@ describe("router config", () => {
     const del = await route(apiRequest("/api/config", { method: "DELETE" }), h.env, h.deps);
     expect(del.status).toBe(200);
     expect(await del.json()).toMatchObject({ configIsDefault: true });
+  });
+
+  it("previews a draft config without saving it", async () => {
+    const h = createHarness();
+    const response = await route(
+      apiRequest("/api/config/preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          config: {
+            enabledGroups: ["select", "auto", "final"],
+            customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.org", target: "DIRECT" }],
+          },
+        }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toMatchObject({
+      nodeCount: 0,
+      rules: ["DOMAIN-SUFFIX,example.org,DIRECT", "MATCH,🐟 漏网之鱼"],
+    });
+
+    const state = (await (await route(apiRequest("/api/state"), h.env, h.deps)).json()) as {
+      configIsDefault: boolean;
+    };
+    expect(state.configIsDefault).toBe(true);
+  });
+
+  it("rejects a preview without a config object and reports generation errors", async () => {
+    const h = createHarness();
+    const post = (body: unknown) =>
+      route(
+        apiRequest("/api/config/preview", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+        h.env,
+        h.deps
+      );
+
+    for (const body of [{}, { config: [] }, { config: "x" }]) {
+      const response = await post(body);
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ code: "VALIDATION_ERROR" });
+    }
+
+    const broken = await post({ config: { dnsYaml: "dns: [" } });
+    expect(broken.status).toBe(400);
+    const error = (await broken.json()) as { error: string; code: string };
+    expect(error.code).toBe("VALIDATION_ERROR");
+    expect(error.error).toContain("YAML");
+  });
+
+  it("requires the admin token for previews", async () => {
+    const h = createHarness();
+    const response = await route(
+      apiRequest("/api/config/preview", { method: "POST", body: JSON.stringify({ config: {} }) }, null),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(401);
   });
 });
 

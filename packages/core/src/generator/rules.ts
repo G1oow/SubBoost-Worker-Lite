@@ -133,6 +133,27 @@ const PRESET_MODULE_RULE_ORDER_KEYS = PROXY_GROUP_MODULES.flatMap((module) =>
   module.rules.map((rule) => getModuleRuleOrderKey(module.id, rule.id))
 );
 const PRESET_MODULE_RULE_ORDER_KEY_SET = new Set(PRESET_MODULE_RULE_ORDER_KEYS);
+const ALL_MODULE_IDS = PROXY_GROUP_MODULES.map((module) => module.id);
+
+let canonicalPresetRuleIndex: Map<string, number> | null = null;
+
+/**
+ * 全部内置规则（含未开启模块）在规范生成顺序里的位置。
+ * 持久化顺序缺了某条内置规则时，按它在这里的后继找插回锚点。
+ */
+function getCanonicalPresetRuleIndex(): Map<string, number> {
+  if (!canonicalPresetRuleIndex) {
+    const keys = buildCanonicalRuleEntries({
+      enabledModules: ALL_MODULE_IDS,
+      customRules: [],
+      customRuleSets: [],
+    }).preMatchEntries
+      .map((entry) => entry.key)
+      .filter((key) => PRESET_MODULE_RULE_ORDER_KEY_SET.has(key));
+    canonicalPresetRuleIndex = new Map(keys.map((key, index) => [key, index]));
+  }
+  return canonicalPresetRuleIndex;
+}
 
 function buildModuleRuleEntry(
   module: ProxyGroupModule,
@@ -328,29 +349,56 @@ function usesFullRuleOrder(ruleOrder: string[] | undefined, editableRuleKeys: st
   return normalizeRuleOrderInput(ruleOrder).some((key) => allSet.has(key) && !editableSet.has(key));
 }
 
-function getRuleIdFromModuleRuleOrderKey(key: string): string | null {
-  const parts = key.split(":");
-  if (parts.length !== 3 || parts[0] !== "module") return null;
-  return parts[2] || null;
+/**
+ * 把持久化顺序里缺失的内置规则插回规范位置：紧贴在它之后第一条已在顺序里的内置规则前面。
+ *
+ * 不能追加到末尾：末尾在 `geolocation-!cn` 之后，那条规则会先吃掉所有境外域名，
+ * 后开启模块的规则（或新版本新增的预设规则）就永远命中不到。
+ * 只认内置规则作锚点、插在后继之前，用户自己排好的自定义规则相对它们的先后不变。
+ */
+function insertPresetRuleAtCanonicalAnchor(orderedKeys: string[], presentKeys: Set<string>, key: string): boolean {
+  const canonicalIndex = getCanonicalPresetRuleIndex();
+  const index = canonicalIndex.get(key);
+  if (index === undefined) return false;
+
+  let successor: string | undefined;
+  let successorIndex = Number.POSITIVE_INFINITY;
+  for (const candidate of presentKeys) {
+    const candidateIndex = canonicalIndex.get(candidate);
+    if (candidateIndex === undefined || candidateIndex <= index || candidateIndex >= successorIndex) continue;
+    successor = candidate;
+    successorIndex = candidateIndex;
+  }
+  if (!successor) return false;
+
+  orderedKeys.splice(orderedKeys.indexOf(successor), 0, key);
+  return true;
 }
 
-function insertMovedModuleRuleAtSourceAnchor(
+function insertMissingEditableKeys(
   orderedKeys: string[],
-  activeRuleKeys: Set<string>,
-  key: string
-): boolean {
-  const ruleId = getRuleIdFromModuleRuleOrderKey(key);
-  if (!ruleId) return false;
+  universeKeys: string[],
+  editableRuleKeys: string[],
+  missingEditableKeys: string[]
+): void {
+  const editableSet = new Set(editableRuleKeys);
+  const firstEditableIndex = universeKeys.findIndex((key) => editableSet.has(key));
 
-  const anchorIndex = orderedKeys.findIndex((candidate) => {
-    if (activeRuleKeys.has(candidate)) return false;
-    if (!PRESET_MODULE_RULE_ORDER_KEY_SET.has(candidate)) return false;
-    return getRuleIdFromModuleRuleOrderKey(candidate) === ruleId;
-  });
-  if (anchorIndex < 0) return false;
+  for (let prevIndex = firstEditableIndex - 1; prevIndex >= 0; prevIndex -= 1) {
+    const resultIndex = orderedKeys.indexOf(universeKeys[prevIndex]);
+    if (resultIndex < 0) continue;
+    orderedKeys.splice(resultIndex + 1, 0, ...missingEditableKeys);
+    return;
+  }
 
-  orderedKeys.splice(anchorIndex, 0, key);
-  return true;
+  for (let nextIndex = firstEditableIndex + missingEditableKeys.length; nextIndex < universeKeys.length; nextIndex += 1) {
+    const resultIndex = orderedKeys.indexOf(universeKeys[nextIndex]);
+    if (resultIndex < 0) continue;
+    orderedKeys.splice(resultIndex, 0, ...missingEditableKeys);
+    return;
+  }
+
+  orderedKeys.push(...missingEditableKeys);
 }
 
 export function hasFullRuleOrderKeys(ruleOrder: string[] | undefined): boolean {
@@ -502,88 +550,75 @@ export function normalizePersistedRuleOrder(options: RulesGenerateOptions): stri
   return normalizeEditableRuleOrderKeys(cleaned, editableRuleKeys);
 }
 
-export function resolveAppliedRuleOrder(options: RulesGenerateOptions): string[] {
-  const { preMatchEntries } = buildCanonicalRuleEntries({
-    enabledModules: options.enabledModules,
-    customRules: options.customRules,
-    customRuleSets: options.customRuleSets,
-    customProxyGroups: options.customProxyGroups,
-    builtinRuleEdits: options.builtinRuleEdits,
-    proxyGroupNameOverrides: options.proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet: options.experimentalCnUseCnRuleSet,
-    cnIpNoResolve: options.cnIpNoResolve,
-    availablePolicyTargets: options.availablePolicyTargets,
-    fallbackPolicyTarget: options.fallbackPolicyTarget,
-  });
-
-  const allRuleKeys = preMatchEntries.map((entry) => entry.key);
-  const activeRuleKeys = preMatchEntries.filter((entry) => entry.enabled !== false).map((entry) => entry.key);
+/**
+ * 覆盖全部模块的完整规则顺序：所有内置规则（含未开启模块与已停用的）+ 自定义规则/规则集 + 系统规则。
+ *
+ * 结果与开启了哪些模块无关（实验性 cn 规则除外），所以在界面上开关模块不会打乱其他规则的位置；
+ * 可视化编辑保存时整体写回 `ruleOrder`，之后再开启的模块直接落在自己的位置上。
+ * 实际生效的顺序是它按当前开启状态过滤后的子序列（见 `resolveAppliedRuleOrder`）。
+ */
+export function resolveFullRuleOrder(options: RulesGenerateOptions): string[] {
+  const { preMatchEntries } = buildCanonicalRuleEntries({ ...options, enabledModules: ALL_MODULE_IDS });
+  const universeKeys = preMatchEntries.map((entry) => entry.key);
   const editableRuleKeys = getLegacyEditableRuleKeys(preMatchEntries);
   const persistedOrder = normalizePersistedRuleOrder(options);
 
   if (persistedOrder.length === 0) {
-    return activeRuleKeys;
+    return universeKeys;
   }
 
-  if (usesFullRuleOrder(persistedOrder, editableRuleKeys, allRuleKeys)) {
-    const activeRuleKeySet = new Set(activeRuleKeys);
-    const next = persistedOrder.filter(
-      (key) => activeRuleKeySet.has(key) || PRESET_MODULE_RULE_ORDER_KEY_SET.has(key)
+  if (!usesFullRuleOrder(persistedOrder, editableRuleKeys, universeKeys)) {
+    return applyEditableOnlyOrder(
+      editableRuleKeys,
+      universeKeys,
+      normalizeEditableRuleOrderKeys(persistedOrder, editableRuleKeys)
     );
-    const seen = new Set(next.filter((key) => activeRuleKeySet.has(key)));
-    const editableSet = new Set(editableRuleKeys);
-    const missingEditableKeys = editableRuleKeys.filter((key) => !seen.has(key));
-
-    if (missingEditableKeys.length > 0) {
-      const firstEditableIndex = allRuleKeys.findIndex((key) => editableSet.has(key));
-      let inserted = false;
-
-      for (let prevIndex = firstEditableIndex - 1; prevIndex >= 0; prevIndex -= 1) {
-        const prevKey = allRuleKeys[prevIndex];
-        const resultIndex = next.indexOf(prevKey);
-        if (resultIndex < 0) continue;
-        next.splice(resultIndex + 1, 0, ...missingEditableKeys);
-        missingEditableKeys.forEach((key) => seen.add(key));
-        inserted = true;
-        break;
-      }
-
-      if (!inserted) {
-        for (let nextIndex = firstEditableIndex + missingEditableKeys.length; nextIndex < allRuleKeys.length; nextIndex += 1) {
-          const nextKey = allRuleKeys[nextIndex];
-          const resultIndex = next.indexOf(nextKey);
-          if (resultIndex < 0) continue;
-          next.splice(resultIndex, 0, ...missingEditableKeys);
-          missingEditableKeys.forEach((key) => seen.add(key));
-          inserted = true;
-          break;
-        }
-      }
-
-      if (!inserted) {
-        next.push(...missingEditableKeys);
-        missingEditableKeys.forEach((key) => seen.add(key));
-      }
-    }
-
-    for (const key of allRuleKeys) {
-      if (seen.has(key)) continue;
-      if (insertMovedModuleRuleAtSourceAnchor(next, activeRuleKeySet, key)) {
-        seen.add(key);
-        continue;
-      }
-      next.push(key);
-      seen.add(key);
-    }
-
-    return next.filter((key) => activeRuleKeySet.has(key));
   }
 
-  return applyEditableOnlyOrder(
-    editableRuleKeys,
-    allRuleKeys,
-    normalizeEditableRuleOrderKeys(persistedOrder, editableRuleKeys)
-  ).filter((key) => activeRuleKeys.includes(key));
+  const universeSet = new Set(universeKeys);
+  const next = persistedOrder.filter((key) => universeSet.has(key));
+  const present = new Set(next);
+  const missingEditableKeys = editableRuleKeys.filter((key) => !present.has(key));
+
+  if (missingEditableKeys.length > 0) {
+    insertMissingEditableKeys(next, universeKeys, editableRuleKeys, missingEditableKeys);
+    missingEditableKeys.forEach((key) => present.add(key));
+  }
+
+  for (const key of universeKeys) {
+    if (present.has(key)) continue;
+    if (!insertPresetRuleAtCanonicalAnchor(next, present, key)) next.push(key);
+    present.add(key);
+  }
+
+  return next;
+}
+
+export function resolveAppliedRuleOrder(options: RulesGenerateOptions): string[] {
+  const { preMatchEntries } = buildCanonicalRuleEntries(options);
+  const activeRuleKeySet = new Set(
+    preMatchEntries.filter((entry) => entry.enabled !== false).map((entry) => entry.key)
+  );
+  return resolveFullRuleOrder(options).filter((key) => activeRuleKeySet.has(key));
+}
+
+export interface RuleOrderView {
+  /** 已开启模块的全部内置规则（含已停用的）与自定义条目，按最终顺序排列 */
+  entries: GeneratedRuleEntry[];
+  matchEntry: GeneratedRuleEntry;
+  /** 覆盖全部模块的完整顺序，可视化编辑保存时整体写回 `ruleOrder` */
+  fullOrder: string[];
+}
+
+/** 给可视化编辑用：停用的内置规则也留在原位，便于就地重新启用 */
+export function buildRuleOrderView(options: RulesGenerateOptions): RuleOrderView {
+  const { preMatchEntries, matchEntry } = buildCanonicalRuleEntries(options);
+  const fullOrder = resolveFullRuleOrder(options);
+  const byKey = new Map(preMatchEntries.map((entry) => [entry.key, entry]));
+  const entries = fullOrder
+    .map((key) => byKey.get(key))
+    .filter((entry): entry is GeneratedRuleEntry => Boolean(entry));
+  return { entries, matchEntry, fullOrder };
 }
 
 export function buildGeneratedRuleEntries(options: RulesGenerateOptions): GeneratedRuleEntry[] {

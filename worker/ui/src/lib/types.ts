@@ -157,5 +157,15 @@ export type DashboardStats = {
   warnings: DashboardWarning[];
 };
 
+/** 用草稿配置试生成的结果（对应 worker/src/pipeline.ts 的 ConfigPreview） */
+export type ConfigPreview = {
+  sourceCount: number;
+  snapshotCount: number;
+  nodeCount: number;
+  proxyGroupCount: number;
+  ruleProviderCount: number;
+  rules: string[];
+};
+
 /** 管理页顶部导航的页面 id */
 export type PageId = "dashboard" | "sources" | "subscriptions" | "status" | "config";

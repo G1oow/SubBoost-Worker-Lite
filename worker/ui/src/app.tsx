@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Activity, LayoutDashboard, Layers, Link2, LoaderCircle, Settings } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
-import { ConfirmDialogHost } from "@subboost/ui/components/ui/confirm-dialog";
+import { ConfirmDialogHost, confirmDialog } from "@subboost/ui/components/ui/confirm-dialog";
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { AppShell, type AppNavItem } from "./components/app-shell";
 import { ConfigPanel } from "./components/config-panel";
@@ -13,10 +13,18 @@ import { DemoBanner } from "./components/demo-banner";
 import { TokenGate } from "./components/token-gate";
 import { clearAdminToken, readAdminToken, writeAdminToken } from "./lib/admin-token";
 import { createApiClient } from "./lib/api-client";
+import {
+  DEFAULT_CONFIG_SECTION,
+  formatAppHash,
+  isPageId,
+  parseAppHash,
+  type AppRoute,
+  type ConfigSection,
+} from "./lib/routes";
 import type {
   AppState,
+  ConfigPreview,
   DashboardStats,
-  PageId,
   ParseNodesResponse,
   SourceInput,
   SourceNodesResponse,
@@ -33,17 +41,20 @@ type SourcesResponse = { sources: AppState["sources"] };
 type StatusResponse = { status: StatusRecord };
 type ConfigResponse = { config: Record<string, unknown>; configIsDefault: boolean };
 
-const PAGE_IDS: PageId[] = ["dashboard", "sources", "subscriptions", "status", "config"];
-const DEFAULT_PAGE: PageId = "dashboard";
-
-function isPageId(value: string): value is PageId {
-  return (PAGE_IDS as string[]).includes(value);
+function readRouteFromHash(): AppRoute {
+  if (typeof window === "undefined") return parseAppHash("");
+  return parseAppHash(window.location.hash);
 }
 
-function readPageFromHash(): PageId {
-  if (typeof window === "undefined") return DEFAULT_PAGE;
-  const raw = window.location.hash.replace(/^#\/?/, "").trim();
-  return isPageId(raw) ? raw : DEFAULT_PAGE;
+/** 「生成配置」有未保存的修改时，离开前先确认 */
+function confirmDiscardConfigChanges(): Promise<boolean> {
+  return confirmDialog({
+    title: "放弃未保存的配置修改？",
+    description: "「生成配置」里还有没保存的修改，离开后会丢失。",
+    confirmText: "放弃并离开",
+    cancelText: "留在本页",
+    variant: "warning",
+  });
 }
 
 const NAV_ITEMS: AppNavItem[] = [
@@ -65,7 +76,15 @@ export function App() {
   const [statsLoading, setStatsLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
-  const [page, setPage] = React.useState<PageId>(() => readPageFromHash());
+  const [route, setRoute] = React.useState<AppRoute>(() => readRouteFromHash());
+  const page = route.page;
+  const routeRef = React.useRef(route);
+  /** 由生成配置页上报；只在事件回调里读取，不触发重渲染 */
+  const configDirtyRef = React.useRef(false);
+
+  React.useEffect(() => {
+    routeRef.current = route;
+  }, [route]);
 
   const handleUnauthorized = React.useCallback(() => {
     clearAdminToken();
@@ -128,20 +147,81 @@ export function App() {
   // 用 hash 保存当前页面，刷新/前进后退都能回到同一页
   React.useEffect(() => {
     if (typeof window === "undefined") return;
-    const onHashChange = () => setPage(readPageFromHash());
+    const onHashChange = () => {
+      const next = parseAppHash(window.location.hash);
+      const current = routeRef.current;
+      if (next.page === current.page && next.configSection === current.configSection) return;
+      if (current.page === "config" && next.page !== "config" && configDirtyRef.current) {
+        // 浏览器前进/后退离开生成配置：先把地址栏放回去，确认放弃后再真正离开
+        window.history.replaceState(null, "", formatAppHash(current));
+        void confirmDiscardConfigChanges().then((confirmed) => {
+          if (!confirmed) return;
+          configDirtyRef.current = false;
+          window.history.replaceState(null, "", formatAppHash(next));
+          setRoute(next);
+        });
+        return;
+      }
+      setRoute(next);
+    };
     window.addEventListener("hashchange", onHashChange);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
-  const navigate = React.useCallback((next: string) => {
-    if (!isPageId(next)) return;
-    // 用 View Transition 包住页面状态更新，实现新旧页面的交叉过渡而不是硬切
-    runPageTransition(() => {
-      setPage(next);
-      if (typeof window !== "undefined" && window.location.hash !== `#/${next}`) {
-        window.location.hash = `#/${next}`;
-      }
-    });
+  // 关闭或刷新标签页时由浏览器弹出它自己的确认框
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const onBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (!configDirtyRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  const handleConfigDirtyChange = React.useCallback((dirty: boolean) => {
+    configDirtyRef.current = dirty;
+  }, []);
+
+  /** 返回 false 表示没有换页（例如在确认框里选择了留下），外壳据此决定是否回到顶部 */
+  const navigate = React.useCallback((next: string): boolean | Promise<boolean> => {
+    if (!isPageId(next)) return false;
+    const current = routeRef.current;
+    if (next === current.page) return true;
+
+    const go = () => {
+      const nextRoute: AppRoute = { page: next, configSection: DEFAULT_CONFIG_SECTION };
+      // 用 View Transition 包住页面状态更新，实现新旧页面的交叉过渡而不是硬切
+      runPageTransition(() => {
+        routeRef.current = nextRoute;
+        setRoute(nextRoute);
+        const hash = formatAppHash(nextRoute);
+        if (typeof window !== "undefined" && window.location.hash !== hash) {
+          window.location.hash = hash;
+        }
+      });
+      return true;
+    };
+
+    if (current.page === "config" && configDirtyRef.current) {
+      return confirmDiscardConfigChanges().then((confirmed) => {
+        if (!confirmed) return false;
+        configDirtyRef.current = false;
+        return go();
+      });
+    }
+    return go();
+  }, []);
+
+  /** 子页切换不新增历史记录：前进/后退仍然是在页面之间走 */
+  const handleConfigSectionChange = React.useCallback((section: ConfigSection) => {
+    const nextRoute: AppRoute = { page: "config", configSection: section };
+    routeRef.current = nextRoute;
+    setRoute(nextRoute);
+    if (typeof window !== "undefined") {
+      window.history.replaceState(null, "", formatAppHash(nextRoute));
+    }
   }, []);
 
   const handleAuthenticated = (nextToken: string) => {
@@ -149,7 +229,11 @@ export function App() {
     setToken(nextToken);
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (routeRef.current.page === "config" && configDirtyRef.current) {
+      if (!(await confirmDiscardConfigChanges())) return;
+      configDirtyRef.current = false;
+    }
     clearAdminToken();
     setToken(null);
     setState(null);
@@ -273,6 +357,12 @@ export function App() {
     );
   };
 
+  const handlePreviewConfig = React.useCallback(
+    async (config: Record<string, unknown>) =>
+      client.send<ConfigPreview>("POST", "/api/config/preview", { config }),
+    [client]
+  );
+
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
@@ -299,7 +389,7 @@ export function App() {
       <AppShell
         title={state?.app.name ?? "SubBoost Lite"}
         version={state?.app.version ?? ""}
-        onLogout={DEMO_MODE ? undefined : handleLogout}
+        onLogout={DEMO_MODE ? undefined : () => void handleLogout()}
         navItems={state ? navItems : undefined}
         activeNav={page}
         onNavigate={navigate}
@@ -356,7 +446,15 @@ export function App() {
               <StatusPanel state={state} onRefresh={handleRefresh} refreshing={refreshing} />
             ) : null}
             {page === "config" ? (
-              <ConfigPanel state={state} onSave={handleSaveConfig} onReset={handleResetConfig} />
+              <ConfigPanel
+                state={state}
+                section={route.configSection}
+                onSectionChange={handleConfigSectionChange}
+                onSave={handleSaveConfig}
+                onReset={handleResetConfig}
+                onPreview={handlePreviewConfig}
+                onDirtyChange={handleConfigDirtyChange}
+              />
             ) : null}
           </>
         ) : (

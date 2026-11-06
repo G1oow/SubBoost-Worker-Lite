@@ -17,7 +17,7 @@ import { stripImportedNodeControlFieldsFromList } from "@subboost/core/subscript
 import { buildProxyProvidersFromConfig } from "@subboost/core/subscription/proxy-providers";
 import { resolveNodeNameFilter } from "@subboost/core/subscription/node-name-filter";
 import { ensureCustomRuleId } from "@subboost/core/rules/custom-rule-utils";
-import { DEFAULT_SUBBOOST_CONFIG } from "@subboost/core/config/defaults";
+import { DEFAULT_SUBBOOST_CONFIG, buildDefaultUserConfig } from "@subboost/core/config/defaults";
 import { normalizeRuleModelFromConfig } from "@subboost/core/rules/rule-model";
 import { normalizeProxyGroupAdvancedConfig } from "@subboost/core/proxy-group-advanced";
 import { normalizeProxyGroupTargetRef } from "@subboost/core/proxy-group-targets";
@@ -309,13 +309,14 @@ export function buildGenerateOptionsFromConfig(
   const proxyGroupNameOverrides = normalizeProxyGroupNameOverrides(config.proxyGroupNameOverrides);
   const listenerPorts = normalizeListenerPorts(config.listenerPorts);
   const ruleOrder = normalizePersistedRuleOrder({
-    enabledModules: enabledGroups || [],
+    // 与生成时一致：没写的开关按模板默认值，否则依赖它们的 key（实验性 cn 规则）会被当成无效 key 丢掉
+    enabledModules: enabledGroups ?? buildDefaultUserConfig(template).enabledGroups,
     customProxyGroups,
     customRules: customRules || [],
     customRuleSets,
     builtinRuleEdits,
     proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet,
+    experimentalCnUseCnRuleSet: experimentalCnUseCnRuleSet ?? DEFAULT_SUBBOOST_CONFIG.experimentalCnUseCnRuleSet,
     cnIpNoResolve,
     ruleOrder: normalizeProxyGroupOrder(config.ruleOrder),
   });

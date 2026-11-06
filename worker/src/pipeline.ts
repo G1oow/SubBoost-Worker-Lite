@@ -1,5 +1,5 @@
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
-import { generateClashYaml } from "@subboost/core/generator";
+import { configToYaml, generateClashConfig, generateClashYaml } from "@subboost/core/generator";
 import { buildNodeContentKey, stableJsonStringify } from "@subboost/core/node-identity";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 import type { ParsedNode } from "@subboost/core/types/node";
@@ -14,6 +14,7 @@ import {
   REFRESH_CONCURRENCY,
   REFRESH_SOFT_DEADLINE_MS,
   type CacheRecord,
+  type NodeRenames,
   type SnapshotRecord,
   type SourceDto,
   type SourceRefreshStatus,
@@ -94,6 +95,31 @@ function targetSources<T extends { id: string; enabled: boolean }>(
   return sub.sourceIds
     .map((id) => byId.get(id))
     .filter((source): source is T => Boolean(source));
+}
+
+/**
+ * 按源顺序合并快照里的节点：内容指纹相同的只保留首次出现，再套用该源的节点改名。
+ * 订阅生成与配置预览共用，保证两边看到的节点集合一致。
+ */
+function mergeSnapshotNodes(
+  targets: ReadonlyArray<{ nodeRenames?: NodeRenames }>,
+  snapshots: ReadonlyArray<SnapshotRecord | null>
+): ParsedNode[] {
+  const seen = new Set<string>();
+  const nodes: ParsedNode[] = [];
+  for (let index = 0; index < snapshots.length; index += 1) {
+    const snapshot = snapshots[index];
+    if (!snapshot) continue;
+    // 同一份快照的节点数不超过源上限，重命名只影响展示名，不影响去重身份
+    const renames = targets[index]?.nodeRenames;
+    for (const node of snapshot.nodes) {
+      const key = buildNodeContentKey(node);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      nodes.push(applyNodeRenames(node, renames));
+    }
+  }
+  return nodes;
 }
 
 function aggregateUserInfo(
@@ -184,20 +210,7 @@ export async function generateSubscription(
     }
   );
 
-  const seen = new Set<string>();
-  const nodes: ParsedNode[] = [];
-  for (let index = 0; index < snapshots.length; index += 1) {
-    const snapshot = snapshots[index];
-    if (!snapshot) continue;
-    // 同一份快照的节点数不超过源上限，重命名只影响展示名，不影响去重身份
-    const renames = targets[index]?.nodeRenames;
-    for (const node of snapshot.nodes) {
-      const key = buildNodeContentKey(node);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      nodes.push(applyNodeRenames(node, renames));
-    }
-  }
+  const nodes = mergeSnapshotNodes(targets, snapshots);
 
   if (nodes.length === 0) return { kind: "no-nodes" };
 
@@ -215,6 +228,62 @@ export async function generateSubscription(
   };
   await store.putCache(cache);
   return { kind: "ok", cache, info };
+}
+
+export type ConfigPreview = {
+  /** 参与预览的已启用源数量 */
+  sourceCount: number;
+  /** 其中已有节点快照的源数量：预览不抓上游，缺快照的源不贡献节点 */
+  snapshotCount: number;
+  nodeCount: number;
+  proxyGroupCount: number;
+  ruleProviderCount: number;
+  /** 最终 rules 段，与订阅输出逐行一致 */
+  rules: string[];
+};
+
+export type ConfigPreviewResult =
+  | { ok: true; preview: ConfigPreview }
+  | { ok: false; error: string };
+
+/**
+ * 用一份草稿配置试生成，供管理端保存前校验与展示最终规则。
+ *
+ * 只读：节点取自全部已启用源的现有快照，不抓上游、不写快照/缓存/状态。
+ * 生成失败（例如基础 YAML 写错）作为结果返回；KV 读失败等基础设施错误照常向上抛。
+ */
+export async function previewConfig(
+  deps: PipelineDeps,
+  config: Record<string, unknown>
+): Promise<ConfigPreviewResult> {
+  const summaries = await deps.store.listSourceSummaries();
+  const targets = summaries.filter((source) => source.enabled);
+  const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
+  const nodes = mergeSnapshotNodes(targets, snapshots);
+
+  try {
+    const clash = generateClashConfig(
+      buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes })
+    );
+    // 订阅输出还要再序列化一次，这一步失败同样算生成失败
+    configToYaml(clash);
+    return {
+      ok: true,
+      preview: {
+        sourceCount: targets.length,
+        snapshotCount: snapshots.filter(Boolean).length,
+        nodeCount: nodes.length,
+        proxyGroupCount: clash["proxy-groups"]?.length ?? 0,
+        ruleProviderCount: Object.keys(clash["rule-providers"] ?? {}).length,
+        rules: clash.rules ?? [],
+      },
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: sanitizeErrorMessage(err instanceof Error ? err.message : String(err), "生成失败"),
+    };
+  }
 }
 
 /**

@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-orange.svg" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.9.2-green.svg" alt="Version 0.9.2">
+  <img src="https://img.shields.io/badge/version-0.10.0-green.svg" alt="Version 0.10.0">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-blue.svg" alt="许可证 AGPL-3.0-only"></a>
 </p>
 <!-- markdownlint-enable MD033 MD041 -->
@@ -23,7 +23,7 @@
 ## 核心特性
 
 - **只维护一条链接**：多个上游订阅与手动添加的节点合并后，跨源去重成一份 Clash/Mihomo 配置。
-- **管理端就在同一个 Worker 里**：token 保护的 SPA 负责源管理、订阅管理、刷新状态，并以 JSON 编辑生成的配置。
+- **管理端就在同一个 Worker 里**：token 保护的 SPA 负责源管理、订阅管理、刷新状态；生成配置可视化编辑分流组开关、自定义规则与规则集（含批量导入）和最终规则顺序，保存前按现有快照试生成校验，也保留高级 JSON 编辑。
 - **预先生成缓存**：Cron `0 */12 * * *` 提前抓取上游，订阅请求大多直接命中 KV 里的缓存。
 - **静态加密**：订阅 token 等落库字段使用 AES-256-GCM 加密，密钥由 `ENCRYPTION_KEY` 经 HKDF-SHA256 派生。
 - **抓取侧防护**：协议与凭据校验、私网网段拦截、重定向逐跳校验（最多 3 跳）。

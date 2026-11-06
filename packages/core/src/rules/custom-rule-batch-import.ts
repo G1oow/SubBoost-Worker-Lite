@@ -293,7 +293,6 @@ export function parseCustomRuleBatchImport(
     let ruleSet: CustomRuleSet | undefined;
     if (draft.type === "RULE-SET") {
       try {
-        if (["DIRECT", "REJECT"].includes(target)) throw new Error("请选择规则集使用的代理组");
         if (options.ruleSetTargetOptions && !options.ruleSetTargetOptions.includes(target)) throw new Error(`未知规则集目标：${target}`);
         const metadata = parseManualRuleSetUrl(draft.value);
         const id = allocateRuleSetId(metadata.name, usedIds);

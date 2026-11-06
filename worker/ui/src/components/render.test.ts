@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.9.2" },
+  app: { name: "SubBoost Lite", version: "0.10.0" },
   sources: [
     {
       id: "s1",
@@ -89,7 +89,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.9.2");
+    expect(html).toContain("v0.10.0");
     expect(html).toContain("content");
   });
 
@@ -430,13 +430,44 @@ describe("admin UI rendering", () => {
     expect(html).not.toContain("https://worker.example.com/sub/tokenvalue");
   });
 
-  it("renders the config panel with the JSON text and default hint", () => {
+  it("renders the config rules section as the final rule list", () => {
     const html = renderToStaticMarkup(
-      React.createElement(ConfigPanel, { state: STATE, onSave: noopAsync, onReset: noopAsync })
+      React.createElement(ConfigPanel, {
+        state: STATE,
+        section: "rules",
+        onSectionChange: () => {},
+        onSave: noopAsync,
+        onReset: noopAsync,
+      })
     );
     expect(html).toContain("生成配置");
-    expect(html).toContain("当前为默认配置");
+    expect(html).toContain("当前使用默认配置");
+    // 规则与高级 JSON 是同一页上的两个子页
+    expect(html).toContain('aria-label="生成配置分区"');
+    expect(html).toContain("高级 JSON");
+    expect(html).toContain("分流组");
+    expect(html).toContain("规则顺序");
+    // 列表就是最终规则：带行号、生成文本，MATCH 固定在最后
+    expect(html).toContain("RULE-SET,category-ads-all,🛑 广告拦截");
+    expect(html).toContain("MATCH,🐟 漏网之鱼");
+    expect(html).toContain('aria-label="启用 广告域名"');
+    // 没有修改时不挂载保存条
+    expect(html).not.toContain("data-config-save-bar");
+  });
+
+  it("renders the config JSON section with the raw text", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(ConfigPanel, {
+        state: STATE,
+        section: "json",
+        onSectionChange: () => {},
+        onSave: noopAsync,
+        onReset: noopAsync,
+      })
+    );
+    expect(html).toContain('aria-label="生成配置 JSON"');
     expect(html).toContain("mixedPort");
+    expect(html).not.toContain("规则顺序");
   });
 });
 
