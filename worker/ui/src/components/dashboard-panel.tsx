@@ -3,7 +3,6 @@ import {
   Activity,
   ArrowRight,
   Boxes,
-  ChevronDown,
   CircleAlert,
   CircleCheck,
   Clock,
@@ -22,6 +21,7 @@ import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
+import { DisclosureChevron } from "@subboost/ui/motion/disclosure-chevron";
 import { MotionItem, MotionList, MotionReveal } from "@subboost/ui/motion/motion-list";
 import { SpotlightCard } from "@subboost/ui/motion/spotlight-card";
 import { cn } from "@subboost/ui/lib/utils";
@@ -428,13 +428,10 @@ export function DashboardPanel({
                         >
                           {formatCount(item.nodeCount)}
                         </span>
-                        <Icon
-                          icon={ChevronDown}
+                        <DisclosureChevron
+                          open={expanded}
                           size="md"
-                          className={cn(
-                            "shrink-0 text-fg-45 transition-transform duration-300",
-                            expanded && "rotate-180 text-primary-200"
-                          )}
+                          className={cn("text-fg-45", expanded && "text-primary-200")}
                         />
                       </button>
                       <MotionReveal open={expanded} id={panelId}>
@@ -466,10 +463,7 @@ export function DashboardPanel({
                 onClick={() => setShowAllSources((current) => !current)}
               >
                 {showAllSources ? "收起" : `展开全部 ${sourceStats.length} 个源`}
-                <Icon
-                  icon={ChevronDown}
-                  className={cn("transition-transform duration-300", showAllSources && "rotate-180")}
-                />
+                <DisclosureChevron open={showAllSources} />
               </Button>
             ) : null}
           </CardContent>

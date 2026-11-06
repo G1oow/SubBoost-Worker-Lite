@@ -3,6 +3,7 @@ import { join } from "node:path";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { DisclosureChevron } from "./disclosure-chevron";
 import { GrowBar } from "./grow-bar";
 import { LoadingButton } from "./loading-button";
 import { MotionItem, MotionList, MotionReveal } from "./motion-list";
@@ -175,5 +176,18 @@ describe("grow bar spring", () => {
     // 不再逐帧写 left / 改 textContent：那是布局与重排，正是抖动的来源
     expect(source).not.toMatch(/style=\{\{\s*left\s/u);
     expect(source).not.toMatch(/textContent\s*=/u);
+  });
+});
+
+describe("disclosure chevron", () => {
+  it("rotates only when open, with the same timing as MotionReveal", () => {
+    const closed = renderToStaticMarkup(React.createElement(DisclosureChevron, { open: false }));
+    const open = renderToStaticMarkup(React.createElement(DisclosureChevron, { open: true }));
+    expect(closed).not.toContain("rotate-180");
+    expect(open).toContain("rotate-180");
+    // 0.22s + EASE_OUT 与 REVEAL_TRANSITION 对齐；reduced-motion 下不过渡
+    expect(open).toContain("motion-safe:duration-220");
+    expect(open).toContain("motion-safe:ease-[cubic-bezier(0.22,1,0.36,1)]");
+    expect(open).toContain('aria-hidden="true"');
   });
 });

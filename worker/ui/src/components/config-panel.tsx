@@ -1,5 +1,5 @@
 import * as React from "react";
-import { CircleCheck, LoaderCircle, RotateCcw, Save, TriangleAlert, Undo2 } from "lucide-react";
+import { Braces, CircleCheck, LoaderCircle, RotateCcw, Save, TriangleAlert, Undo2 } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -8,6 +8,7 @@ import { Textarea } from "@subboost/ui/components/ui/textarea";
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { SegmentedControl } from "@subboost/ui/motion/segmented-control";
+import { readChains } from "../lib/chain-editor";
 import { isConfigChanged, reconcileWithBaseline, type ConfigRecord } from "../lib/rule-editor";
 import type { ConfigSection } from "../lib/routes";
 import type { AppState, ConfigPreview } from "../lib/types";
@@ -259,6 +260,11 @@ export function ConfigPanel({
   // 预览里的逐条链状态：还没跑完第一次校验、或校验直接失败时没有这层数据
   const previewChains =
     preview.status === "idle" || preview.status === "error" ? undefined : preview.data?.chains;
+  // 分段控件上的数量徽标：不点进去也能看出有几条链
+  const chainCount = React.useMemo(() => readChains(draft).length, [draft]);
+  const sectionOptions = SECTION_OPTIONS.map((option) =>
+    option.id === "chains" && chainCount > 0 ? { ...option, badge: chainCount } : option
+  );
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -270,7 +276,7 @@ export function ConfigPanel({
           </div>
           <div className="flex shrink-0 items-center gap-2">
             <Button
-              variant="secondary"
+              variant="ghost"
               onClick={() => void handleReset()}
               disabled={saving || resetting || (state.configIsDefault && !dirty)}
               className="flex-1 sm:flex-none"
@@ -290,24 +296,32 @@ export function ConfigPanel({
             </LoadingButton>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3">
+        {/* 分区切换与生成校验放同一行：切换的同时就能看到这份草稿能不能生成 */}
+        <CardContent className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
           <SegmentedControl
             label="生成配置分区"
             layoutGroupId="config-sections"
-            options={SECTION_OPTIONS}
+            options={sectionOptions}
             activeId={activeSection}
             onSelect={selectSection}
+            className="self-start"
           />
           {sectionNotice ? (
             <p className="text-xs text-danger-note-fg" role="alert">
               {sectionNotice}
             </p>
           ) : null}
-          {onPreview ? <PreviewStatusLine preview={preview} /> : null}
+          {onPreview && !sectionNotice ? <PreviewStatusLine preview={preview} /> : null}
         </CardContent>
       </Card>
 
-      <div role="tabpanel" aria-label={SECTION_LABELS[activeSection]} className="space-y-4 sm:space-y-6">
+      {/* 子页切换与顶层切页同一套入场：只淡入，按分区重新挂载 */}
+      <div
+        key={activeSection}
+        role="tabpanel"
+        aria-label={SECTION_LABELS[activeSection]}
+        className="animate-page-in space-y-4 sm:space-y-6"
+      >
         {activeSection === "rules" ? <ConfigRulesSection config={draft} onChange={applyVisual} /> : null}
         {activeSection === "chains" ? (
           <ConfigChainsSection
@@ -319,11 +333,23 @@ export function ConfigPanel({
         ) : null}
         {activeSection === "json" ? (
           <Card>
-            <CardHeader className="space-y-1">
-              <CardTitle>高级 JSON</CardTitle>
-              <p className="text-xs leading-relaxed text-fg-45">
-                与「规则」「链式代理」共用同一份草稿：可视化不认识的字段在这里原样保留。JSON 写坏时不能切回可视化，也不能保存。
-              </p>
+            <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-4">
+              <div className="space-y-1">
+                <CardTitle>高级 JSON</CardTitle>
+                <p className="text-xs leading-relaxed text-fg-45">
+                  与「规则」「链式代理」共用同一份草稿：可视化不认识的字段在这里原样保留。JSON 写坏时不能切回可视化，也不能保存。
+                </p>
+              </div>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={() => setJsonText(prettyJson(draft))}
+                disabled={jsonError !== null}
+                className="shrink-0 self-end sm:self-auto"
+              >
+                <Icon icon={Braces} />
+                格式化
+              </Button>
             </CardHeader>
             <CardContent className="space-y-3">
               {/* 窄屏降低最小高度：320px 以上的编辑器在手机上会占满两屏 */}
@@ -341,16 +367,6 @@ export function ConfigPanel({
                   {jsonError}
                 </p>
               ) : null}
-              <div className="flex justify-end">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setJsonText(prettyJson(draft))}
-                  disabled={jsonError !== null}
-                >
-                  格式化
-                </Button>
-              </div>
             </CardContent>
           </Card>
         ) : null}
@@ -410,20 +426,25 @@ function PreviewStatusLine({ preview }: { preview: PreviewState }) {
   const loading = preview.status === "loading";
   const data = preview.data;
   return (
-    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-fg-45" role="status">
+    <p className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-fg-45 lg:justify-end" role="status">
       <Icon
         icon={loading ? LoaderCircle : CircleCheck}
         size="sm"
-        className={loading ? "animate-spin" : "text-success-note-fg"}
+        className={loading ? "animate-spin" : "animate-icon-pop text-success-note-fg"}
       />
-      <span>{loading ? (data ? "正在重新校验…" : "正在按草稿试生成…") : "生成校验通过"}</span>
+      <span className="font-medium text-fg-70">
+        {loading ? (data ? "正在重新校验…" : "正在按草稿试生成…") : "生成校验通过"}
+      </span>
       {data ? (
         <>
-          <span>
-            {`· 输出 ${data.rules.length} 条规则、${data.proxyGroupCount} 个代理组、${data.ruleProviderCount} 个规则集`}
+          <span className="tabular-nums">
+            {`· ${data.rules.length} 条规则 · ${data.proxyGroupCount} 个代理组 · ${data.ruleProviderCount} 个规则集`}
           </span>
-          <span>
-            {`· 基于 ${data.snapshotCount}/${data.sourceCount} 个源的现有快照（${data.nodeCount} 个节点），不抓取上游`}
+          <span
+            className="tabular-nums"
+            title="试生成只读现有快照，不抓取上游，也不写缓存"
+          >
+            {`· 基于 ${data.snapshotCount}/${data.sourceCount} 个源的快照（${data.nodeCount} 个节点）`}
           </span>
         </>
       ) : null}

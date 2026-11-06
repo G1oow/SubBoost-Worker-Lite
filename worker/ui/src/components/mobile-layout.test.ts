@@ -262,3 +262,28 @@ describe("page header", () => {
     expect(source).not.toContain("optionLabelClassName");
   });
 });
+
+describe("disclosure motion", () => {
+  /**
+   * 折叠区统一走 MotionReveal（按需挂载 + 高度/透明度过渡）与 DisclosureChevron，
+   * 不再各自手写箭头旋转时长或给正文套 animate-*：之前三处折叠三种手感。
+   */
+  it("keeps every disclosure on the shared chevron and reveal", () => {
+    for (const file of [
+      "components/dashboard-panel.tsx",
+      "components/config-rules-section.tsx",
+      "components/config-chains-section.tsx",
+    ]) {
+      const source = readWorkerUi(file);
+      expect(source, `${file} 应使用 DisclosureChevron`).toContain("<DisclosureChevron");
+      expect(source, `${file} 应使用 MotionReveal`).toContain("<MotionReveal");
+      expect(source, `${file} 不应再手写箭头旋转`).not.toMatch(/ChevronDown/u);
+    }
+  });
+
+  it("keeps hover feedback on list buttons free of translate", () => {
+    // 带文字的按钮 hover 位移会被提升为合成层，与「文字只驱动 opacity」相悖
+    const source = readWorkerUi("components/subscriptions-panel.tsx");
+    expect(source).not.toMatch(/hover:-?translate-/u);
+  });
+});
