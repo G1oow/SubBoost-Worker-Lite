@@ -16,6 +16,7 @@ import {
   buildCacheETag,
   getOrGenerateSubscription,
   getOrGenerateSubscriptionByShortCode,
+  previewConfig,
   refreshAll,
   type GetOrGenerateResult,
   type PipelineDeps,
@@ -290,6 +291,17 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       nodes: collectNodeSummaries(nodes, source.nodeRenames),
       parseErrors,
     });
+  }
+
+  // 用草稿配置试生成：只读，不抓上游、不写缓存，供管理端保存前校验
+  if (path === "/api/config/preview" && method === "POST") {
+    const body = requireObjectBody(await readJsonBody(request, BODY_LIMITS.large));
+    if (!isPlainObject(body.config)) {
+      throw new ApiError(400, "VALIDATION_ERROR", "config 必须是 JSON 对象");
+    }
+    const result = await previewConfig(pipelineDeps, body.config);
+    if (!result.ok) throw new ApiError(400, "VALIDATION_ERROR", result.error);
+    return json(result.preview);
   }
 
   if (path === "/api/config" && method === "PUT") {

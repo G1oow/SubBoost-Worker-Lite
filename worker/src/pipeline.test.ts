@@ -5,6 +5,7 @@ import {
   generateSubscription,
   getOrGenerateSubscription,
   normalizeConfigForGeneration,
+  previewConfig,
   refreshAll,
   type PipelineDeps,
 } from "./pipeline";
@@ -165,6 +166,71 @@ describe("generateSubscription", () => {
     const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
     const result = await generateSubscription(h.deps, sub!, { onDemand: false });
     expect(result).toEqual({ kind: "no-nodes" });
+  });
+});
+
+describe("previewConfig", () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await createHarness();
+  });
+
+  async function dumpKv(kv: MemoryKV): Promise<Array<[string, string | undefined]>> {
+    const { keys } = await kv.list();
+    return keys.map(({ name }) => [name, kv.raw(name)]);
+  }
+
+  it("previews a draft from existing snapshots only and writes nothing", async () => {
+    const fetchSpy = vi.fn(async () => okResponse(base64Subscription([ssNode("fresh", 8400)])));
+    h.deps.fetchText = fetchSpy as unknown as PipelineDeps["fetchText"];
+    const sources = await h.store.saveSources([
+      { name: "a", kind: "remote", url: "https://a.example.com/sub" },
+      { name: "b", kind: "remote", url: "https://b.example.com/sub" },
+      { name: "off", kind: "remote", url: "https://c.example.com/sub", enabled: false },
+    ]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [{ name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putSnapshot({
+      sourceId: sources[2].id,
+      nodes: [{ name: "off", type: "ss", server: "example.com", port: 8390, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    const before = await dumpKv(h.kv);
+
+    const result = await previewConfig(h.deps, {
+      enabledGroups: ["select", "auto", "final"],
+      customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.org", target: "DIRECT" }],
+    });
+
+    expect(result).toEqual({
+      ok: true,
+      preview: {
+        // 停用的源不参与；b 没有快照，预览也不替它去抓上游
+        sourceCount: 2,
+        snapshotCount: 1,
+        nodeCount: 1,
+        proxyGroupCount: 3,
+        ruleProviderCount: 0,
+        rules: ["DOMAIN-SUFFIX,example.org,DIRECT", "MATCH,🐟 漏网之鱼"],
+      },
+    });
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(await dumpKv(h.kv)).toEqual(before);
+  });
+
+  it("returns generation failures as a result instead of throwing", async () => {
+    const result = await previewConfig(h.deps, { dnsYaml: "dns: [" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toContain("YAML");
   });
 });
 
