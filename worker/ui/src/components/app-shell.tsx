@@ -27,7 +27,8 @@ export type AppShellProps = {
   children?: React.ReactNode;
   navItems?: AppNavItem[];
   activeNav?: string;
-  onNavigate?: (id: string) => void;
+  /** 返回 false（或 resolve 为 false）表示没有换页，例如离开前的确认框里选了留下 */
+  onNavigate?: (id: string) => void | boolean | Promise<boolean>;
   onRefresh?: () => void;
   refreshing?: boolean;
 };
@@ -195,12 +196,20 @@ export function AppShell({
    * 除了交给上层的 navigate，这里还要把滚动位置拉回顶部：
    * 两套导航（页头胶囊、吸顶胶囊）和移动端底栏都可能在"已经滚到半页"时被点到，
    * 若只换内容不归位，用户看到的就是"点了没反应"。
+   * 上层表示没换页（离开确认里选了留下）时保持原位，不打断正在编辑的位置。
    */
   const selectNav = (id: string) => {
-    onNavigate?.(id);
-    if (typeof window !== "undefined") {
-      window.scrollTo({ top: 0, behavior: "auto" });
+    const scrollToTop = () => {
+      if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "auto" });
+    };
+    const result = onNavigate?.(id);
+    if (result instanceof Promise) {
+      void result.then((navigated) => {
+        if (navigated) scrollToTop();
+      });
+      return;
     }
+    if (result !== false) scrollToTop();
   };
 
   /** 吸顶工具条左上角的品牌徽章兼"回到顶部"按钮 */

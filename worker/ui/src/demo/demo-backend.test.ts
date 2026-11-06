@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppState, DashboardStats } from "../lib/types";
+import type { AppState, ConfigPreview, DashboardStats } from "../lib/types";
 import { createDemoBackend } from "./demo-backend";
 import { DEMO_RENAMED_NODE } from "./demo-seed";
 
@@ -82,6 +82,28 @@ describe("演示模式后端", () => {
 
     const restarted = await readJson<AppState>(await createBackend().dispatch("/api/state"));
     expect(restarted.sources).toHaveLength(3);
+  });
+
+  it("生成配置页的试生成走真实路由，只读不落盘", async () => {
+    const backend = createBackend();
+    const state = await readJson<AppState>(await backend.dispatch("/api/state"));
+    const draft = {
+      ...state.config,
+      customRules: [{ id: "demo", type: "DOMAIN-SUFFIX", value: "example.org", target: "DIRECT" }],
+    };
+
+    const response = await backend.dispatch("/api/config/preview", {
+      method: "POST",
+      body: JSON.stringify({ config: draft }),
+    });
+    expect(response.status).toBe(200);
+    const preview = await readJson<ConfigPreview>(response);
+    // 节点来自种子刷新后的快照：两个启用源共 6 个节点
+    expect(preview.nodeCount).toBe(6);
+    expect(preview.rules).toContain("DOMAIN-SUFFIX,example.org,DIRECT");
+
+    const after = await readJson<AppState>(await backend.dispatch("/api/state"));
+    expect(after.configIsDefault).toBe(true);
   });
 
   it("不向外部发起请求：远程源刷新直接失败而不是真的去抓", async () => {
