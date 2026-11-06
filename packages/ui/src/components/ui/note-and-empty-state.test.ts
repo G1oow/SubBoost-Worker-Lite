@@ -69,4 +69,17 @@ describe("EmptyState", () => {
     // 文案与操作的顺序：先说空，再给出口
     expect(html.indexOf("还没有链式代理")).toBeLessThan(html.indexOf("新建链"));
   });
+
+  it("传 icon 时渲染装饰图标且不进无障碍树", () => {
+    const html = render(
+      React.createElement(
+        EmptyState,
+        { icon: React.createElement("span", { "data-testid": "deco" }, "▢") },
+        "还没有源"
+      )
+    );
+    expect(html).toContain('data-testid="deco"');
+    // 图标容器 aria-hidden，读屏只念文案
+    expect(html).toMatch(/aria-hidden="true"[^>]*>.*?▢/u);
+  });
 });
