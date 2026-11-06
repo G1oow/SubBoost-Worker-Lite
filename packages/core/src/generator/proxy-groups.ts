@@ -17,6 +17,7 @@ import type {
 } from "@subboost/core/types/config";
 import { resolveProxyGroupMembers } from "@subboost/core/proxy-group-advanced";
 import { isSubscriptionInfoNodeName } from "@subboost/core/subscription/info-node-name";
+import type { ChainGroupRef } from "@subboost/core/proxy-group-targets";
 
 import { PROXY_GROUP_MODULES, type ProxyGroupModule, type ProxyGroupRule } from "./proxy-group-modules";
 import {
@@ -65,10 +66,19 @@ export interface ProxyGroupGenerateOptions {
   experimentalCnUseCnRuleSet?: boolean;
   proxyGroupNameOverrides?: Record<string, string>;
   ruleOrder?: string[];
+  /** 链式代理：出口组名与其落地节点（成员收敛用） */
+  chainMemberPlan?: ChainMemberPlan;
+  /** 启用的链：成员引用时把 chain:<id> 认成出口组名 */
+  chainGroups?: ChainGroupRef[];
 }
 
 /** @deprecated Use `ProxyGroupGenerateOptions`; retained for 2.x source compatibility. */
 export type GenerateOptions = ProxyGroupGenerateOptions;
+
+/** 链式代理的成员收敛计划：落地节点退出各组的成员列表，出口组顶替它的坑位 */
+export type ChainMemberPlan = {
+  exitGroups: Array<{ id: string; name: string; landingNodes: string[] }>;
+};
 
 export { isSubscriptionInfoNodeName };
 
@@ -149,6 +159,33 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
   const nodeNames = nodes.map((n) => n.name);
   // 业务组/测速组需要过滤掉“信息节点”，仅在 🚀 节点选择 中保留显示
   const filteredNodeNames = nodeNames.filter((n) => !isSubscriptionInfoNodeName(n));
+
+  // 链式代理：落地节点退出所有组的成员列表，出口组顶替它原来的坑位（解析见 subscription/chain-nodes）
+  const chainMemberPlan = options.chainMemberPlan ?? { exitGroups: [] };
+  const chainLandingToExit = new Map<string, string>();
+  for (const group of chainMemberPlan.exitGroups) {
+    for (const nodeName of group.landingNodes) {
+      if (!chainLandingToExit.has(nodeName)) chainLandingToExit.set(nodeName, group.name);
+    }
+  }
+  const chainAwareNames = (names: string[]): string[] => {
+    if (chainLandingToExit.size === 0) return names;
+    const out: string[] = [];
+    const seen = new Set<string>();
+    for (const name of names) {
+      const next = chainLandingToExit.get(name) ?? name;
+      if (seen.has(next)) continue;
+      seen.add(next);
+      out.push(next);
+    }
+    return out;
+  };
+  /** 只含节点：⚡ 自动选择这类测速组不能把出口组当成员，否则「自动」变成手选 */
+  const nodeOnlyNames = filteredNodeNames.filter((name) => !chainLandingToExit.has(name));
+  /** 链感知的成员列表：落地节点被原地替换成出口组名 */
+  const memberNames = chainAwareNames(filteredNodeNames);
+  /** 🚀 节点选择用全量节点名（含信息节点） */
+  const allMemberNames = chainAwareNames(nodeNames);
   const groups: ProxyGroup[] = [];
   const processedModules = new Set<string>();
   const leadingCustomProxyGroups = activeCustomProxyGroups.filter(usesFilteredNodeMembers);
@@ -191,22 +228,22 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         "DIRECT",
         "REJECT",
         ...customGroupNames,
-        ...filteredNodeNames
+        ...memberNames
       )
     : fallbackTargets(
         autoTarget,
         ...customGroupNames,
-        ...filteredNodeNames,
+        ...memberNames,
         "DIRECT",
         "REJECT"
       );
-  const customBaseProxies = fallbackTargets("DIRECT", "REJECT", ...filteredNodeNames);
+  const customBaseProxies = fallbackTargets("DIRECT", "REJECT", ...memberNames);
   const availableMemberProxyNames = fallbackTargets(
     "DIRECT",
     "REJECT",
     autoTarget,
     selectTarget,
-    ...filteredNodeNames,
+    ...memberNames,
     ...PROXY_GROUP_MODULES.filter((module) => enabledSet.has(module.id)).map((module) => moduleNames[module.id]),
     ...customGroupNames,
   );
@@ -222,6 +259,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
       nodes,
       moduleNames,
       customProxyGroups: activeCustomProxyGroups,
+      chainGroups: options.chainGroups ?? [],
       advanced,
       self,
     }).proxyNames;
@@ -256,7 +294,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
             autoTarget,
             "DIRECT",
             "REJECT",
-            ...nodeNames
+            ...allMemberNames
           );
           groups.push({
             name: moduleName,
@@ -288,7 +326,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
           groups.push(createGeneratedProxyGroup(
             moduleName,
             groupType,
-            resolveGroupProxyNames(filteredNodeNames, advanced, {
+            resolveGroupProxyNames(nodeOnlyNames, advanced, {
               kind: "module",
               id: module.id,
               name: moduleName,
@@ -301,7 +339,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         groups.push(createGeneratedProxyGroup(
           moduleName,
           groupType,
-          resolveGroupProxyNames(filteredNodeNames, advanced, {
+          resolveGroupProxyNames(nodeOnlyNames, advanced, {
             kind: "module",
             id: module.id,
             name: moduleName,
@@ -313,7 +351,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         groups.push(createGeneratedProxyGroup(
           moduleName,
           groupType,
-          resolveGroupProxyNames(filteredNodeNames, advanced, {
+          resolveGroupProxyNames(nodeOnlyNames, advanced, {
             kind: "module",
             id: module.id,
             name: moduleName,
@@ -346,7 +384,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
             ...customGroupNames,
             selectTarget,
             autoTarget,
-            ...filteredNodeNames
+            ...memberNames
           ).filter((target) => target !== moduleName);
           groups.push({
             name: moduleName,
@@ -374,13 +412,13 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
 
     if (usesFilteredNodeMembers(customGroup)) {
       if (customGroup.groupType === "url-test" || customGroup.groupType === "fallback") {
-        return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(filteredNodeNames), undefined, {}, customGroup.advanced?.testUrl);
+        return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(nodeOnlyNames), undefined, {}, customGroup.advanced?.testUrl);
       }
       if (customGroup.groupType === "load-balance") {
         return createGeneratedProxyGroup(
           customGroup.name,
           customGroup.groupType,
-          resolveCustom(filteredNodeNames),
+          resolveCustom(nodeOnlyNames),
           customGroup.strategy ?? DEFAULT_LOAD_BALANCE_STRATEGY,
           {}
         );
@@ -389,21 +427,21 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         name: customGroup.name,
         type: "select",
         proxies: customGroup.groupType === "reject-first"
-          ? resolveCustom(["REJECT", "DIRECT", ...filteredNodeNames])
-          : resolveCustom(["DIRECT", "REJECT", ...filteredNodeNames]),
+          ? resolveCustom(["REJECT", "DIRECT", ...memberNames])
+          : resolveCustom(["DIRECT", "REJECT", ...memberNames]),
       };
     }
     if (customGroup.groupType === "url-test") {
-      return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(filteredNodeNames), undefined, providerUse, customGroup.advanced?.testUrl);
+      return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(nodeOnlyNames), undefined, providerUse, customGroup.advanced?.testUrl);
     }
     if (customGroup.groupType === "fallback") {
-      return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(filteredNodeNames));
+      return createGeneratedProxyGroup(customGroup.name, customGroup.groupType, resolveCustom(nodeOnlyNames));
     }
     if (customGroup.groupType === "load-balance") {
       return createGeneratedProxyGroup(
         customGroup.name,
         customGroup.groupType,
-        resolveCustom(filteredNodeNames),
+        resolveCustom(nodeOnlyNames),
         customGroup.strategy ?? DEFAULT_LOAD_BALANCE_STRATEGY
       );
     }
@@ -412,7 +450,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         name: customGroup.name,
         type: "select",
         proxies: resolveCustom(
-          fallbackTargets("DIRECT", "REJECT", ...filteredNodeNames).filter(
+          fallbackTargets("DIRECT", "REJECT", ...memberNames).filter(
             (target) => target !== customGroup.name
           )
         ),
@@ -424,7 +462,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
         name: customGroup.name,
         type: "select",
         proxies: resolveCustom(
-          fallbackTargets("REJECT", "DIRECT", ...filteredNodeNames).filter(
+          fallbackTargets("REJECT", "DIRECT", ...memberNames).filter(
             (target) => target !== customGroup.name
           )
         ),

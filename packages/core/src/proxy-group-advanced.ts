@@ -11,7 +11,7 @@ import type {
   ProxyGroupMemberRef,
 } from "@subboost/core/types/config";
 import type { ParsedNode } from "@subboost/core/types/node";
-import { getProxyGroupMemberKey } from "@subboost/core/proxy-group-targets";
+import { getProxyGroupMemberKey, type ChainGroupRef } from "@subboost/core/proxy-group-targets";
 
 export const REGION_PRESETS: Array<{
   id: NodeRegion;
@@ -48,6 +48,8 @@ export interface ResolveProxyGroupMembersOptions {
   nodes: ParsedNode[];
   moduleNames?: Record<string, string>;
   customProxyGroups?: CustomProxyGroup[];
+  /** 启用的链式代理出口组：可像普通组一样被成员引用选中 */
+  chainGroups?: ChainGroupRef[];
   advanced?: ProxyGroupAdvancedConfig;
   self?: { kind: "module" | "custom"; id: string; name: string };
 }
@@ -148,6 +150,9 @@ export function normalizeProxyGroupMemberRef(value: unknown): ProxyGroupMemberRe
   if (item.kind === "custom" && typeof item.id === "string" && item.id.trim()) {
     return { kind: "custom", id: item.id.trim() };
   }
+  if (item.kind === "chain" && typeof item.id === "string" && item.id.trim()) {
+    return { kind: "chain", id: item.id.trim() };
+  }
   return null;
 }
 
@@ -214,6 +219,7 @@ function buildMemberFromName(
     nodeNameSet: Set<string>;
     moduleNameToId: Map<string, string>;
     customNameToId: Map<string, string>;
+    chainNameToId: Map<string, string>;
   }
 ): ProxyGroupResolvedMember | null {
   const trimmed = name.trim();
@@ -228,6 +234,8 @@ function buildMemberFromName(
     if (moduleId) ref = { kind: "module", id: moduleId };
     const customId = options.customNameToId.get(trimmed);
     if (!ref && customId) ref = { kind: "custom", id: customId };
+    const chainId = options.chainNameToId.get(trimmed);
+    if (!ref && chainId) ref = { kind: "chain", id: chainId };
   }
 
   if (!ref) return null;
@@ -245,6 +253,7 @@ function buildMemberFromRef(
     nodeNameSet: Set<string>;
     moduleNames: Record<string, string>;
     customGroupsById: Map<string, CustomProxyGroup>;
+    chainNameById: Map<string, string>;
   }
 ): ProxyGroupResolvedMember | null {
   const key = getProxyGroupMemberKey(ref);
@@ -256,6 +265,10 @@ function buildMemberFromRef(
   }
   if (ref.kind === "module") {
     const name = options.moduleNames[ref.id]?.trim();
+    return name ? { ref, key, name, kind: ref.kind } : null;
+  }
+  if (ref.kind === "chain") {
+    const name = options.chainNameById.get(ref.id)?.trim();
     return name ? { ref, key, name, kind: ref.kind } : null;
   }
   const group = options.customGroupsById.get(ref.id);
@@ -308,13 +321,20 @@ export function resolveProxyGroupMembers(options: ResolveProxyGroupMembersOption
       customGroupsById.set(group.id, group);
     }
   }
+  const chainNameById = new Map<string, string>();
+  for (const group of options.chainGroups || []) {
+    const name = typeof group.name === "string" ? group.name.trim() : "";
+    if (name && group.id) chainNameById.set(group.id, name);
+  }
+  const chainNameToId = new Map<string, string>();
+  for (const [id, name] of chainNameById) chainNameToId.set(name, id);
 
   const buildMembersFromNames = (names: string[]) => {
     const out: ProxyGroupResolvedMember[] = [];
     const seen = new Set<string>();
     for (const rawName of names || []) {
       if (typeof rawName !== "string") continue;
-      const member = buildMemberFromName(rawName, { nodeNameSet, moduleNameToId, customNameToId });
+      const member = buildMemberFromName(rawName, { nodeNameSet, moduleNameToId, customNameToId, chainNameToId });
       if (!member || seen.has(member.key)) continue;
       if (options.self && member.key === `${options.self.kind}:${options.self.id}`) continue;
       seen.add(member.key);
@@ -333,6 +353,7 @@ export function resolveProxyGroupMembers(options: ResolveProxyGroupMembersOption
       nodeNameSet,
       moduleNames: options.moduleNames || {},
       customGroupsById,
+      chainNameById,
     });
     if (!member || candidateMap.has(member.key)) continue;
     if (options.self && member.key === `${options.self.kind}:${options.self.id}`) continue;

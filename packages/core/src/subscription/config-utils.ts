@@ -6,9 +6,11 @@ import {
   DEFAULT_LOAD_BALANCE_STRATEGY,
   isLoadBalanceStrategy,
   isProxyGroupGroupType,
+  type ChainSelector,
   type CustomProxyGroup,
   type CustomRule,
   type GroupListenerBinding,
+  type ProxyChain,
   type ProxyGroupRuleTarget,
   type TemplateType,
   type UserConfig,
@@ -268,6 +270,45 @@ export function getEffectiveTestOptions(config: Record<string, unknown>): { test
 
   return { testUrl, testInterval };
 }
+function normalizeChainSelector(value: unknown): ChainSelector {
+  const record = isRecord(value) ? value : {};
+  const includeRegex = toTrimmedString(record.includeRegex);
+  const excludeRegex = toTrimmedString(record.excludeRegex);
+  return {
+    sourceIds: normalizeStringArray(record.sourceIds),
+    ...(includeRegex ? { includeRegex } : {}),
+    ...(excludeRegex ? { excludeRegex } : {}),
+  };
+}
+
+/**
+ * 链式代理配置的宽松规范化：只修剪字段、不校验语义。
+ *
+ * 「组名冲突 / 落地为空 / 正则写坏」都要在生成期带着原因暴露给界面，
+ * 所以这里不能提前把条目丢掉，否则用户看不到为什么这条链没生效。
+ */
+export function normalizeProxyChains(value: unknown): ProxyChain[] {
+  if (!Array.isArray(value)) return [];
+  const out: ProxyChain[] = [];
+  for (const item of value) {
+    if (!isRecord(item)) continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    const testUrl = toTrimmedString(item.testUrl);
+    out.push({
+      id,
+      name,
+      ...(item.enabled === false ? { enabled: false } : {}),
+      relay: normalizeChainSelector(item.relay),
+      landing: normalizeChainSelector(item.landing),
+      ...(isProxyGroupGroupType(item.exitGroupType) ? { exitGroupType: item.exitGroupType } : {}),
+      ...(isProxyGroupGroupType(item.relayGroupType) ? { relayGroupType: item.relayGroupType } : {}),
+      ...(testUrl ? { testUrl } : {}),
+    });
+  }
+  return out;
+}
+
 
 export function buildGenerateOptionsFromConfig(
   rawConfig: Record<string, unknown>,
@@ -339,6 +380,7 @@ export function buildGenerateOptionsFromConfig(
   };
 
   const dialerProxyGroups = normalizeDialerProxyGroups(config.dialerProxyGroups);
+  const proxyChains = normalizeProxyChains(config.proxyChains);
   const proxyGroupOrder = normalizeProxyGroupOrder(config.proxyGroupOrder);
   const effectiveNodes = resolveNodeNameFilter(opts.nodes, config.nodeNameFilter).effectiveNodes;
   const groupListeners = normalizeGroupListeners(config.groupListeners);
@@ -357,6 +399,7 @@ export function buildGenerateOptionsFromConfig(
     template,
     userConfig,
     ...(dialerProxyGroups.length > 0 ? { dialerProxyGroups } : {}),
+    ...(proxyChains.length > 0 ? { proxyChains } : {}),
     ...(customProxyGroups.length > 0 ? { customProxyGroups } : {}),
     ...(customRuleSets.length > 0 ? { customRuleSets } : {}),
     ...(proxyGroupAdvanced && Object.keys(proxyGroupAdvanced).length > 0 ? { proxyGroupAdvanced } : {}),
