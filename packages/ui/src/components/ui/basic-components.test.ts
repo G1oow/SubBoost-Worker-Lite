@@ -22,7 +22,8 @@ describe("basic UI components", () => {
     expect(html).toContain("href=\"/docs\"");
     expect(html).toContain("Warn");
     expect(buttonVariants({ variant: "outline", size: "sm" })).toContain("h-8");
-    expect(badgeVariants({ variant: "success" })).toContain("green");
+    // success 变体改用语义令牌：深浅两套主题各有一份值，不再直接写调色板
+    expect(badgeVariants({ variant: "success" })).toContain("text-success-note-fg");
   });
 
   it("renders card sections and date/text inputs with merged classes", () => {

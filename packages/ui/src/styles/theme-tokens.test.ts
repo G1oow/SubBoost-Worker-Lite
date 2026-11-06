@@ -82,6 +82,33 @@ describe("theme token parity", () => {
     expect(darkNames.has("--surface-raised")).toBe(true);
     expect(darkNames.has("--surface-popover")).toBe(true);
   });
+
+  /**
+   * 前景刻度只留六档。浅色主题里 35/40/45/50 曾映射到同一个色值，
+   * 结果同一层级的说明文字在不同页面深浅不一；把这些中间档重新加回来
+   * 等于把分叉重新引进来。
+   */
+  it("keeps the foreground scale at exactly six steps", () => {
+    const steps = [...themeCss.matchAll(/--color-fg(-[\w-]+)?:\s*var\(/gu)]
+      .map((match) => match[1]?.slice(1) ?? "base")
+      .sort();
+    expect(steps).toEqual(["35", "45", "60", "70", "80", "base"]);
+  });
+
+  /**
+   * 状态提示是「前景 + 底色 + 描边」成组的令牌。少任何一个，组件就只能
+   * 回退到手拼调色板，浅色主题下的对比度又会分叉。
+   */
+  it("defines the full warning/danger/success note token triplets", () => {
+    for (const tone of ["warning", "danger", "success"]) {
+      for (const part of ["fg", "bg", "border"]) {
+        const name = `--${tone}-note-${part}`;
+        expect(darkNames.has(name), `深色块缺 ${name}`).toBe(true);
+        expect(lightNames.has(name), `浅色块缺 ${name}`).toBe(true);
+        expect(themeBlockNames.has(`--color-${tone}-note-${part}`), `@theme inline 缺 ${name}`).toBe(true);
+      }
+    }
+  });
 });
 
 describe("opaque chrome", () => {

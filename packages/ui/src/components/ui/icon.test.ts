@@ -22,9 +22,9 @@ describe("Icon", () => {
   });
 
   it("不传尺寸档位时完全交给容器或 className 控制", () => {
-    const html = render({ icon: CircleCheck, className: "text-fg-40" });
+    const html = render({ icon: CircleCheck, className: "text-fg-45" });
 
-    expect(html).toContain("text-fg-40");
+    expect(html).toContain("text-fg-45");
     for (const sizeClass of Object.values(ICON_SIZE_CLASS)) {
       expect(html).not.toContain(sizeClass);
     }

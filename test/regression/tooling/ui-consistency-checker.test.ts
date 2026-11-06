@@ -199,4 +199,43 @@ describe("public UI consistency checker", () => {
     runCheck([join(tempRoot, "missing")]);
     expect(log).toHaveBeenCalledWith("UI consistency check passed (0 source files scanned).");
   });
+
+  it("rejects off-scale font sizes, flattened fg scale, and raw status palettes", () => {
+    const badFile = writeSource(
+      "packages/components/off-scale.tsx",
+      [
+        `export const A = () => <p className="text-[11px] text-fg-50" />;`,
+        `export const B = () => <p className="hover:text-fg-85 placeholder:text-amber-400" />;`,
+        `export const C = () => <p className="text-red-400 text-emerald-300" />;`,
+      ].join("\n"),
+    );
+    const errors: string[] = [];
+    vi.spyOn(console, "error").mockImplementation((message) => errors.push(String(message)));
+    process.exit = vi.fn((code?: string | number | null) => {
+      throw new Error("exit:" + code);
+    }) as never;
+
+    expect(() => runCheck([badFile])).toThrow("exit:1");
+    const output = errors.join("\n");
+    expect(output).toContain("text-[11px]");
+    expect(output).toContain("text-2xs");
+    expect(output).toContain("text-fg-50");
+    expect(output).toContain("hover:text-fg-85");
+    expect(output).toContain("placeholder:text-amber-400");
+    expect(output).toContain("text-red-400");
+    expect(output).toContain("text-emerald-300");
+    expect(output).toContain("text-warning-note-fg");
+    // 六处：字号 1 + 前景 2 + 状态色 3
+    expect(errors.at(-1)).toContain("UI consistency check failed with 6 finding(s).");
+  });
+
+  it("accepts the in-scale sizes and semantic note tokens", () => {
+    writeSource(
+      "packages/components/in-scale.tsx",
+      `export const A = () => <p className="text-2xs text-fg-45 bg-warning-note-bg text-danger-note-fg border-success-note-border" />;`,
+    );
+    const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+    runCheck(["packages"]);
+    expect(log).toHaveBeenCalledWith("UI consistency check passed (1 source files scanned).");
+  });
 });

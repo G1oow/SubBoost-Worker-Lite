@@ -70,6 +70,16 @@
     --warning-strong-fg: color-mix(in oklab, var(--color-amber-300) 90%, transparent);
     --success-muted-fg: color-mix(in oklab, var(--color-green-200) 70%, transparent);
     --success-label-fg: var(--color-green-400);
+    /* 状态提示（InlineNote / Badge）：底色、描边、前景成组，深色浅色各一套，
+       组件只引用这三个名字，不再各自拼 amber/red/green 的透明度变体。 */
+    --warning-note-fg: color-mix(in oklab, var(--color-amber-200) 90%, transparent);
+    --warning-note-bg: color-mix(in oklab, var(--color-amber-500) 12%, transparent);
+    --warning-note-border: color-mix(in oklab, var(--color-amber-500) 32%, transparent);
+    --danger-note-bg: color-mix(in oklab, var(--color-red-500) 12%, transparent);
+    --danger-note-border: color-mix(in oklab, var(--color-red-500) 32%, transparent);
+    --success-note-fg: color-mix(in oklab, var(--color-green-200) 90%, transparent);
+    --success-note-bg: color-mix(in oklab, var(--color-green-500) 12%, transparent);
+    --success-note-border: color-mix(in oklab, var(--color-green-500) 32%, transparent);
     --primary-label-fg: var(--color-primary-300);
     --preview-node-count-fg: var(--color-primary-500);
     --preview-group-count-fg: var(--color-green-500);
@@ -82,21 +92,11 @@
     --ink: #fff;
     --shade: #000;
     --fg: #fff;
-    --fg-90: color-mix(in oklab, #fff 90%, transparent);
-    --fg-85: color-mix(in oklab, #fff 85%, transparent);
     --fg-80: color-mix(in oklab, #fff 80%, transparent);
-    --fg-75: color-mix(in oklab, #fff 75%, transparent);
     --fg-70: color-mix(in oklab, #fff 70%, transparent);
-    --fg-65: color-mix(in oklab, #fff 65%, transparent);
     --fg-60: color-mix(in oklab, #fff 60%, transparent);
-    --fg-55: color-mix(in oklab, #fff 55%, transparent);
-    --fg-50: color-mix(in oklab, #fff 50%, transparent);
     --fg-45: color-mix(in oklab, #fff 45%, transparent);
-    --fg-40: color-mix(in oklab, #fff 40%, transparent);
     --fg-35: color-mix(in oklab, #fff 35%, transparent);
-    --fg-30: color-mix(in oklab, #fff 30%, transparent);
-    --fg-25: color-mix(in oklab, #fff 25%, transparent);
-    --fg-20: color-mix(in oklab, #fff 20%, transparent);
     --heading-from: #fff;
     --heading-to: color-mix(in oklab, #fff 60%, transparent);
     --border-default: rgba(255, 255, 255, 0.1);
@@ -344,6 +344,15 @@
     --warning-strong-fg: #92400e;
     --success-muted-fg: oklch(44.8% 0.119 151.328);
     --success-label-fg: var(--color-green-800);
+    /* 与深色块同名同数量：浅色下把前景压深，底色只留一层薄色，白底上才既分清又不脏 */
+    --warning-note-fg: #92400e;
+    --warning-note-bg: color-mix(in oklab, var(--color-amber-500) 14%, transparent);
+    --warning-note-border: color-mix(in oklab, var(--color-amber-500) 42%, transparent);
+    --danger-note-bg: color-mix(in oklab, var(--color-red-500) 10%, transparent);
+    --danger-note-border: color-mix(in oklab, var(--color-red-500) 38%, transparent);
+    --success-note-fg: #166534;
+    --success-note-bg: color-mix(in oklab, var(--color-green-500) 12%, transparent);
+    --success-note-border: color-mix(in oklab, var(--color-green-500) 40%, transparent);
     --primary-label-fg: var(--color-primary-800);
     --preview-node-count-fg: #1d4ed8;
     --preview-group-count-fg: oklch(44.8% 0.119 151.328);
@@ -355,21 +364,11 @@
     --ink: #1e3a6e;
     --shade: #fff;
     --fg: #0f172a;
-    --fg-90: #0f172a;
-    --fg-85: #0f172a;
     --fg-80: #1e293b;
-    --fg-75: #1e293b;
     --fg-70: #334155;
-    --fg-65: #334155;
     --fg-60: #475569;
-    --fg-55: #475569;
-    --fg-50: #536379;
     --fg-45: #536379;
-    --fg-40: #536379;
     --fg-35: #536379;
-    --fg-30: #5f6f86;
-    --fg-25: #5f6f86;
-    --fg-20: var(--fg-25);
     --heading-from: #0f172a;
     --heading-to: #0f172a;
     --border-default: color-mix(in oklab, #1e3a6e 10%, transparent);
@@ -575,6 +574,10 @@
 
 /* Project scales: registered here so their utilities exist; the dark values match the block above. */
 @theme {
+  /* 字号刻度：Tailwind 默认从 text-xs(12px) 起步，界面里大量「比 xs 再小一号」的
+     说明文字只能用 text-[11px] 写死。这里补一档，全站统一用它。 */
+  --text-2xs: 0.6875rem;
+  --text-2xs--line-height: 1rem;
   --color-primary: #6366f1;
   --color-primary-50: #eef2ff;
   --color-primary-100: #e0e7ff;
@@ -629,6 +632,14 @@
   --color-warning-strong-fg: var(--warning-strong-fg);
   --color-success-muted-fg: var(--success-muted-fg);
   --color-success-label-fg: var(--success-label-fg);
+  --color-warning-note-fg: var(--warning-note-fg);
+  --color-warning-note-bg: var(--warning-note-bg);
+  --color-warning-note-border: var(--warning-note-border);
+  --color-danger-note-bg: var(--danger-note-bg);
+  --color-danger-note-border: var(--danger-note-border);
+  --color-success-note-fg: var(--success-note-fg);
+  --color-success-note-bg: var(--success-note-bg);
+  --color-success-note-border: var(--success-note-border);
   --color-primary-label-fg: var(--primary-label-fg);
   --color-preview-node-count-fg: var(--preview-node-count-fg);
   --color-preview-group-count-fg: var(--preview-group-count-fg);
@@ -637,21 +648,13 @@
   --color-fg: var(--fg);
   --color-solid-label-fg: var(--solid-label-fg, inherit);
   --color-solid-label: var(--solid-label-bg);
-  --color-fg-90: var(--fg-90);
-  --color-fg-85: var(--fg-85);
+  /* 前景刻度只留 fg / 80 / 70 / 60 / 45 / 35 六档：
+     浅色主题里 35/40/45/50 映射到同一个色值，多出来的档位只会让写法各写一套。 */
   --color-fg-80: var(--fg-80);
-  --color-fg-75: var(--fg-75);
   --color-fg-70: var(--fg-70);
-  --color-fg-65: var(--fg-65);
   --color-fg-60: var(--fg-60);
-  --color-fg-55: var(--fg-55);
-  --color-fg-50: var(--fg-50);
   --color-fg-45: var(--fg-45);
-  --color-fg-40: var(--fg-40);
   --color-fg-35: var(--fg-35);
-  --color-fg-30: var(--fg-30);
-  --color-fg-25: var(--fg-25);
-  --color-fg-20: var(--fg-20);
   --color-heading-from: var(--heading-from);
   --color-heading-to: var(--heading-to);
   --color-code-panel: var(--code-panel-bg);

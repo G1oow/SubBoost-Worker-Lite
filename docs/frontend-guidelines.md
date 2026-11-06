@@ -87,19 +87,39 @@ packages/ui/src/        可复用能力：业务无关
 
 | 用途 | 令牌 |
 | --- | --- |
-| 正文/次级/弱化文字 | `text-fg`、`text-fg-60`、`text-fg-45`、`text-fg-35` |
+| 正文/次级/弱化文字 | `text-fg`、`text-fg-80`、`text-fg-70`、`text-fg-60`、`text-fg-45`、`text-fg-35` |
 | 前景透明填充与描边 | `bg-ink/5`、`bg-ink/10`、`border-ink/10` |
 | 表面 | `bg-surface`、`bg-surface-raised`、`bg-surface-popover` |
 | 卡片描边/阴影 | `border-card-border`、`shadow-(--surface-shadow)` |
 | 常驻色块（页头、底栏） | `bg-header`（必须是不透明实心色） |
 | 遮罩 | `bg-overlay` |
 | 焦点环 | `ring-focus-ring` |
+| 警告/失败/成功提示 | `text-warning-note-fg`、`bg-warning-note-bg`、`border-warning-note-border`（danger / success 同构） |
+
+**前景只有六档**：`fg / fg-80 / fg-70 / fg-60 / fg-45 / fg-35`。浅色主题里相邻几档本就映射到同一个色值，
+多写一档只会让同一层级的文字在不同页面深浅不一；`text-fg-50`、`text-fg-40` 这类中间值已从令牌表移除，
+`check:ui-consistency` 会拦下来。
 
 写 class 一律过 `cn()`（`@subboost/ui/lib/utils`），让条件类与外部传入的 `className` 能正确合并。
 
-语义色（成功/警告/危险）允许用 `emerald` / `amber` / `red` 的透明度变体
-（如 `border-emerald-500/30 bg-emerald-500/10 text-emerald-400`），
-但必须是**成对**的浅色可用写法，不许只写深色下才看得清的值。
+**状态色只走语义令牌。** 警告/失败/成功三种提示的「前景 + 底色 + 描边」是成组的主题令牌，
+深浅两套主题各有一份值。不要再在页面里拼 `border-amber-500/30 bg-amber-500/10 text-amber-400`：
+同一句提示在不同页面会变成三种底色，而且 `text-amber-400` 在白底上几乎看不清。
+直接用 `InlineNote`（页面级提示）或 `Badge` / `Toast` 的 `tone`（状态标签）：
+
+```tsx
+// ✅ 组件选 tone，颜色由令牌决定
+<InlineNote tone="warning">有 2 条自定义规则格式无效，生成时会被忽略。</InlineNote>
+
+// ❌ 手拼调色板：浅色主题下分叉，且无法统一内边距与字号
+<p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">…</p>
+```
+
+例外只有协议徽标（`protocol-badge.tsx`）：那里的颜色是**协议标识色**，不表达状态，允许继续用调色板。
+
+**字号只有刻度内档位。** Tailwind 默认从 `text-xs`（12px）起步，界面里大量「比 xs 再小一号」的
+说明文字过去写成 `text-[11px]`。现在统一用 `text-2xs`（11px，定义在 `theme.css` 的 `@theme` 里），
+任意值字号 `text-[11px]` / `text-[10px]` 一律被拦下。
 
 新增令牌的流程：`theme.css` 两套主题块同时加 → 在 `@theme inline` 里映射成 `--color-*` →
 确认 `theme-tokens.test.ts` 通过。
@@ -137,6 +157,31 @@ packages/ui/src/        可复用能力：业务无关
 - 表单控件字号在移动端不得低于 16px（`text-base`，桌面用 `sm:text-sm` 降回 14px），
   否则 iOS Safari 聚焦时会自动放大整页。
 - 校验错误用 `role="alert"` 内联显示，不要只靠 toast。
+
+### 状态提示与空状态
+
+- **提示**统一用 `InlineNote`：`tone` 选 `warning` / `danger` / `success`，
+  `variant="plain"` 用于「只有一行附注」的场合（不加底色描边），`alert` 只在需要立刻朗读时传。
+  不要再手写 `flex items-start gap-1.5` + 调色板的组合；图标可覆盖（例如锁、盾牌）或传 `null` 去掉。
+- **空状态**统一用 `EmptyState`：虚线框、居中文案，可选 `icon` 与 `action`（例如「新建链」按钮）。
+  列表为空、筛选无结果、首次进入都走它，不要各自写 `rounded-xl border border-dashed`。
+- 空状态文案要说清「现在没有」和「下一步做什么」，不要只写「暂无数据」。
+
+### 可折叠列表卡片
+
+同构条目（链式代理、未来的规则组等）一张卡片内有大量字段时，默认展开会把页面拉成几屏，
+必须做成可折叠。约定如下：
+
+- **正文按需挂载**，不用 `hidden` / 高度动画：收起时 DOM 里不留三分栏、不留十几个输入框。
+- **折叠状态由父级持有**，一次只展开一条（或明确允许多开），收起其余；新建后自动展开这一条。
+- **摘要行给键盘入口**：收起时正文里的输入框不在了，摘要行要 `role="button"` + `tabIndex={0}`，
+  处理 `Enter` / `空格`，并带 `aria-expanded`。展开态的 `aria-controls` 才指向正文 id，
+  收起时留 `undefined`，避免指向不存在的节点。
+- **状态必须常驻在折叠区之外**：收起后仍要能看出这条为什么没生成（状态徽标、节点计数、冲突原因）。
+- 切换按钮用 `IconButton` + 轮换 `label`（`展开 X` / `收起 X`），图标 `rotate-180` 走
+  `motion-safe:transition-transform`（纯图标装饰，允许 transition）。
+- 折叠是显隐，**不是**入场动画，不要给卡片套 `animate-*`。
+
 
 ### 容器
 
@@ -209,6 +254,10 @@ packages/ui/src/        可复用能力：业务无关
 | 10 | 一条长订阅链接把整页推出横向滚动 | 无空格长串 | `break-words` / `truncate` + 页面级 `overflow-x: hidden` | `mobile-layout.test.ts` |
 | 11 | 页头压住正文，且滚动时挡操作 | 常驻 `sticky` 页头 + 高度变化使文档流跳动 | 页头是普通内容随页面滚走；需要常驻时用 `fixed` 独立层按需挂载 | `mobile-layout.test.ts` |
 | 12 | 两套导航同时进入无障碍树、读屏重复念 | 同一导航在多处渲染但没做互斥 | 断点互斥（`sm:hidden` / `hidden md:flex`）或按需挂载 | `mobile-layout.test.ts` |
+| 13 | 同一条警告在不同页面是三种底色、两种字号 | 每个页面自己拼 amber/red 的透明度变体与内边距 | `InlineNote` + `*-note-*` 令牌；`check:ui-consistency` 拒绝裸调色板 | `test/regression/tooling/ui-consistency-checker.test.ts`、`note-and-empty-state.test.ts` |
+| 14 | 浅色主题下警告文字几乎看不见 | 直接写 `text-amber-400`：深色下尚可，白底上对比度不足 | 用 `text-warning-note-fg`（两套主题各一份值） | 同上 |
+| 15 | 列表空状态样式五花八门（虚线色、字号、内边距各异） | 各处手写 `rounded-xl border border-dashed` | 统一 `EmptyState`，可选 `icon` 与 `action` | `note-and-empty-state.test.ts` |
+| 16 | 说明文字字号在 10/11/12px 之间跳 | 任意值字号 `text-[11px]` 没有刻度约束 | `text-2xs`（11px）/ `text-xs` / `text-sm` | `ui-consistency-checker.test.ts` |
 
 排错顺序建议：先在控制台跑 `AGENTS.md` 里那段合成层扫描脚本，再去 DevTools →
 Layers 看滚动期间哪些层被 squashed，最后才怀疑具体 CSS 数值。
