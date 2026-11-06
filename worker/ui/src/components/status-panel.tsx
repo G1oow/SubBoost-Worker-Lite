@@ -1,6 +1,7 @@
 import * as React from "react";
 import { CircleAlert, CircleCheck, Clock, RefreshCw, TriangleAlert } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { GrowBar } from "@subboost/ui/motion/grow-bar";
@@ -20,20 +21,20 @@ export type StatusPanelProps = {
 /** 结论条的外观：颜色全部来自主题令牌，明暗两套都成立 */
 const TONE_STYLE: Record<RefreshTone, { box: string; icon: React.ReactNode }> = {
   ok: {
-    box: "border-emerald-500/30 bg-emerald-500/10",
-    icon: <Icon icon={CircleCheck} size="lg" className="text-emerald-400" />,
+    box: "border-success-note-border bg-success-note-bg",
+    icon: <Icon icon={CircleCheck} size="lg" className="text-success-note-fg" />,
   },
   warn: {
-    box: "border-amber-500/30 bg-amber-500/10",
-    icon: <Icon icon={TriangleAlert} size="lg" className="text-amber-400" />,
+    box: "border-warning-note-border bg-warning-note-bg",
+    icon: <Icon icon={TriangleAlert} size="lg" className="text-warning-note-fg" />,
   },
   error: {
-    box: "border-red-500/30 bg-red-500/10",
-    icon: <Icon icon={CircleAlert} size="lg" className="text-red-400" />,
+    box: "border-danger-note-border bg-danger-note-bg",
+    icon: <Icon icon={CircleAlert} size="lg" className="text-danger-note-fg" />,
   },
   idle: {
     box: "border-ink/10 bg-ink/5",
-    icon: <Icon icon={Clock} size="lg" className="text-fg-40" />,
+    icon: <Icon icon={Clock} size="lg" className="text-fg-45" />,
   },
 };
 
@@ -41,9 +42,9 @@ const TONE_STYLE: Record<RefreshTone, { box: string; icon: React.ReactNode }> = 
 function Metric({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
     <div className="rounded-xl border border-card-border bg-surface px-3 py-2.5">
-      <p className="text-[11px] text-fg-50">{label}</p>
+      <p className="text-2xs text-fg-45">{label}</p>
       <p className="mt-1 truncate text-base font-semibold leading-none tabular-nums text-fg sm:text-lg">{value}</p>
-      {hint ? <p className="mt-1 truncate text-[11px] tabular-nums text-fg-40">{hint}</p> : null}
+      {hint ? <p className="mt-1 truncate text-2xs tabular-nums text-fg-45">{hint}</p> : null}
     </div>
   );
 }
@@ -61,7 +62,7 @@ function EntryRow({ entry }: { entry: RefreshEntry }) {
       <div
         className={cn(
           "rounded-xl border px-3 pb-2.5 pt-2.5 transition-[border-color,background-color] duration-200",
-          entry.ok ? "border-ink/10 bg-ink/[0.03]" : "border-red-500/30 bg-red-500/10"
+          entry.ok ? "border-ink/10 bg-ink/[0.03]" : "border-danger-note-border bg-danger-note-bg"
         )}
       >
         <div className="flex items-center gap-2.5">
@@ -70,7 +71,7 @@ function EntryRow({ entry }: { entry: RefreshEntry }) {
             className={cn("h-1.5 w-1.5 shrink-0 rounded-full", entry.ok ? "bg-emerald-400" : "bg-red-400")}
           />
           <span className="min-w-0 flex-1 truncate text-sm text-fg-80">{entry.name}</span>
-          <span className="shrink-0 text-xs tabular-nums text-fg-50">{entry.share}%</span>
+          <span className="shrink-0 text-xs tabular-nums text-fg-45">{entry.share}%</span>
         </div>
 
         <GrowBar
@@ -81,7 +82,7 @@ function EntryRow({ entry }: { entry: RefreshEntry }) {
         />
 
         {entry.error ? (
-          <p className="mt-2 break-words text-[11px] leading-relaxed text-red-300">{entry.error}</p>
+          <p className="mt-2 break-words text-2xs leading-relaxed text-danger-note-fg">{entry.error}</p>
         ) : null}
       </div>
     </MotionItem>
@@ -93,7 +94,7 @@ function EntryGroup({ title, entries }: { title: string; entries: RefreshEntry[]
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-fg-60">{title}</p>
-        <span className="text-[11px] tabular-nums text-fg-40">{entries.length} 项</span>
+        <span className="text-2xs tabular-nums text-fg-45">{entries.length} 项</span>
       </div>
       <MotionList as="ul" className="space-y-2" animateOnMount>
         {entries.map((entry) => (
@@ -150,7 +151,7 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
       </CardHeader>
       <CardContent className="space-y-4">
         {board === null ? (
-          <p className="text-sm text-fg-50">还没有刷新记录，点击「立即刷新」抓取上游节点。</p>
+          <EmptyState>还没有刷新记录，点击「立即刷新」抓取上游节点。</EmptyState>
         ) : (
           <>
             {/*

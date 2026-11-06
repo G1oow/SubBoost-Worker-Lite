@@ -219,13 +219,19 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 在 `packages/ui/src/styles/theme.css` 中同时为 `:root/[data-theme="dark"]` 与
 `[data-theme="light"]` 定义变量，再通过生成的工具类使用：
 
-- 文本：`text-fg`、`text-fg-60`、`text-fg-45`
+- 文本：`text-fg`、`text-fg-80`、`text-fg-70`、`text-fg-60`、`text-fg-45`、`text-fg-35`（只有这六档）
 - 填充与描边：`bg-ink/5`、`border-ink/10`
 - 表面：`bg-surface`、`bg-surface-raised`、`bg-header`、`bg-overlay`
+- 状态提示：`text-warning-note-fg`、`bg-warning-note-bg`、`border-warning-note-border`
+  （`danger` / `success` 同构），由 `InlineNote` / `Badge` / `Toast` 消费
+- 字号：`text-2xs`（11px）、`text-xs`、`text-sm`，不用任意值 `text-[11px]`
 
 以下写法会被 `npm run check:ui-consistency` 直接拒绝：`text-white/60`、
 `bg-white/5`、`border-white/10`、`bg-black/40`、`bg-[#0a0a0a]`、`text-zinc-950`、
-`color-scheme: dark`。新增颜色变量要同时改两个主题块。
+`color-scheme: dark`、刻度外的前景色（`text-fg-50`、`text-fg-40` 等）、
+裸调色板状态色（`text-amber-400`、`text-red-400`、`text-emerald-400` 等）、
+任意值字号（`text-[11px]`）。协议徽标 `protocol-badge.tsx` 是唯一例外（协议标识色，非状态色）。
+新增颜色变量要同时改两个主题块。
 
 ### 组件使用
 

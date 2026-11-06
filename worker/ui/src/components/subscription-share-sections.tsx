@@ -1,6 +1,7 @@
 import { BookOpen, Check, Copy, Lock, ShieldAlert } from "lucide-react";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { AGE_ENCRYPTION_DOC_URL } from "../lib/docs-links";
 import { buildAgeLinks, buildImportLinks } from "../lib/share-links";
 import type { AgeCapabilities } from "../lib/types";
@@ -37,7 +38,7 @@ export function ImportLinksSection({
           </Button>
         ))}
       </div>
-      <p className="text-[11px] leading-relaxed text-fg-45">
+      <p className="text-2xs leading-relaxed text-fg-45">
         微信 / QQ 等应用内浏览器会拦截自定义 scheme，拉不起来时改用「复制链接」。
       </p>
     </div>
@@ -57,10 +58,9 @@ export function AgeOnlyNotice() {
 /** AGE_RECIPIENT 配错时的提示 */
 export function AgeMisconfiguredNotice() {
   return (
-    <p className="flex items-start gap-1.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
-      <Icon icon={ShieldAlert} size="sm" className="mt-px shrink-0" />
-      <span>AGE_RECIPIENT 配置无效，age 加密通道已关闭；请检查 Worker 上的 age 公钥。</span>
-    </p>
+    <InlineNote icon={<Icon icon={ShieldAlert} size="sm" />}>
+      AGE_RECIPIENT 配置无效，age 加密通道已关闭；请检查 Worker 上的 age 公钥。
+    </InlineNote>
   );
 }
 
@@ -80,17 +80,17 @@ export function AgeSection({ link, age, copied = false, onCopy }: AgeSectionProp
         <p className="text-xs font-medium text-fg-70">age 加密订阅</p>
         <Button type="button" variant="secondary" size="sm" onClick={onCopy}>
           {copied ? (
-            <Icon icon={Check} className="animate-icon-pop text-emerald-400" />
+            <Icon icon={Check} className="animate-icon-pop text-success-note-fg" />
           ) : (
             <Icon icon={Copy} />
           )}
           {copied ? "已复制" : "复制加密链接"}
         </Button>
       </div>
-      <p className="select-all break-all rounded-lg border border-ink/10 bg-surface px-2 py-1 font-mono text-[11px] leading-relaxed text-fg-60">
+      <p className="select-all break-all rounded-lg border border-ink/10 bg-surface px-2 py-1 font-mono text-2xs leading-relaxed text-fg-60">
         {buildAgeLinks(link).binary}
       </p>
-      <p className="text-[11px] leading-relaxed text-fg-45">
+      <p className="text-2xs leading-relaxed text-fg-45">
         公钥{" "}
         {age.recipients
           .map((recipient) => `${recipient.slice(0, 12)}…${recipient.slice(-4)}`)

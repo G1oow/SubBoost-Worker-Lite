@@ -299,7 +299,7 @@ export function ConfigPanel({
             onSelect={selectSection}
           />
           {sectionNotice ? (
-            <p className="text-xs text-red-400" role="alert">
+            <p className="text-xs text-danger-note-fg" role="alert">
               {sectionNotice}
             </p>
           ) : null}
@@ -337,7 +337,7 @@ export function ConfigPanel({
                 aria-describedby={jsonError ? "config-json-error" : undefined}
               />
               {jsonError ? (
-                <p id="config-json-error" className="text-sm text-red-400" role="alert">
+                <p id="config-json-error" className="text-sm text-danger-note-fg" role="alert">
                   {jsonError}
                 </p>
               ) : null}
@@ -400,7 +400,7 @@ function PreviewStatusLine({ preview }: { preview: PreviewState }) {
   if (preview.status === "idle") return null;
   if (preview.status === "error") {
     return (
-      <p className="flex items-start gap-1.5 text-xs text-red-400" role="alert">
+      <p className="flex items-start gap-1.5 text-xs text-danger-note-fg" role="alert">
         <Icon icon={TriangleAlert} size="sm" className="mt-px shrink-0" />
         <span>生成校验未通过：{preview.message}</span>
       </p>
@@ -414,7 +414,7 @@ function PreviewStatusLine({ preview }: { preview: PreviewState }) {
       <Icon
         icon={loading ? LoaderCircle : CircleCheck}
         size="sm"
-        className={loading ? "animate-spin" : "text-emerald-400"}
+        className={loading ? "animate-spin" : "text-success-note-fg"}
       />
       <span>{loading ? (data ? "正在重新校验…" : "正在按草稿试生成…") : "生成校验通过"}</span>
       {data ? (

@@ -1,6 +1,7 @@
 import * as React from "react";
 import { RotateCcw, Search } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
@@ -59,7 +60,7 @@ export function NodeRenameEditor({
   return (
     <div className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-xs text-fg-50">
+        <p className="text-xs text-fg-45">
           共 {nodes.length} 个节点
           {renamedCount > 0 ? ` · 已改名 ${renamedCount} 个` : ""}
         </p>
@@ -69,7 +70,7 @@ export function NodeRenameEditor({
             <Icon
               icon={Search}
               size="sm"
-              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-40"
+              className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-45"
             />
             <Input
               value={query}
@@ -89,9 +90,9 @@ export function NodeRenameEditor({
           ))}
         </div>
       ) : visible.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-ink/15 px-3 py-6 text-center text-xs text-fg-45">
+        <EmptyState className="px-3 py-6 text-xs">
           {nodes.length === 0 ? emptyHint : "没有匹配的节点。"}
-        </p>
+        </EmptyState>
       ) : (
         <MotionList
           as="ul"
@@ -115,7 +116,7 @@ export function NodeRenameEditor({
                 <ProtocolBadge type={node.type} className="shrink-0" />
                 <div className="min-w-0 flex-1">
                   {/* 原名（含服务器）在上作为说明，输入框（节点名）在下作为主体 */}
-                  <p className="mb-1 truncate text-[11px] text-fg-40">
+                  <p className="mb-1 truncate text-2xs text-fg-45">
                     {renamed ? `原名 ${node.originName || "—"}` : node.originName || "—"}
                     {node.server ? ` · ${node.server}${node.port ? `:${node.port}` : ""}` : ""}
                   </p>
@@ -145,7 +146,7 @@ export function NodeRenameEditor({
       )}
 
       {nodes.length > visible.length ? (
-        <p className="text-[11px] text-fg-35">
+        <p className="text-2xs text-fg-35">
           已隐藏 {nodes.length - visible.length} 个不匹配的节点。
         </p>
       ) : null}

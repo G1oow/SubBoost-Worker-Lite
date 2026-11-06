@@ -15,6 +15,7 @@ import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { confirmDialog } from "@subboost/ui/components/ui/confirm-dialog";
 import {
   Dialog,
@@ -311,12 +312,11 @@ export function SubscriptionsPanel({
       </CardHeader>
       <CardContent>
         {state.sources.length === 0 ? (
-          <div className="animate-fade-in-up rounded-xl border border-dashed border-ink/15 px-4 py-10 text-center">
-            <Icon icon={Link2} size="xl" className="mx-auto mb-2 text-fg-35" />
-            <p className="text-sm text-fg-50">请先添加源，再创建订阅链接。</p>
-          </div>
+          <EmptyState className="animate-fade-in-up" icon={<Icon icon={Link2} size="xl" />}>
+            请先添加源，再创建订阅链接。
+          </EmptyState>
         ) : state.subscriptions.length === 0 ? (
-          <p className="text-sm text-fg-50">还没有订阅，点击「创建订阅」生成一条链接。</p>
+          <EmptyState>还没有订阅，点击「创建订阅」生成一条链接。</EmptyState>
         ) : (
           /*
            * 与「源管理」保持一致：每条订阅是一张独立卡片，而不是表格行。
@@ -337,14 +337,14 @@ export function SubscriptionsPanel({
                       {renderBoundSources(subscription)}
                     </div>
                     {/* 链接单占一行：表格里被压成一列，前缀都读不全 */}
-                    <p className="truncate font-mono text-[11px] text-fg-45" title={subscription.link}>
+                    <p className="truncate font-mono text-2xs text-fg-45" title={subscription.link}>
                       {subscription.link}
                     </p>
                     {/* 短链独立成一个按钮：不翻弹窗也能生成，生成后短码直接显示在这一行 */}
                     {onCreateShortLink ? (
                       subscription.shortLink ? (
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                          <span className="flex min-w-0 items-center gap-1 text-[11px] text-fg-60">
+                          <span className="flex min-w-0 items-center gap-1 text-2xs text-fg-60">
                             <Icon icon={Link2} size="xs" className="shrink-0 text-fg-45" />
                             <span
                               className="select-all break-all font-mono"
@@ -411,7 +411,7 @@ export function SubscriptionsPanel({
                       <Icon
                         icon={Check}
                         className={cn(
-                          copiedId === subscription.id ? "animate-icon-pop text-emerald-400" : "hidden"
+                          copiedId === subscription.id ? "animate-icon-pop text-success-note-fg" : "hidden"
                         )}
                       />
                       <Icon
@@ -494,7 +494,7 @@ export function SubscriptionsPanel({
                 不选择任何源表示使用全部启用源；勾选后只聚合这些源。
               </p>
               {editingId && danglingCount > 0 ? (
-                <p className="text-xs text-amber-400" role="status">
+                <p className="text-xs text-warning-note-fg" role="status">
                   该订阅还挂着 {danglingCount} 个已被删除的源（下方列表不再显示它们），保存后会自动移除。
                 </p>
               ) : null}
@@ -539,7 +539,7 @@ export function SubscriptionsPanel({
             </div>
 
             {error ? (
-              <p className="text-sm text-red-400" role="alert">
+              <p className="text-sm text-danger-note-fg" role="alert">
                 {error}
               </p>
             ) : null}

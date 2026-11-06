@@ -82,7 +82,7 @@ describe("toaster primitives", () => {
     );
 
     expect(html).toContain("toast-extra");
-    expect(html).toContain("border-amber-500/30");
+    expect(html).toContain("border-warning-note-border");
     expect(html).toContain("title-extra");
     expect(html).toContain("description-extra");
     expect(html).toContain("action-extra");
@@ -123,9 +123,9 @@ describe("toaster primitives", () => {
     expect(html).toContain("Updated");
     expect(html).toContain("Changed details");
     expect(html).toContain("Latest");
-    expect(html).toContain("text-red-400");
-    expect(html).toContain("text-emerald-400");
-    expect(html).toContain("text-amber-400");
+    expect(html).toContain("text-danger-note-fg");
+    expect(html).toContain("text-success-note-fg");
+    expect(html).toContain("text-warning-note-fg");
     expect(html).toContain("text-sky-400");
 
     primitiveCaptures.roots[0]?.onOpenChange?.(true);

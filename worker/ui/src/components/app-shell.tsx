@@ -71,7 +71,7 @@ function HeaderBrand({ title, version, compact = false }: HeaderBrandProps) {
           <h1 className="truncate text-base font-semibold text-fg sm:text-lg">{title}</h1>
         )}
         {!compact && version ? (
-          <span className="hidden shrink-0 rounded-full border border-ink/10 bg-ink/5 px-2 py-0.5 text-[11px] text-fg-45 sm:inline-block">
+          <span className="hidden shrink-0 rounded-full border border-ink/10 bg-ink/5 px-2 py-0.5 text-2xs text-fg-45 sm:inline-block">
             v{version}
           </span>
         ) : null}
@@ -354,7 +354,7 @@ export function AppShell({
                     onClick={() => selectNav(option.id)}
                     aria-current={active ? "page" : undefined}
                     className={cn(
-                      "flex min-h-14 w-full flex-col items-center justify-center gap-1 px-1 pb-2 pt-2 text-[11px] font-medium transition-colors",
+                      "flex min-h-14 w-full flex-col items-center justify-center gap-1 px-1 pb-2 pt-2 text-2xs font-medium transition-colors",
                       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-inset",
                       active ? "text-primary-200" : "text-fg-45 active:text-fg-70"
                     )}
@@ -368,7 +368,7 @@ export function AppShell({
                     >
                       {option.icon}
                       {typeof option.badge === "number" ? (
-                        <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-primary-500/25 px-1 text-center text-[10px] leading-4 tabular-nums text-primary-200">
+                        <span className="absolute -right-2.5 -top-1.5 min-w-4 rounded-full bg-primary-500/25 px-1 text-center text-2xs leading-4 tabular-nums text-primary-200">
                           {option.badge}
                         </span>
                       ) : null}

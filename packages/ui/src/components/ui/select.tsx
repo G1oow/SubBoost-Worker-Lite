@@ -21,7 +21,7 @@ const SelectTrigger = React.forwardRef<
     ref={ref}
     className={cn(
       // 移动端起于 16px 避免 iOS 聚焦自动缩放；43px 高度落在 44px 触控目标附近
-      "flex h-11 w-full items-center justify-between whitespace-nowrap rounded-xl border border-field-border bg-field px-4 py-2 text-base text-fg shadow-sm ring-offset-background placeholder:text-fg-40 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-all duration-200 sm:h-10 sm:text-sm",
+      "flex h-11 w-full items-center justify-between whitespace-nowrap rounded-xl border border-field-border bg-field px-4 py-2 text-base text-fg shadow-sm ring-offset-background placeholder:text-fg-45 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:cursor-not-allowed disabled:opacity-50 [&>span]:line-clamp-1 transition-all duration-200 sm:h-10 sm:text-sm",
       className
     )}
     {...props}

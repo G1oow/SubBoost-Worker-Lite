@@ -71,6 +71,32 @@ const themeColorRules = [
   },
   { pattern: /color-scheme:\s*dark/g, hint: "按主题取值的变量，例如 [color-scheme:var(--date-input-scheme)]" },
   { pattern: new RegExp(BOUNDARY + String.raw`(?:bg|text|border|fill)-zinc-950\b`, "g"), hint: "bg-surface-popover" },
+  // 字号与状态色的刻度：theme.css 提供了 --text-2xs 与 *-note-* 一组令牌，
+  // 业务代码不再自己写 text-[11px] 或 text-amber-400 这类散装值。
+  {
+    pattern: new RegExp(BOUNDARY + String.raw`text-\[\d+(?:\.\d+)?(?:px|rem)\]`, "g"),
+    prefix: "字号不在刻度内：",
+    hint: "text-2xs（11px）/ text-xs / text-sm（刻度见 theme.css 的 --text-2xs）",
+  },
+  {
+    pattern: new RegExp(
+      BOUNDARY +
+        VARIANT_PREFIX +
+        String.raw`(?:text|placeholder|bg|border|from|to|via)-fg-(?:20|25|30|40|50|55|65|75|85|90)\b`,
+      "g"
+    ),
+    prefix: "前景刻度外的 ",
+    hint: "前景只有 fg / fg-80 / fg-70 / fg-60 / fg-45 / fg-35 六档",
+  },
+  {
+    pattern: new RegExp(
+      BOUNDARY + VARIANT_PREFIX + String.raw`(?:text|placeholder)-(?:amber|red|emerald|green|yellow)-\d{2,3}\b`,
+      "g"
+    ),
+    prefix: "状态色直接写调色板：",
+    hint: "text-warning-note-fg / text-danger-note-fg / text-success-note-fg，或直接用 InlineNote / Badge 的 tone",
+    skipFileSuffixes: ["/components/ui/protocol-badge.tsx"],
+  },
 ];
 
 function isThemeExcluded(filePath) {
@@ -81,13 +107,16 @@ function checkThemeColors(filePath, sourceText) {
   if (isThemeExcluded(filePath)) return;
   const lines = sourceText.split("\n");
   lines.forEach((lineText, lineIndex) => {
-    for (const { pattern, hint } of themeColorRules) {
+    for (const { pattern, hint, prefix, skipFileSuffixes } of themeColorRules) {
+      if (skipFileSuffixes?.some((suffix) => normalizePath(filePath).endsWith(suffix))) continue;
       for (const match of lineText.matchAll(pattern)) {
         findings.push({
           file: path.relative(workspaceRoot, filePath),
           line: lineIndex + 1,
           column: match.index + 1,
-          message: `深色专用颜色 ${match[0]} 会破坏浅色主题，请改用 ${hint}（主题变量见 packages/ui/src/styles/theme.css）`,
+          message: prefix
+            ? `${prefix}${match[0]}，请改用 ${hint}（令牌见 packages/ui/src/styles/theme.css）`
+            : `深色专用颜色 ${match[0]} 会破坏浅色主题，请改用 ${hint}（主题变量见 packages/ui/src/styles/theme.css）`,
         });
       }
     }

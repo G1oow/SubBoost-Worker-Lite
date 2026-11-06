@@ -106,9 +106,9 @@ function useConfirmDialog() {
 function getVariantIcon(variant: ConfirmDialogVariant) {
   switch (variant) {
     case "destructive":
-      return <Icon icon={CircleX} size="lg" className="text-red-400" />;
+      return <Icon icon={CircleX} size="lg" className="text-danger-note-fg" />;
     case "warning":
-      return <Icon icon={TriangleAlert} size="lg" className="text-amber-400" />;
+      return <Icon icon={TriangleAlert} size="lg" className="text-warning-note-fg" />;
     default:
       return <Icon icon={CircleHelp} size="lg" className="text-indigo-400" />;
   }

@@ -405,7 +405,7 @@ export function App() {
               ))}
             </div>
             <div className="skeleton h-64 w-full animate-shimmer" aria-hidden="true" />
-            <p className="flex items-center justify-center gap-2 py-2 text-sm text-fg-50">
+            <p className="flex items-center justify-center gap-2 py-2 text-sm text-fg-45">
               <Icon icon={LoaderCircle} size="md" className="animate-spin" />
               加载中…
             </p>
@@ -458,7 +458,7 @@ export function App() {
             ) : null}
           </>
         ) : (
-          <div className="py-24 text-center text-fg-50">
+          <div className="py-24 text-center text-fg-45">
             {DEMO_MODE ? "演示数据加载失败，请刷新重试。" : "加载失败，请重新输入 token。"}
           </div>
         )}

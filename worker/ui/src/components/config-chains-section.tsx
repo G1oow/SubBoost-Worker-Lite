@@ -1,13 +1,15 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Plus, Trash2, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronDown, Plus, Trash2 } from "lucide-react";
 import { Badge, type BadgeProps } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { confirmDialog } from "@subboost/ui/components/ui/confirm-dialog";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { FormField } from "@subboost/ui/components/ui/form-field";
 import { Icon } from "@subboost/ui/components/ui/icon";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@subboost/ui/components/ui/select";
 import { Switch } from "@subboost/ui/components/ui/switch";
 import { cn } from "@subboost/ui/lib/utils";
@@ -87,7 +89,18 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
     [config, onChange]
   );
 
-  const handleCreate = () => applyChains([...chains, createChain(chains)]);
+  /*
+   * 折叠状态：新建的链默认展开（刚建就要填），其余默认收起。
+   * 只持有一个 expandedId，点开一条就收起别的，避免整页同时铺开三栏。
+   */
+  const [expandedId, setExpandedId] = React.useState<string | null>(null);
+  const toggleExpanded = (id: string) => setExpandedId((current) => (current === id ? null : id));
+
+  const handleCreate = () => {
+    const created = createChain(chains);
+    applyChains([...chains, created]);
+    setExpandedId(created.id);
+  };
 
   const handleDelete = async (chain: ProxyChain, index: number) => {
     const name = chainDisplayName(chain, index);
@@ -125,9 +138,7 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
         </CardHeader>
         <CardContent>
           {merged.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-ink/15 px-4 py-8 text-center text-sm text-fg-50">
-              还没有链式代理，点击「新建链」创建第一条。
-            </p>
+            <EmptyState>还没有链式代理，点击「新建链」创建第一条。</EmptyState>
           ) : (
             <ol aria-label="链式代理" className="space-y-3">
               {merged.map(({ chain, preview }, index) => (
@@ -140,6 +151,8 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
                     preview={preview}
                     enabledSources={enabledSources}
                     sourceNames={sourceNames}
+                    expanded={expandedId === chain.id}
+                    onToggleExpanded={() => toggleExpanded(chain.id)}
                     onPatch={(patch) => applyChains(patchChain(chains, chain.id, patch))}
                     onPatchSelector={(side, patch) =>
                       applyChains(patchChainSelector(chains, chain.id, side, patch))
@@ -200,6 +213,9 @@ type ChainCardProps = {
   enabledSources: SourceDto[];
   /** 全部源的 id → 名字，用来给已失效的 sourceId 显示可读名称 */
   sourceNames: Map<string, string>;
+  /** 卡片的折叠状态由父级持有：新建或点摘要行时只展开它，收起其余 */
+  expanded: boolean;
+  onToggleExpanded: () => void;
   onPatch: (patch: Partial<ProxyChain>) => void;
   onPatchSelector: (side: ChainSelectorSide, patch: Partial<ChainSelector>) => void;
   onToggleSource: (side: ChainSelectorSide, sourceId: string) => void;
@@ -216,6 +232,8 @@ function ChainCard({
   preview,
   enabledSources,
   sourceNames,
+  expanded,
+  onToggleExpanded,
   onPatch,
   onPatchSelector,
   onToggleSource,
@@ -227,10 +245,28 @@ function ChainCard({
   const { exitGroupName, relayGroupName } = chainGroupNames(chain);
   const status = chainStatusMeta(preview?.status);
   const enabled = chain.enabled !== false;
+  const bodyId = `chain-body-${chain.id}`;
+  const headerId = `chain-header-${chain.id}`;
+  // 收起的卡片上没有输入框可聚焦，摘要行用 tabIndex 补齐键盘入口。
+  // aria-controls 只在正文真的挂载时给，避免指向不存在的节点。
+  const summaryProps = {
+    id: headerId,
+    role: "button" as const,
+    tabIndex: 0,
+    "aria-expanded": expanded,
+    "aria-controls": expanded ? bodyId : undefined,
+    onClick: onToggleExpanded,
+    onKeyDown: (event: React.KeyboardEvent<HTMLDivElement>) => {
+      if (event.target !== event.currentTarget) return;
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onToggleExpanded();
+    },
+  };
 
   return (
     <Card className={cn("overflow-hidden", !enabled && "border-dashed")} data-chain-card={chain.id}>
-      <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+      <CardHeader className="flex flex-col gap-3 pb-0 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="flex min-w-0 flex-1 items-start gap-3">
           <span
             className="mt-2 w-5 shrink-0 text-right font-mono text-xs tabular-nums text-fg-45"
@@ -238,14 +274,23 @@ function ChainCard({
           >
             {index + 1}
           </span>
-          <FormField label="链名" className="min-w-0 flex-1" error={validation.nameError}>
-            <Input
-              value={chain.name}
-              onChange={(event) => onPatch({ name: event.target.value })}
-              placeholder="例如：落地美国"
-              aria-invalid={validation.nameError !== null}
-            />
-          </FormField>
+          {expanded ? (
+            <FormField label="链名" className="min-w-0 flex-1" error={validation.nameError}>
+              <Input
+                value={chain.name}
+                onChange={(event) => onPatch({ name: event.target.value })}
+                placeholder="例如：落地美国"
+                aria-invalid={validation.nameError !== null}
+              />
+            </FormField>
+          ) : (
+            <div
+              {...summaryProps}
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-lg text-sm font-medium text-fg transition-colors duration-200 hover:text-fg-80"
+            >
+              <span className="truncate">{name}</span>
+            </div>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
           <span className="mr-1 text-xs text-fg-45" aria-hidden="true">
@@ -278,70 +323,80 @@ function ChainCard({
           >
             <Icon icon={Trash2} />
           </IconButton>
+          <IconButton
+            label={expanded ? `收起 ${name}` : `展开 ${name}`}
+            variant="ghost"
+            aria-expanded={expanded}
+            aria-controls={expanded ? bodyId : undefined}
+            onClick={onToggleExpanded}
+            className="min-h-9 min-w-9"
+          >
+            <Icon icon={ChevronDown} className={cn("motion-safe:transition-transform motion-safe:duration-200", expanded && "rotate-180")} />
+          </IconButton>
         </div>
       </CardHeader>
 
-      <CardContent className="space-y-3">
-        {/* 状态只来自服务端预览：本地校验的问题单独提示在各自输入框下面 */}
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs" role="status">
-          <Badge variant={TONE_BADGE[status.tone]}>{status.label}</Badge>
-          <span className="text-fg-45">{status.description}</span>
-          {preview ? (
-            <span className="text-fg-60">
-              {`· 前置 ${preview.relayCount} 个节点 · 落地 ${preview.landingCount} 个节点`}
-            </span>
-          ) : null}
-        </div>
+      {/* 状态行常驻：收起的卡片也要能看出这条链为什么不生成 */}
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-xs sm:px-6" role="status">
+        <Badge variant={TONE_BADGE[status.tone]}>{status.label}</Badge>
+        <span className="text-fg-45">{status.description}</span>
+        {preview ? (
+          <span className="text-fg-60">
+            {`· 前置 ${preview.relayCount} 个节点 · 落地 ${preview.landingCount} 个节点`}
+          </span>
+        ) : null}
         {preview?.error ? (
-          <p className="flex items-start gap-1.5 text-[11px] text-amber-400" role="alert">
-            <Icon icon={TriangleAlert} size="sm" className="mt-px shrink-0" />
-            <span className="break-words">{preview.error}</span>
-          </p>
+          <InlineNote variant="plain" alert>
+            {preview.error}
+          </InlineNote>
         ) : null}
         {validation.nameConflictError ? (
-          <p className="flex items-start gap-1.5 text-[11px] text-amber-400" role="alert">
-            <Icon icon={TriangleAlert} size="sm" className="mt-px shrink-0" />
-            <span className="break-words">{validation.nameConflictError}</span>
-          </p>
+          <InlineNote variant="plain" alert>
+            {validation.nameConflictError}
+          </InlineNote>
         ) : null}
         {validation.nameTakenError ? (
-          <p className="flex items-start gap-1.5 text-[11px] text-amber-400" role="alert">
-            <Icon icon={TriangleAlert} size="sm" className="mt-px shrink-0" />
-            <span className="break-words">{validation.nameTakenError}</span>
-          </p>
+          <InlineNote variant="plain" alert>
+            {validation.nameTakenError}
+          </InlineNote>
         ) : null}
+      </div>
 
-        <div className="grid gap-3 lg:grid-cols-3">
-          <SelectorPanel
-            side="relay"
-            title="① 前置（中转节点）"
-            selector={chain.relay}
-            enabledSources={enabledSources}
-            sourceNames={sourceNames}
-            includeError={validation.relayIncludeError}
-            excludeError={validation.relayExcludeError}
-            onToggleSource={(sourceId) => onToggleSource("relay", sourceId)}
-            onPatchSelector={(patch) => onPatchSelector("relay", patch)}
-          />
-          <SelectorPanel
-            side="landing"
-            title="② 落地（最终出口的节点）"
-            selector={chain.landing}
-            enabledSources={enabledSources}
-            sourceNames={sourceNames}
-            includeError={validation.landingIncludeError}
-            excludeError={validation.landingExcludeError}
-            onToggleSource={(sourceId) => onToggleSource("landing", sourceId)}
-            onPatchSelector={(patch) => onPatchSelector("landing", patch)}
-          />
-          <GroupPanel
-            chain={chain}
-            exitGroupName={exitGroupName}
-            relayGroupName={relayGroupName}
-            onPatch={onPatch}
-          />
-        </div>
-      </CardContent>
+      {/* 正文只在展开时挂载：收起不该只是视觉隐藏，DOM 里也不留三分栏 */}
+      {expanded ? (
+        <CardContent id={bodyId} aria-labelledby={headerId} className="space-y-3">
+          <div className="grid gap-3 lg:grid-cols-3">
+            <SelectorPanel
+              side="relay"
+              title="① 前置（中转节点）"
+              selector={chain.relay}
+              enabledSources={enabledSources}
+              sourceNames={sourceNames}
+              includeError={validation.relayIncludeError}
+              excludeError={validation.relayExcludeError}
+              onToggleSource={(sourceId) => onToggleSource("relay", sourceId)}
+              onPatchSelector={(patch) => onPatchSelector("relay", patch)}
+            />
+            <SelectorPanel
+              side="landing"
+              title="② 落地（最终出口的节点）"
+              selector={chain.landing}
+              enabledSources={enabledSources}
+              sourceNames={sourceNames}
+              includeError={validation.landingIncludeError}
+              excludeError={validation.landingExcludeError}
+              onToggleSource={(sourceId) => onToggleSource("landing", sourceId)}
+              onPatchSelector={(patch) => onPatchSelector("landing", patch)}
+            />
+            <GroupPanel
+              chain={chain}
+              exitGroupName={exitGroupName}
+              relayGroupName={relayGroupName}
+              onPatch={onPatch}
+            />
+          </div>
+        </CardContent>
+      ) : null}
     </Card>
   );
 }
@@ -378,15 +433,13 @@ function SelectorPanel({
     <section aria-label={title} className="space-y-3 rounded-xl border border-ink/10 bg-ink/5 p-3">
       <div className="space-y-1">
         <h4 className="text-sm font-medium text-fg-80">{title}</h4>
-        <p className="text-[11px] leading-relaxed text-fg-45">
+        <p className="text-2xs leading-relaxed text-fg-45">
           {`${SELECTOR_ALL_SOURCES_HINT}（当前 ${enabledSources.length} 个）。勾选的源只限定范围，再用正则筛节点名。`}
         </p>
       </div>
 
       {enabledSources.length === 0 && staleIds.length === 0 ? (
-        <p className="text-[11px] leading-relaxed text-amber-400">
-          还没有已启用的源，这个选择器会匹配不到任何节点。
-        </p>
+        <InlineNote variant="plain">还没有已启用的源，这个选择器会匹配不到任何节点。</InlineNote>
       ) : (
         <div role="group" aria-label={`${scope}可选的源`} className="flex flex-wrap gap-1.5">
           {enabledSources.map((source) => {
@@ -421,9 +474,7 @@ function SelectorPanel({
       )}
 
       {staleIds.length > 0 && enabledSources.length > 0 ? (
-        <p className="text-[11px] leading-relaxed text-amber-400">
-          勾选里有已失效的源，取消掉才按剩下这些源筛选。
-        </p>
+        <InlineNote variant="plain">勾选里有已失效的源，取消掉才按剩下这些源筛选。</InlineNote>
       ) : null}
 
       <FormField label="匹配正则" description="留空表示不限制节点名" error={includeError}>
@@ -461,7 +512,7 @@ function GroupPanel({ chain, exitGroupName, relayGroupName, onPatch }: GroupPane
     <section aria-label="③ 出口组" className="space-y-3 rounded-xl border border-ink/10 bg-ink/5 p-3">
       <div className="space-y-1">
         <h4 className="text-sm font-medium text-fg-80">③ 出口组与前置组</h4>
-        <p className="break-all text-[11px] leading-relaxed text-fg-45">
+        <p className="break-all text-2xs leading-relaxed text-fg-45">
           {`出口组「${exitGroupName || "待填写链名"}」，前置组「${relayGroupName}」名字自动派生。`}
         </p>
       </div>

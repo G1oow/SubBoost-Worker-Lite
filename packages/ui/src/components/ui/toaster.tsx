@@ -46,9 +46,9 @@ const Toast = React.forwardRef<
       "after:pointer-events-none after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:origin-left after:content-['']",
       "after:animate-toast-progress after:bg-current after:opacity-30 group-hover:after:[animation-play-state:paused]",
       variant === "info" && "border-sky-500/30",
-      variant === "success" && "border-emerald-500/30",
-      variant === "warning" && "border-amber-500/30",
-      variant === "destructive" && "border-red-500/40",
+      variant === "success" && "border-success-note-border",
+      variant === "warning" && "border-warning-note-border",
+      variant === "destructive" && "border-danger-note-border",
       className
     )}
     {...props}
@@ -78,7 +78,7 @@ const ToastClose = React.forwardRef<
   <ToastPrimitives.Close
     ref={ref}
     className={cn(
-      "absolute right-2 top-2 rounded-lg p-1 text-fg-50 opacity-0 transition-opacity hover:bg-ink/5 hover:text-fg focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-focus-ring group-hover:opacity-100",
+      "absolute right-2 top-2 rounded-lg p-1 text-fg-45 opacity-0 transition-opacity hover:bg-ink/5 hover:text-fg focus:opacity-100 focus:outline-none focus:ring-2 focus:ring-focus-ring group-hover:opacity-100",
       className
     )}
     toast-close=""
@@ -150,13 +150,13 @@ function genId() {
 function getToastIcon(variant: ToastVariant) {
   switch (variant) {
     case "success":
-      return <Icon icon={CircleCheck} size="md" className="text-emerald-400" />;
+      return <Icon icon={CircleCheck} size="md" className="text-success-note-fg" />;
     case "warning":
-      return <Icon icon={TriangleAlert} size="md" className="text-amber-400" />;
+      return <Icon icon={TriangleAlert} size="md" className="text-warning-note-fg" />;
     case "info":
       return <Icon icon={Info} size="md" className="text-sky-400" />;
     case "destructive":
-      return <Icon icon={CircleAlert} size="md" className="text-red-400" />;
+      return <Icon icon={CircleAlert} size="md" className="text-danger-note-fg" />;
     default:
       return null;
   }

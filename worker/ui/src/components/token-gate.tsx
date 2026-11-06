@@ -44,7 +44,7 @@ export function TokenGate({ onAuthenticated }: TokenGateProps) {
             <span className="text-sm font-medium tracking-tight text-fg-60">SubBoost Lite</span>
           </div>
           <h1 className="text-2xl font-bold text-fg">管理访问</h1>
-          <p className="mt-2 text-fg-50">请输入管理访问 token 以继续</p>
+          <p className="mt-2 text-fg-45">请输入管理访问 token 以继续</p>
         </div>
 
         <SpotlightCard className="animate-rise stagger-2 p-5 sm:p-6">

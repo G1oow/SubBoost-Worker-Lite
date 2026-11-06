@@ -58,7 +58,7 @@ export function ShortLinkSection({
         <p className="text-xs font-medium text-fg-70">短链</p>
         <div className="flex items-center gap-1.5">
           <Button type="button" variant="secondary" size="sm" onClick={onCopy}>
-            <Icon icon={copied ? Check : Copy} className={copied ? "animate-icon-pop text-emerald-400" : undefined} />
+            <Icon icon={copied ? Check : Copy} className={copied ? "animate-icon-pop text-success-note-fg" : undefined} />
             {copied ? "已复制" : "复制短链"}
           </Button>
           <LoadingButton

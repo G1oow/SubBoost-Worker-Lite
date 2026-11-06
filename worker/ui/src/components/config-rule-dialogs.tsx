@@ -381,7 +381,7 @@ export function CustomRuleSetDialog({
                 <Icon
                   icon={Search}
                   size="sm"
-                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-40"
+                  className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-fg-45"
                 />
                 <Input
                   value={query}
@@ -408,7 +408,7 @@ export function CustomRuleSetDialog({
                       >
                         <span className="min-w-0">
                           <span className="block truncate font-medium">{info.nameZh}</span>
-                          <span className="block truncate font-mono text-[11px] text-fg-45">
+                          <span className="block truncate font-mono text-2xs text-fg-45">
                             {catalogRuleSetPath(info)}
                           </span>
                         </span>
@@ -424,7 +424,7 @@ export function CustomRuleSetDialog({
                 ) : null}
               </ul>
               {results.length > CATALOG_RESULT_LIMIT ? (
-                <p className="text-[11px] text-fg-45">
+                <p className="text-2xs text-fg-45">
                   共 {results.length} 个匹配，只列出前 {CATALOG_RESULT_LIMIT} 个，继续输入可缩小范围。
                 </p>
               ) : null}
@@ -470,7 +470,7 @@ export function CustomRuleSetDialog({
             />
           ) : null}
           {error ? (
-            <p className="text-sm text-red-400" role="alert">
+            <p className="text-sm text-danger-note-fg" role="alert">
               {error}
             </p>
           ) : null}
@@ -654,11 +654,11 @@ export function BatchImportDialog({
                 {result.parsed.duplicateCount > 0 ? ` · 重复 ${result.parsed.duplicateCount} 行` : ""}
               </p>
               {problems.length > 0 ? (
-                <ul className="custom-scrollbar max-h-40 space-y-1 overflow-y-auto text-[11px]">
+                <ul className="custom-scrollbar max-h-40 space-y-1 overflow-y-auto text-2xs">
                   {problems.slice(0, PROBLEM_LIMIT).map((item) => (
                     <li key={item.lineNumber} className="flex gap-2">
                       <span className="shrink-0 tabular-nums text-fg-45">第 {item.lineNumber} 行</span>
-                      <span className={item.status === "error" ? "text-red-400" : "text-amber-400"}>
+                      <span className={item.status === "error" ? "text-danger-note-fg" : "text-warning-note-fg"}>
                         {STATUS_LABEL[item.status]}：{item.message}
                       </span>
                       <span className="min-w-0 truncate font-mono text-fg-45">{item.raw.trim()}</span>
@@ -667,7 +667,7 @@ export function BatchImportDialog({
                 </ul>
               ) : null}
               {problems.length > 0 ? (
-                <p className="text-[11px] text-fg-45">有错误或重复的行时不能导入，修改或删掉这些行后再试。</p>
+                <p className="text-2xs text-fg-45">有错误或重复的行时不能导入，修改或删掉这些行后再试。</p>
               ) : null}
             </div>
           ) : null}

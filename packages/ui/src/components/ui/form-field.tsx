@@ -58,7 +58,7 @@ function FormField({
   const labelContent = (
     <Label htmlFor={controlChild.props.id ?? controlId}>
       {label}
-      {required ? <span aria-hidden="true" className="ml-1 text-red-400">*</span> : null}
+      {required ? <span aria-hidden="true" className="ml-1 text-danger-note-fg">*</span> : null}
     </Label>
   );
   const labelElement = labelAction ? (
@@ -83,7 +83,7 @@ function FormField({
       {control}
       {descriptionPlacement === "after-control" ? descriptionElement : null}
       {error ? (
-        <p id={errorId} className="text-xs leading-relaxed text-red-400" role="alert">
+        <p id={errorId} className="text-xs leading-relaxed text-danger-note-fg" role="alert">
           {error}
         </p>
       ) : null}
