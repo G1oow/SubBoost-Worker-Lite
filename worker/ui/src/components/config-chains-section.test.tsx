@@ -86,6 +86,70 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** 默认全部收起，需要正文的用例先点开对应卡片的摘要行 */
+function expandCard(card: HTMLElement) {
+  fireEvent.click(within(card).getByRole("button", { name: /^展开 /u }));
+}
+
+describe("折叠", () => {
+  it("默认全部收起，只渲染摘要行与常驻状态，不挂载三分栏", () => {
+    const { container } = renderSection();
+    for (const card of cards(container)) {
+      expect(within(card).getByRole("button", { name: /^展开 /u }).getAttribute("aria-expanded")).toBe("false");
+      expect(within(card).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull();
+      // 收起也要能看出为什么不生成
+      expect(within(card).getByRole("status")).toBeTruthy();
+    }
+  });
+
+  it("点摘要行展开同一条，再点收起", () => {
+    const { container } = renderSection();
+    const card = cards(container)[0];
+    const summary = within(card).getByRole("button", { name: "落地美国" });
+
+    // 展开时摘要行会被链名输入框替换，所以每次重新取摘要行
+    fireEvent.click(summary);
+    expect(within(card).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "收起 落地美国" }).getAttribute("aria-expanded")).toBe("true");
+
+    fireEvent.click(within(card).getByRole("button", { name: "收起 落地美国" }));
+    expect(within(card).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull();
+    expect(within(card).getByRole("button", { name: "落地美国" }).getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("展开一条会收起另一条，避免整页同时铺开", () => {
+    const { container } = renderSection();
+    const [first, second] = cards(container);
+
+    expandCard(first);
+    expect(within(first).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
+
+    expandCard(second);
+    expect(within(first).queryByRole("region", { name: "① 前置（中转节点）" })).toBeNull();
+    expect(within(second).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
+  });
+
+  it("摘要行可用键盘 Enter 与空格展开", () => {
+    const { container } = renderSection();
+    const summary = within(cards(container)[0]).getByRole("button", { name: "落地美国" });
+
+    fireEvent.keyDown(summary, { key: "Enter" });
+    expect(within(cards(container)[0]).getByRole("button", { name: "收起 落地美国" })).toBeTruthy();
+
+    fireEvent.click(within(cards(container)[0]).getByRole("button", { name: "收起 落地美国" }));
+    expect(within(cards(container)[0]).getByRole("button", { name: "落地美国" })).toBeTruthy();
+  });
+
+  it("展开后链名是可编辑输入框，收起时退回纯文本", () => {
+    const { container } = renderSection();
+    const card = cards(container)[0];
+
+    expect(within(card).queryByLabelText("链名")).toBeNull();
+    expandCard(card);
+    expect(within(card).getByLabelText("链名")).toBeTruthy();
+  });
+});
+
 describe("链卡片渲染", () => {
   it("每条链一张卡片，按预览显示状态与节点计数", () => {
     const { container } = renderSection();
@@ -103,6 +167,7 @@ describe("链卡片渲染", () => {
   it("三段结构：前置 / 落地 / 出口组各一段", () => {
     const { container } = renderSection();
     const card = within(cards(container)[0]);
+    expandCard(cards(container)[0]);
     expect(card.getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
     expect(card.getByRole("region", { name: "② 落地（最终出口的节点）" })).toBeTruthy();
     expect(card.getByRole("region", { name: "③ 出口组" })).toBeTruthy();
@@ -111,7 +176,9 @@ describe("链卡片渲染", () => {
 
   it("选择器解释「一个源都不选 = 全部已启用源」，并且只列已启用的源", () => {
     const { container } = renderSection();
-    const card = within(cards(container)[0]);
+    const rendered = cards(container)[0];
+    expandCard(rendered);
+    const card = within(rendered);
     const relay = within(card.getByRole("region", { name: "① 前置（中转节点）" }));
     expect(relay.getByText(/一个源都不选 = 全部已启用源/u)).toBeTruthy();
     expect(relay.getByRole("group", { name: "前置可选的源" })).toBeTruthy();
@@ -211,6 +278,7 @@ describe("编辑操作", () => {
     const onChange = vi.fn();
     renderSection({ onChange });
 
+    expandCard(cards(document.body)[0]);
     const nameInputs = screen.getAllByLabelText("链名");
     fireEvent.change(nameInputs[0], { target: { value: "落地美国 2" } });
     const chains = (onChange.mock.calls[0][0] as Record<string, unknown>).proxyChains as Array<{
@@ -280,6 +348,7 @@ describe("状态文案", () => {
       },
       previewChains: [previewChain({ id: "c1" })],
     });
+    expandCard(cards(container)[0]);
     const card = within(cards(container)[0]);
     expect(card.getByText("前置 · 匹配正则 不是有效的正则表达式")).toBeTruthy();
     expect(card.getByRole("status").textContent).toContain("正常");
@@ -287,6 +356,7 @@ describe("状态文案", () => {
 
   it("组类型下拉带可访问名，标签能关联到触发器", () => {
     const { container } = renderSection();
+    expandCard(cards(container)[0]);
     const card = within(cards(container)[0]);
     const exit = card.getByLabelText("出口组类型");
     const relay = card.getByLabelText("前置组类型");
@@ -310,6 +380,7 @@ describe("状态文案", () => {
       },
       onChange: (next) => changes.push(next),
     });
+    expandCard(cards(container)[0]);
     const card = within(cards(container)[0]);
     const stale = card.getByRole("button", { name: "gone（已失效）" });
     expect(stale.getAttribute("aria-pressed")).toBe("true");

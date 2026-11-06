@@ -4,6 +4,7 @@ import { Check, Copy, Download, ExternalLink, QrCode, ShieldAlert } from "lucide
 import { Button } from "@subboost/ui/components/ui/button";
 import { confirmDialog } from "@subboost/ui/components/ui/confirm-dialog";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import {
   Dialog,
@@ -106,7 +107,7 @@ export function SubscriptionShareContent({
           {shareLink}
         </p>
         {shortLink ? (
-          <p className="select-all break-all text-[11px] leading-relaxed text-fg-45">
+          <p className="select-all break-all text-2xs leading-relaxed text-fg-45">
             原始链接：{subscription.link}
           </p>
         ) : null}
@@ -128,10 +129,9 @@ export function SubscriptionShareContent({
       {age?.enabled ? (
         <AgeSection link={shareLink} age={age} copied={ageCopied} onCopy={onCopyAgeLink} />
       ) : null}
-      <p className="flex items-start gap-1.5 rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-xs text-amber-600">
-        <Icon icon={ShieldAlert} size="sm" className="mt-px shrink-0" />
-        <span>链接等同于访问凭据，拿到即可拉取订阅，请只分享给本人设备。</span>
-      </p>
+      <InlineNote icon={<Icon icon={ShieldAlert} size="sm" />}>
+        链接等同于访问凭据，拿到即可拉取订阅，请只分享给本人设备。
+      </InlineNote>
 
       {/* 窄屏把三个按钮堆叠铺满：一行三个中文按钮在 320px 下会被压成两行且对齐错乱 */}
       <DialogFooter className="flex-col gap-2 sm:flex-row">
@@ -151,7 +151,7 @@ export function SubscriptionShareContent({
           打开链接
         </Button>
         <Button type="button" onClick={onCopy} className="w-full sm:w-auto">
-          {copied ? <Icon icon={Check} className="animate-icon-pop text-emerald-400" /> : <Icon icon={Copy} />}
+          {copied ? <Icon icon={Check} className="animate-icon-pop text-success-note-fg" /> : <Icon icon={Copy} />}
           {copied ? "已复制" : "复制链接"}
         </Button>
       </DialogFooter>

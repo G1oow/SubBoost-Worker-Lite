@@ -75,7 +75,7 @@ export function SubscriptionImportDialog({
                 <DialogFooter className="flex-col gap-2 sm:flex-row">
                   <Button type="button" onClick={handleCopy} className="w-full sm:w-auto">
                     {copied ? (
-                      <Icon icon={Check} className="animate-icon-pop text-emerald-400" />
+                      <Icon icon={Check} className="animate-icon-pop text-success-note-fg" />
                     ) : (
                       <Icon icon={Copy} />
                     )}

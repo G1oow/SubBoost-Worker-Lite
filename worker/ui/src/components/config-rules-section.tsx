@@ -11,14 +11,15 @@ import {
   Plus,
   Search,
   Trash2,
-  TriangleAlert,
 } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { Switch } from "@subboost/ui/components/ui/switch";
 import { SwitchField } from "@subboost/ui/components/ui/switch-field";
 import { cn } from "@subboost/ui/lib/utils";
@@ -286,17 +287,19 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
         </CardHeader>
         <CardContent className="space-y-3">
           {view.invalid.customRules > 0 || view.invalid.customRuleSets > 0 || view.hiddenCustomEntries > 0 ? (
-            <div className="space-y-1 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
-              {view.invalid.customRules > 0 ? (
-                <p>有 {view.invalid.customRules} 条自定义规则格式无效，生成时会被忽略，可在「高级 JSON」里修改。</p>
-              ) : null}
-              {view.invalid.customRuleSets > 0 ? (
-                <p>有 {view.invalid.customRuleSets} 个规则集格式无效或 id 重复，生成时会被忽略。</p>
-              ) : null}
-              {view.hiddenCustomEntries > 0 ? (
-                <p>有 {view.hiddenCustomEntries} 条自定义条目指向已停用的自定义分组，当前不会生成。</p>
-              ) : null}
-            </div>
+            <InlineNote tone="warning">
+              <div className="space-y-1">
+                {view.invalid.customRules > 0 ? (
+                  <p>有 {view.invalid.customRules} 条自定义规则格式无效，生成时会被忽略，可在「高级 JSON」里修改。</p>
+                ) : null}
+                {view.invalid.customRuleSets > 0 ? (
+                  <p>有 {view.invalid.customRuleSets} 个规则集格式无效或 id 重复，生成时会被忽略。</p>
+                ) : null}
+                {view.hiddenCustomEntries > 0 ? (
+                  <p>有 {view.hiddenCustomEntries} 条自定义条目指向已停用的自定义分组，当前不会生成。</p>
+                ) : null}
+              </div>
+            </InlineNote>
           ) : null}
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
@@ -318,7 +321,7 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
               <Icon
                 icon={Search}
                 size="sm"
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-40"
+                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-fg-45"
               />
               <Input
                 value={query}
@@ -330,7 +333,7 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
             </div>
           </div>
           {filtering ? (
-            <p className="text-[11px] text-fg-45">筛选或搜索时不能调整顺序，清除后即可上移、下移。</p>
+            <p className="text-2xs text-fg-45">筛选或搜索时不能调整顺序，清除后即可上移、下移。</p>
           ) : null}
 
           <ol aria-label="最终规则" className="space-y-1.5">
@@ -354,11 +357,7 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
               );
             })}
           </ol>
-          {visibleRows.length === 0 ? (
-            <p className="rounded-xl border border-dashed border-ink/15 px-4 py-8 text-center text-sm text-fg-50">
-              没有符合条件的规则。
-            </p>
-          ) : null}
+          {visibleRows.length === 0 ? <EmptyState>没有符合条件的规则。</EmptyState> : null}
           {!filtering ? (
             <div className="flex items-start gap-3 rounded-xl border border-dashed border-card-border px-3 py-2.5">
               <span className="mt-0.5 w-8 shrink-0 text-right font-mono text-xs tabular-nums text-fg-45">
@@ -366,7 +365,7 @@ export function ConfigRulesSection({ config, onChange }: ConfigRulesSectionProps
               </span>
               <div className="min-w-0 space-y-1">
                 <p className="break-all font-mono text-xs text-fg-80">{view.matchText}</p>
-                <p className="text-[11px] text-fg-45">兜底规则：前面都没命中的流量走这里，固定在最后。</p>
+                <p className="text-2xs text-fg-45">兜底规则：前面都没命中的流量走这里，固定在最后。</p>
               </div>
             </div>
           ) : null}
@@ -475,7 +474,7 @@ function RuleRowItem({
           <p className={cn("break-all font-mono text-xs", row.enabled ? "text-fg-80" : "text-fg-45 line-through")}>
             {row.text}
           </p>
-          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-fg-45">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-2xs text-fg-45">
             <Badge variant={row.movable ? "default" : "secondary"} className="min-w-0 max-w-full">
               <span className="truncate">{kindLabel(row)}</span>
             </Badge>
@@ -486,12 +485,7 @@ function RuleRowItem({
             {!row.enabled ? <span>已停用，不会生成</span> : null}
             {row.kind === "module" && !row.defaultTarget ? <span>已改目标</span> : null}
           </div>
-          {row.targetWarning ? (
-            <p className="flex items-start gap-1 text-[11px] text-amber-400">
-              <Icon icon={TriangleAlert} size="xs" className="mt-0.5 shrink-0" />
-              <span>{row.targetWarning}</span>
-            </p>
-          ) : null}
+          {row.targetWarning ? <InlineNote variant="plain">{row.targetWarning}</InlineNote> : null}
         </div>
       </div>
 

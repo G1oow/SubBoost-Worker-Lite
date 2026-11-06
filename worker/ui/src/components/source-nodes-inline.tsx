@@ -1,6 +1,8 @@
 import * as React from "react";
 import { RefreshCw } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
 import { Button } from "@subboost/ui/components/ui/button";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
@@ -44,15 +46,15 @@ export function SourceNodesInline({
         {[0, 1, 2].map((index) => (
           <div key={index} className="skeleton h-9 w-full animate-shimmer" aria-hidden="true" />
         ))}
-        <p className="text-[11px] text-fg-40">正在读取节点…</p>
+        <p className="text-2xs text-fg-45">正在读取节点…</p>
       </div>
     );
   }
 
   if (state.status === "error") {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2">
-        <p className="min-w-0 break-words text-xs text-red-200">{state.message}</p>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-danger-note-border bg-danger-note-bg px-3 py-2">
+        <p className="min-w-0 break-words text-xs text-danger-note-fg">{state.message}</p>
         {onRetry ? (
           <Button type="button" variant="secondary" size="sm" onClick={onRetry}>
             <Icon icon={RefreshCw} />
@@ -71,7 +73,7 @@ export function SourceNodesInline({
   return (
     <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] text-fg-45">
+        <p className="text-2xs text-fg-45">
           共 {formatCount(data.nodeCount)} 个节点
           {data.renamedCount > 0 ? ` · 已改名 ${formatCount(data.renamedCount)} 个` : ""}
           {data.fetchedAt ? ` · 抓取于 ${formatRelativeTime(data.fetchedAt)}` : ""}
@@ -92,9 +94,7 @@ export function SourceNodesInline({
       </div>
 
       {nodes.length === 0 ? (
-        <p className="rounded-xl border border-dashed border-ink/15 px-3 py-4 text-center text-[11px] text-fg-45">
-          {emptyHint}
-        </p>
+        <EmptyState className="px-3 py-4 text-2xs">{emptyHint}</EmptyState>
       ) : (
         <ul className="max-h-[45dvh] space-y-1 overflow-y-auto pr-1 sm:max-h-[260px]">
           {visible.map((node, index) => (
@@ -109,7 +109,7 @@ export function SourceNodesInline({
               <ProtocolBadge type={node.type} className="shrink-0" />
               <div className="min-w-0 flex-1">
                 {/* 原名是背景信息，放在上方作为说明；节点名是要认的那一行，放在下方 */}
-                <p className="truncate text-[11px] text-fg-40">
+                <p className="truncate text-2xs text-fg-45">
                   {node.renamed ? `原名 ${node.originName || "—"}` : node.originName || "—"}
                   {node.server ? ` · ${node.server}${node.port ? `:${node.port}` : ""}` : ""}
                 </p>
@@ -140,10 +140,10 @@ export function SourceNodesInline({
       ) : null}
 
       {data.parseErrors.length > 0 ? (
-        <p className="text-[11px] text-amber-400">
+        <InlineNote variant="plain">
           {formatCount(data.parseErrors.length)} 条节点解析失败：
           {data.parseErrors.slice(0, 2).join("；")}
-        </p>
+        </InlineNote>
       ) : null}
     </div>
   );

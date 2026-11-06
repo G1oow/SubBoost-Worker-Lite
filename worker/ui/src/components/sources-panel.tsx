@@ -4,6 +4,7 @@ import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { confirmDialog } from "@subboost/ui/components/ui/confirm-dialog";
 import {
   Dialog,
@@ -304,10 +305,9 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
       </CardHeader>
       <CardContent>
         {state.sources.length === 0 ? (
-          <div className="animate-fade-in-up rounded-xl border border-dashed border-ink/15 px-4 py-10 text-center">
-            <Icon icon={Boxes} size="xl" className="mx-auto mb-2 text-fg-35" />
-            <p className="text-sm text-fg-50">还没有源，先添加一个上游订阅或手动节点。</p>
-          </div>
+          <EmptyState className="animate-fade-in-up" icon={<Icon icon={Boxes} size="xl" />}>
+            还没有源，先添加一个上游订阅或手动节点。
+          </EmptyState>
         ) : (
           /*
            * 每行是一张独立卡片，而不是表格行。
@@ -334,7 +334,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                         </Badge>
                         {status?.ok === false ? <Badge variant="destructive">失败</Badge> : null}
                       </div>
-                      <p className="flex flex-wrap items-center gap-x-2 text-[11px] text-fg-45">
+                      <p className="flex flex-wrap items-center gap-x-2 text-2xs text-fg-45">
                         <span className="tabular-nums">{status?.nodeCount ?? "-"} 个节点</span>
                         {renamed > 0 ? <span>· 已改名 {renamed} 个</span> : null}
                       </p>
@@ -426,14 +426,14 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-medium text-fg-80">解析出的节点</p>
                   {parse.status === "loading" ? (
-                    <span className="flex items-center gap-1.5 text-[11px] text-fg-45">
+                    <span className="flex items-center gap-1.5 text-2xs text-fg-45">
                       <Icon icon={LoaderCircle} size="xs" className="animate-spin" />
                       解析中…
                     </span>
                   ) : parse.status === "error" ? (
-                    <span className="text-[11px] text-red-400">{parse.message}</span>
+                    <span className="text-2xs text-danger-note-fg">{parse.message}</span>
                   ) : (
-                    <span className="text-[11px] text-fg-45">可直接修改节点名称</span>
+                    <span className="text-2xs text-fg-45">可直接修改节点名称</span>
                   )}
                 </div>
                 <NodeRenameEditor
@@ -444,12 +444,12 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                   emptyHint="粘贴节点链接后会自动解析出名称与协议。"
                 />
                 {parse.errors.length > 0 ? (
-                  <p className="text-[11px] text-amber-400">
+                  <p className="text-2xs text-warning-note-fg">
                     {parse.errors.length} 条节点解析失败：{parse.errors.slice(0, 2).join("；")}
                   </p>
                 ) : null}
                 {renamedCount > 0 ? (
-                  <p className="text-[11px] text-fg-45">保存后立即生效，订阅链接无需更换。</p>
+                  <p className="text-2xs text-fg-45">保存后立即生效，订阅链接无需更换。</p>
                 ) : null}
               </div>
             ) : null}
@@ -470,7 +470,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
             />
 
             {error ? (
-              <p className="text-sm text-red-400" role="alert">
+              <p className="text-sm text-danger-note-fg" role="alert">
                 {error}
               </p>
             ) : null}
@@ -495,7 +495,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
           {nodesDialog ? (
             <div className="space-y-4">
               {nodesDialog.error ? (
-                <p className="text-sm text-red-400" role="alert">
+                <p className="text-sm text-danger-note-fg" role="alert">
                   {nodesDialog.error}
                 </p>
               ) : null}
@@ -512,7 +512,7 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                 }
               />
               {nodesDialog.data?.parseErrors.length ? (
-                <p className="text-[11px] text-amber-400">
+                <p className="text-2xs text-warning-note-fg">
                   {nodesDialog.data.parseErrors.length} 条节点解析失败：
                   {nodesDialog.data.parseErrors.slice(0, 2).join("；")}
                 </p>

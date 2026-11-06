@@ -20,6 +20,7 @@ import { Icon } from "@subboost/ui/components/ui/icon";
 import { Badge, badgeVariants } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
+import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { ProtocolBadge } from "@subboost/ui/components/ui/protocol-badge";
 import { MotionItem, MotionList, MotionReveal } from "@subboost/ui/motion/motion-list";
 import { SpotlightCard } from "@subboost/ui/motion/spotlight-card";
@@ -76,7 +77,7 @@ function StatCard({
   const content = (
     <>
       <div className="flex items-start justify-between gap-3">
-        <p className="text-xs font-medium text-fg-50">{label}</p>
+        <p className="text-xs font-medium text-fg-45">{label}</p>
         <span aria-hidden="true" className={cn("shrink-0", accent)}>
           {icon}
         </span>
@@ -84,7 +85,7 @@ function StatCard({
       <p className="mt-2.5 text-2xl font-semibold leading-none text-fg sm:mt-3 sm:text-3xl">
         <AnimatedCount value={value} />
       </p>
-      <p className="mt-1.5 text-[11px] text-fg-45 sm:mt-2">{hint}</p>
+      <p className="mt-1.5 text-2xs text-fg-45 sm:mt-2">{hint}</p>
     </>
   );
 
@@ -238,7 +239,7 @@ export function DashboardPanel({
             <h2 className="text-lg font-semibold text-fg sm:text-2xl">
               {enabledSources > 0 ? `${formatCount(enabledSources)} 个源正在供节点` : "先添加一个源开始聚合"}
             </h2>
-            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-50">
+            <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-45">
               <span className="inline-flex items-center gap-1">
                 <Icon icon={Clock} size="sm" />
                 最近刷新 {formatRelativeTime(lastRunAt)}
@@ -297,7 +298,7 @@ export function DashboardPanel({
           label="可用节点"
           value={totalNodes}
           icon={<Icon icon={Boxes} size="md" />}
-          accent="text-emerald-300"
+          accent="text-success-note-fg"
           hint={renamedNodes > 0 ? `${renamedNodes} 个已改名` : "来自启用源的节点快照"}
           onClick={() => onNavigate("sources")}
         />
@@ -306,7 +307,7 @@ export function DashboardPanel({
           label="刷新失败源"
           value={failedSources}
           icon={<Icon icon={Gauge} size="md" />}
-          accent={failedSources > 0 ? "text-red-300" : "text-fg-40"}
+          accent={failedSources > 0 ? "text-danger-note-fg" : "text-fg-45"}
           hint={failedSources > 0 ? "展开提醒查看错误" : "上次刷新全部成功"}
           onClick={() => onNavigate("status")}
         />
@@ -332,9 +333,7 @@ export function DashboardPanel({
                 ))}
               </div>
             ) : protocols.length === 0 ? (
-              <p className="py-6 text-center text-sm text-fg-45">
-                还没有节点数据，刷新一次或等待定时任务抓取。
-              </p>
+              <EmptyState>还没有节点数据，刷新一次或等待定时任务抓取。</EmptyState>
             ) : (
               <MotionList as="ul" className="space-y-3" animateOnMount>
                 {protocols.map((item) => (
@@ -375,7 +374,7 @@ export function DashboardPanel({
           </CardHeader>
           <CardContent>
             {sourceStats.length === 0 ? (
-              <p className="py-6 text-center text-sm text-fg-45">还没有源。</p>
+              <EmptyState>还没有源。</EmptyState>
             ) : (
               <MotionList
                 as="ul"
@@ -406,17 +405,17 @@ export function DashboardPanel({
                           className={cn(
                             "h-2 w-2 shrink-0 rounded-full",
                             !item.enabled
-                              ? "bg-fg-30"
+                              ? "bg-fg-35"
                               : item.ok === false
                                 ? "animate-badge-pulse bg-red-400"
                                 : item.ok === true
                                   ? "bg-emerald-400"
-                                  : "bg-fg-40"
+                                  : "bg-fg-45"
                           )}
                         />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm text-fg-80">{item.name}</span>
-                          <span className="block text-[11px] text-fg-40">
+                          <span className="block text-2xs text-fg-45">
                             {item.kind === "remote" ? "远程" : "手动"}
                             {item.enabled ? "" : " · 已停用"}
                             {item.renamedCount > 0 ? ` · 改名 ${item.renamedCount}` : ""}
@@ -433,7 +432,7 @@ export function DashboardPanel({
                           icon={ChevronDown}
                           size="md"
                           className={cn(
-                            "shrink-0 text-fg-40 transition-transform duration-300",
+                            "shrink-0 text-fg-45 transition-transform duration-300",
                             expanded && "rotate-180 text-primary-200"
                           )}
                         />
@@ -481,7 +480,7 @@ export function DashboardPanel({
         <Card className="animate-rise border-amber-500/30">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Icon icon={TriangleAlert} size="md" className="text-amber-400" />
+              <Icon icon={TriangleAlert} size="md" className="text-warning-note-fg" />
               提醒
             </CardTitle>
             <Badge variant="warning">{warnings.length}</Badge>
@@ -495,8 +494,8 @@ export function DashboardPanel({
                   className={cn(
                     "flex items-start gap-2 rounded-xl border px-3 py-2 text-xs",
                     item.level === "error"
-                      ? "border-red-500/30 bg-red-500/10 text-red-200"
-                      : "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                      ? "border-danger-note-border bg-danger-note-bg text-danger-note-fg"
+                      : "border-warning-note-border bg-warning-note-bg text-warning-note-fg"
                   )}
                 >
                   <Icon icon={CircleAlert} size="sm" className="mt-0.5 shrink-0" />
