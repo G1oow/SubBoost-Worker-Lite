@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   buildGeneratedRuleEntries,
+  buildRuleOrderView,
   generateRules,
   hasFullRuleOrderKeys,
   normalizePersistedRuleOrder,
   resolveAppliedRuleOrder,
+  resolveFullRuleOrder,
   resolveModuleName,
 } from "./rules";
 import { generateClashConfig } from "./index";
@@ -538,6 +540,107 @@ describe("rule generator", () => {
       "module:cn:cn-ip",
       "custom-rule:process",
       "special:experimental-cn",
+    ]);
+  });
+});
+
+describe("full rule order", () => {
+  const allModuleIds = PROXY_GROUP_MODULES.map((proxyModule) => proxyModule.id);
+  const presetKeys = PROXY_GROUP_MODULES.flatMap((proxyModule) =>
+    proxyModule.rules.map((rule) => `module:${proxyModule.id}:${rule.id}`)
+  );
+
+  it("puts preset rules missing from a saved full order back at their canonical anchor", () => {
+    // 保存全量顺序时奈飞模块还没开启、顺序里没有它的规则；
+    // 之后开启时若追加到末尾，会落在 geolocation-!cn 之后而永远命中不到
+    const savedOrder = resolveAppliedRuleOrder({
+      enabledModules: ["ad", "private", "cn", "global", "final"],
+      customRules,
+      customRuleSets: [],
+    });
+    const applied = resolveAppliedRuleOrder({
+      enabledModules: ["ad", "private", "cn", "netflix", "global", "final"],
+      customRules,
+      customRuleSets: [],
+      ruleOrder: savedOrder,
+    });
+
+    expect(applied.slice(-3)).toEqual([
+      "module:netflix:netflix",
+      "module:netflix:netflix-ip",
+      "module:global:geolocation-!cn",
+    ]);
+    expect(applied.indexOf("module:cn:cn-ip")).toBeLessThan(applied.indexOf("module:netflix:netflix"));
+  });
+
+  it("keeps user-placed custom rules ahead of a preset rule that comes back", () => {
+    const applied = resolveAppliedRuleOrder({
+      enabledModules: ["ad", "private", "global", "final"],
+      customRules: [customRules[1]],
+      customRuleSets: [],
+      ruleOrder: ["module:ad:category-ads-all", "custom-rule:ip-rule", "module:global:geolocation-!cn"],
+    });
+
+    expect(applied).toEqual([
+      "module:ad:category-ads-all",
+      "custom-rule:ip-rule",
+      "module:private:private",
+      "module:private:private-ip",
+      "module:global:geolocation-!cn",
+    ]);
+  });
+
+  it("resolves one complete order covering every module regardless of which ones are enabled", () => {
+    const canonical = resolveFullRuleOrder({ enabledModules: ["final"], customRules, customRuleSets });
+    expect(new Set(canonical)).toEqual(
+      new Set([...presetKeys, "custom-rule:domain-rule", "custom-rule:ip-rule", "custom-rule-set:media-rule"])
+    );
+    expect(canonical).toHaveLength(presetKeys.length + 3);
+
+    // 把一条自定义规则挪到油管规则之后，再故意截掉一段内置规则模拟旧顺序
+    const moved = canonical.filter((key) => key !== "custom-rule:ip-rule");
+    moved.splice(moved.indexOf("module:youtube:youtube") + 1, 0, "custom-rule:ip-rule");
+    const partial = moved.filter((key) => !key.startsWith("module:streaming-asia:"));
+
+    for (const ruleOrder of [moved, partial]) {
+      const minimal = resolveFullRuleOrder({ enabledModules: ["select", "final"], customRules, customRuleSets, ruleOrder });
+      const everything = resolveFullRuleOrder({ enabledModules: allModuleIds, customRules, customRuleSets, ruleOrder });
+      expect(minimal).toEqual(everything);
+      expect(minimal).toEqual(moved);
+    }
+
+    expect(
+      resolveAppliedRuleOrder({ enabledModules: ["youtube", "google", "final"], customRules, customRuleSets, ruleOrder: moved })
+    ).toEqual(moved.filter((key) => key.startsWith("custom-") || /^module:(youtube|google):/u.test(key)));
+  });
+
+  it("keeps disabled builtin rules in place for the visual editor", () => {
+    const view = buildRuleOrderView({
+      enabledModules: ["private", "global", "final"],
+      customRules: [],
+      customRuleSets: [],
+      builtinRuleEdits: { "module:private:private-ip": { enabled: false } },
+    });
+
+    expect(view.entries.map((entry) => [entry.key, entry.enabled])).toEqual([
+      ["module:private:private", true],
+      ["module:private:private-ip", false],
+      ["module:global:geolocation-!cn", true],
+    ]);
+    expect(view.matchEntry.text).toBe("MATCH,🐟 漏网之鱼");
+    expect(view.fullOrder).toContain("module:netflix:netflix");
+    expect(
+      generateRules({
+        enabledModules: ["private", "global", "final"],
+        customRules: [],
+        customRuleSets: [],
+        builtinRuleEdits: { "module:private:private-ip": { enabled: false } },
+        ruleOrder: view.fullOrder,
+      })
+    ).toEqual([
+      "RULE-SET,private,🏠 私有网络",
+      "RULE-SET,geolocation-!cn,🌍 非中国",
+      "MATCH,🐟 漏网之鱼",
     ]);
   });
 });
