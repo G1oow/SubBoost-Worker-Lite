@@ -3,6 +3,7 @@ import { looksLikeConfigLine, parseConfigLine } from "./config-line-parser";
 import { parsePlatformConfigContent, looksLikePlatformConfigContent, isPlatformConfigSectionHeader } from "./platform/parse-platform-config";
 import { parsePlatformProxyLine } from "./platform/parse-platform-proxy-line";
 import { parseNodeLink } from "./parse-node-link";
+import { redactSegmentCredentials } from "./redact";
 import { loadSubscriptionYaml } from "./yaml-scalars";
 import type { ParseResult } from "@subboost/core/types/node";
 
@@ -23,7 +24,7 @@ function buildParseResult(nodes: ParseResult["nodes"], errors: string[]): ParseR
 
 export function formatParseSegmentError(segment: string, error: unknown): string {
   const reason = error instanceof Error ? error.message : "未知错误";
-  return `解析失败: ${segment.substring(0, 50)}... - ${reason}`;
+  return `解析失败: ${redactSegmentCredentials(segment).substring(0, 50)}... - ${reason}`;
 }
 
 export function splitNodeLinkSegments(content: string): string[] {
