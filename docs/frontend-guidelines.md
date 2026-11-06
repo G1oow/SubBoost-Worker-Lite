@@ -197,7 +197,7 @@ packages/ui/src/        可复用能力：业务无关
 
 | # | 症状 | 根因 | 正确写法 | 守护 |
 | --- | --- | --- | --- | --- |
-| 1 | 动画中/滚动时文字发虚、卡片发虚，停下才清晰 | 带 `transform`/`translate`/`scale` 的元素被提升为合成层，按非整数像素平移被双线性采样；常驻 `fixed` 层会把它覆盖的正文一起 squash 进同一层 | 承载文字只驱动 `opacity`；常驻层按需挂载、不做位移；表面用不透明 `bg-header` | `packages/ui/src/styles/motion.test.ts`、`worker/ui/src/components/pinned-header.test.ts`、`mobile-layout.test.ts` |
+| 1 | 动画中/滚动时文字发虚、卡片发虚，停下才清晰 | 带 `transform`/`translate`/`scale` 的元素被提升为合成层，按非整数像素平移被双线性采样；常驻 `fixed` 层会把它覆盖的正文一起 squash 进同一层 | 承载文字只驱动 `opacity`；常驻层按需挂载、不做位移；表面用不透明 `bg-header` | `packages/ui/src/styles/motion.test.ts`、`worker/ui/src/components/pinned-header.test.ts`、`mobile-layout.test.ts`、`config-panel.test.ts`（生成配置的未保存保存条） |
 | 2 | 打开弹窗/下拉时整页横跳 4px，关闭又弹回 | `html` 的 `scrollbar-gutter: stable` 与 react-remove-scroll 对 `body` 的补偿**各留了一次**滚动条宽度，布局视口凭空少 8px | `html` 独占占位；`body[data-scroll-locked]` 把库自带补偿清零；遮罩与弹窗容器用 `w-screen` 盖住 | `packages/ui/src/styles/scroll-lock.test.ts` |
 | 3 | 切页卡顿、动画像慢放 | `startViewTransition` 就绪前要整页快照，主线程不可中断阻塞 25–89ms | 不用 View Transitions，改用单一合成层的 `animate-page-in` | `worker/ui/src/lib/view-transition.test.ts` |
 | 4 | 页面越用越卡、切页次数越多越明显 | 入场动画 `fill-mode: both` 把终态恒等 transform 永久留在元素上，仪表板单页累积 40+ 合成层 | 一律 `backwards` | `motion.test.ts`（令牌层面） |

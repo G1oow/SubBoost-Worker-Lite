@@ -160,7 +160,11 @@ git stash list
 | `worker/ui/src/components/status-panel.tsx` | 最近刷新状态与「立即刷新」 | Button、Badge、Table |
 | `worker/ui/src/components/sources-panel.tsx` | 源列表与编辑对话框；手动节点文本防抖解析出名称/协议并可就地改名；行内「节点」对话框可对已有快照改名 | Table、Dialog、Input、Textarea、Switch、Select、NodeRenameEditor |
 | `worker/ui/src/components/subscriptions-panel.tsx` | 订阅列表、创建、修改所含源、复制、轮换、删除 | Table、Dialog、ConfirmDialog、Button |
-| `worker/ui/src/components/config-panel.tsx` | 配置 JSON 编辑与重置 | Textarea、Button |
+| `worker/ui/src/components/config-panel.tsx` | 生成配置页：「规则 / 高级 JSON」子页共用一份草稿与单一保存；未保存保存条、去抖试生成校验、恢复默认确认 | Card、SegmentedControl、Textarea、ConfirmDialog |
+| `worker/ui/src/components/config-rules-section.tsx` | 分流组开关 + 最终规则列表（行号、筛选、内置规则启停与改目标、自定义条目上移/下移/移到指定行） | SwitchField、Switch、IconButton、Badge |
+| `worker/ui/src/components/config-rule-dialogs.tsx` | 自定义规则、规则集（离线规则库 / .mrs 链接）、批量导入、内置规则目标、移到指定行五个对话框 | Dialog、FormField、Select、Input、Textarea |
+| `worker/ui/src/lib/rule-editor.ts` | 规则可视化编辑的纯逻辑：草稿读写、视图、排序（委托 core `resolveFullRuleOrder`）、与已保存配置的语义对比 | `@subboost/core` |
+| `worker/ui/src/lib/routes.ts` | hash 路由解析（含 `#/config/rules`、`#/config/json` 子页） | 无 |
 | `worker/ui/src/lib/*.test.ts` | `admin-token`、`api-client` 单测 | vitest |
 
 ---
@@ -693,6 +697,7 @@ export async function requireAdmin(request: Request, env: Env): Promise<void>;
 | PUT | `/api/sources` | 是 | `{ sources: SourceInput[] }`，上限 1 MiB | `200 { sources }` |
 | PUT | `/api/config` | 是 | JSON 对象，上限 1 MiB | `200 { config, configIsDefault: false }` |
 | DELETE | `/api/config` | 是 | 无 | `200 { config, configIsDefault: true }` |
+| POST | `/api/config/preview` | 是 | `{ config }`，上限 1 MiB | `200 { sourceCount, snapshotCount, nodeCount, proxyGroupCount, ruleProviderCount, rules }`；只读：用已启用源的现有快照试生成，不抓上游、不写快照/缓存/状态；生成失败 `400 VALIDATION_ERROR` |
 | POST | `/api/subscriptions` | 是 | `{ name, sourceIds? }`，上限 64 KiB | `201 { subscription }` |
 | PATCH | `/api/subscriptions/:id` | 是 | `{ name?, sourceIds? }`，上限 64 KiB；`sourceIds` 必须引用现存源 | `200 { subscription }`；源不存在 `400 VALIDATION_ERROR`；清空该订阅的 YAML 缓存 |
 | DELETE | `/api/subscriptions/:id` | 是 | 无 | `204` |
