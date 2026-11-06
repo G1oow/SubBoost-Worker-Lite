@@ -40,7 +40,7 @@ import type { DialerProxyGroup } from "@subboost/core/types/template-config";
 import { collectDnsPolicyEntries, configToYaml } from "./yaml";
 import { isMihomoSupportedProxyNode, normalizeMihomoVlessForGeneration } from "../mihomo/proxy-sanitizer";
 import { getValidDialerRelayGroupNames } from "../subscription/dialer-relay-group-names";
-import { activeProxyChains, resolveProxyChains } from "../subscription/chain-nodes";
+import { activeProxyChains, resolveProxyChains, type ResolvedProxyChain } from "../subscription/chain-nodes";
 import { chooseFallbackPolicyTarget, withBuiltinPolicyTargets } from "./policy-targets";
 import { resolveGroupListenerEntries, type GroupListenerTargetResolution } from "./group-listeners";
 
@@ -210,8 +210,14 @@ export function collectReservedGroupNames(options: {
 
 /**
  * 生成完整的 Clash 配置
+ *
+ * `collect` 用来把生成期才确定的中间结果带出去（当前只有已解析的链）。预览页需要它，
+ * 因为它必须与生成看同一批节点——自己用原始快照另解析一遍会在节点被过滤/改名时对不上。
  */
-export function generateClashConfig(options: GenerateOptions): ClashConfig {
+export function generateClashConfig(
+  options: GenerateOptions,
+  collect?: { chains?: ResolvedProxyChain[] }
+): ClashConfig {
   const {
     nodes,
     proxyProviders,
@@ -353,6 +359,7 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     relayGroupType: chain.relayGroupType,
     ...(chain.testUrl ? { testUrl: chain.testUrl } : {}),
   }));
+  if (collect) collect.chains = resolvedChains;
   const chainDialerGroups = buildChainDialerGroups(chainSpecs);
   // 链优先：同一节点既被旧中转组引用、又被链当作落地时，以链为准
   const dialerGroupsForNodes = [...chainDialerGroups, ...sanitizedDialerProxyGroups];

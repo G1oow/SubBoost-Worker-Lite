@@ -1,12 +1,7 @@
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
-import {
-  collectReservedGroupNames,
-  configToYaml,
-  generateClashConfig,
-  generateClashYaml,
-} from "@subboost/core/generator";
+import { configToYaml, generateClashConfig, generateClashYaml } from "@subboost/core/generator";
 import { buildNodeContentKey, stableJsonStringify } from "@subboost/core/node-identity";
-import { resolveProxyChains, type ProxyChainStatus } from "@subboost/core/subscription/chain-nodes";
+import type { ProxyChainStatus, ResolvedProxyChain } from "@subboost/core/subscription/chain-nodes";
 import { withNodeSourceId } from "@subboost/core/subscription/node-source-state";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 import type { ParsedNode } from "@subboost/core/types/node";
@@ -284,19 +279,13 @@ export async function previewConfig(
   const generateOptions = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes });
 
   try {
-    const clash = generateClashConfig(generateOptions);
+    // 链解析放在生成流程里：必须与生成看同一批节点（已过滤、协议白名单、名字唯一化），
+    // 自己拿原始快照另解析一遍会在节点被过滤时给出"能生成"的假状态。
+    const collect: { chains?: ResolvedProxyChain[] } = {};
+    const clash = generateClashConfig(generateOptions, collect);
     // 订阅输出还要再序列化一次，这一步失败同样算生成失败
     configToYaml(clash);
-    // 同一份草稿、同一批节点、同一份已占用组名：预览与订阅生成看到的链必须一致
-    const resolvedChains = resolveProxyChains({
-      chains: generateOptions.proxyChains,
-      nodes,
-      reservedGroupNames: collectReservedGroupNames({
-        customProxyGroups: generateOptions.customProxyGroups,
-        dialerProxyGroups: generateOptions.dialerProxyGroups,
-        proxyGroupNameOverrides: generateOptions.proxyGroupNameOverrides,
-      }),
-    });
+    const resolvedChains = collect.chains ?? [];
     return {
       ok: true,
       preview: {

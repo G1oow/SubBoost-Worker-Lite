@@ -328,6 +328,40 @@ describe("previewConfig", () => {
     ]);
   });
 
+  it("resolves preview chains against the same node set generation uses", async () => {
+    // 两个同名节点：生成会做唯一化改名，预览若用原始快照解析，落地数量就会对不上
+    const sources = await h.store.saveSources([
+      { name: "演示源", kind: "remote", url: "https://demo.example.com/sub" },
+    ]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [
+        { name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" },
+        { name: "落地", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" },
+      ],
+      nodeCount: 2,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+
+    const result = await previewConfig(h.deps, {
+      enabledGroups: ["select", "auto", "final"],
+      proxyChains: [
+        {
+          id: "chain-x",
+          name: "🇺🇸 一致性链",
+          relay: { sourceIds: [], includeRegex: "中转" },
+          landing: { sourceIds: [], includeRegex: "^落地$" },
+        },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const [chain] = result.preview.chains;
+    // 状态与计数必须与真正生成的结果一致：能生成、落地就是 1 个
+    expect(chain).toMatchObject({ status: "ok", active: true, landingCount: 1, relayCount: 1 });
+  });
+
   it("returns generation failures as a result instead of throwing", async () => {
     const result = await previewConfig(h.deps, { dnsYaml: "dns: [" });
     expect(result.ok).toBe(false);

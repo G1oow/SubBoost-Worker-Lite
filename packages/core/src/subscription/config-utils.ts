@@ -286,13 +286,21 @@ function normalizeChainSelector(value: unknown): ChainSelector {
  *
  * 「组名冲突 / 落地为空 / 正则写坏」都要在生成期带着原因暴露给界面，
  * 所以这里不能提前把条目丢掉，否则用户看不到为什么这条链没生效。
+ *
+ * 唯独重复 id 必须在这里消掉：`chain:<id>` 既是规则目标的引用键，也是
+ * `proxyGroupOrder` 的排序键，撞键会让后一条链的出口组被整组丢掉。
+ * 后缀规则与可视化编辑器一致（`-2`、`-3`…），保证两边认的是同一个 id。
  */
 export function normalizeProxyChains(value: unknown): ProxyChain[] {
   if (!Array.isArray(value)) return [];
   const out: ProxyChain[] = [];
-  for (const item of value) {
+  const usedIds = new Set<string>();
+  for (const [index, item] of value.entries()) {
     if (!isRecord(item)) continue;
-    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const base = (typeof item.id === "string" ? item.id.trim() : "") || `chain-${index + 1}`;
+    let id = base;
+    for (let suffix = 2; usedIds.has(id); suffix += 1) id = `${base}-${suffix}`;
+    usedIds.add(id);
     const name = typeof item.name === "string" ? item.name.trim() : "";
     const testUrl = toTrimmedString(item.testUrl);
     out.push({

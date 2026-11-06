@@ -266,6 +266,8 @@ export type ChainValidation = {
   nameError: string | null;
   /** 出口组/前置组与其他链生成的组名重复（生成时这条链会被跳过） */
   nameConflictError: string | null;
+  /** 出口组/前置组撞上内置分组名，或者其他链已占用的组名 */
+  nameTakenError: string | null;
   relayIncludeError: string | null;
   relayExcludeError: string | null;
   landingIncludeError: string | null;
@@ -292,36 +294,51 @@ export function chainGroupNames(chain: Pick<ProxyChain, "name">): { exitGroupNam
 }
 
 /**
- * 单条链的本地校验。重名只看「其他链会生成的组名」：出口组与前置组同名在非空链名
- * 下不可能出现（前缀后缀不同），真正会撞的是两条链取名相同或一条链取成了
- * 「X · 前置」而另一条叫 X。
+ * 单条链的本地校验。撞名要一起看两拨：
+ *
+ * - 其他链会生成的出口组/前置组（两条链同名，或一条叫「X · 前置」而另一条叫 X）；
+ * - 生成期已占用的组名（内置分流组、自定义分组、旧中转组，由 core 的
+ *   `collectReservedGroupNames` 给出，与生成期同一份集合）。
+ *
+ * 只校验第一条的话，链名取成「🚀 节点选择」本地会显示正常，生成时才被跳过。
  */
-export function validateChain(chain: ProxyChain, all: readonly ProxyChain[] = []): ChainValidation {
+export function validateChain(
+  chain: ProxyChain,
+  all: readonly ProxyChain[] = [],
+  reservedGroupNames: ReadonlySet<string> = new Set()
+): ChainValidation {
   const name = chain.name.trim();
   const relayIncludeError = compileChainRegex(chain.relay?.includeRegex, "前置 · 匹配正则 ");
   const relayExcludeError = compileChainRegex(chain.relay?.excludeRegex, "前置 · 排除正则 ");
   const landingIncludeError = compileChainRegex(chain.landing?.includeRegex, "落地 · 匹配正则 ");
   const landingExcludeError = compileChainRegex(chain.landing?.excludeRegex, "落地 · 排除正则 ");
 
-  const taken = new Set<string>();
+  const takenByChains = new Set<string>();
   for (const other of all) {
     if (other.id === chain.id) continue;
     const otherName = other.name.trim();
     if (!otherName) continue;
-    taken.add(otherName);
-    taken.add(chainRelayGroupName(otherName));
+    takenByChains.add(otherName);
+    takenByChains.add(chainRelayGroupName(otherName));
   }
   const { exitGroupName, relayGroupName } = chainGroupNames(chain);
   const conflict =
-    name !== "" && (taken.has(exitGroupName) || taken.has(relayGroupName) || exitGroupName === relayGroupName);
+    name !== "" &&
+    (takenByChains.has(exitGroupName) || takenByChains.has(relayGroupName) || exitGroupName === relayGroupName);
   const nameConflictError = conflict
     ? `组名「${name}」与其他链生成的组名重复，生成时这条链会被跳过`
     : null;
+  const takenByExisting = [exitGroupName, relayGroupName].filter((group) => reservedGroupNames.has(group));
+  const nameTakenError =
+    name !== "" && takenByExisting.length > 0
+      ? `组名「${takenByExisting[0]}」已被内置分组或其他分组占用，生成时这条链会被跳过，请换个链名`
+      : null;
   const nameError = name === "" ? "请填写链名：它就是出口组名，不能留空" : null;
 
   return {
     nameError,
     nameConflictError,
+    nameTakenError,
     relayIncludeError,
     relayExcludeError,
     landingIncludeError,
@@ -329,6 +346,7 @@ export function validateChain(chain: ProxyChain, all: readonly ProxyChain[] = []
     ok:
       nameError === null &&
       nameConflictError === null &&
+      nameTakenError === null &&
       relayIncludeError === null &&
       relayExcludeError === null &&
       landingIncludeError === null &&

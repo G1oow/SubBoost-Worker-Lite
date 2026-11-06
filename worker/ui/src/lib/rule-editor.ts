@@ -20,6 +20,8 @@ import {
 } from "@subboost/core/generator/rules";
 import { stableJsonStringify } from "@subboost/core/node-identity";
 import { normalizeProxyGroupTargetRef } from "@subboost/core/proxy-group-targets";
+import { chainRelayGroupName } from "@subboost/core/subscription/chain-nodes";
+import { normalizeProxyChains } from "@subboost/core/subscription/config-utils";
 import {
   createCustomRuleId,
   ensureCustomRuleId,
@@ -98,7 +100,7 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
-function readNameOverrides(config: ConfigRecord): Record<string, string> {
+export function readNameOverrides(config: ConfigRecord): Record<string, string> {
   if (!isRecord(config.proxyGroupNameOverrides)) return {};
   const out: Record<string, string> = {};
   for (const [rawKey, rawValue] of Object.entries(config.proxyGroupNameOverrides)) {
@@ -177,18 +179,42 @@ function readDialerGroupNames(config: ConfigRecord): string[] {
     .filter(Boolean);
 }
 
+/** 启用中的链：`id` → 出口组名。规则目标用 `chain:<id>` 引用，不认链名的字符串写法 */
+function readChainGroupRefs(config: ConfigRecord): { id: string; name: string }[] {
+  const out: { id: string; name: string }[] = [];
+  const seen = new Set<string>();
+  for (const item of readRawList(config, "proxyChains")) {
+    if (!isRecord(item) || item.enabled === false) continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (!id || !name || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, name });
+  }
+  return out;
+}
+
 type TargetContext = {
   enabledModules: Set<string>;
   overrides: Record<string, string>;
   moduleIdByName: Map<string, string>;
   /** 全部自定义分组（含已停用的），只用来认名字与给出准确提示 */
   customGroups: CustomProxyGroup[];
+  /** 全部链（含已停用的），同上：只为认 id 与给出准确提示 */
+  chains: { id: string; name: string; enabled: boolean }[];
   fallback: string;
 };
 
 function buildTargetContext(config: ConfigRecord, enabledModules: string[]): TargetContext {
   const overrides = readNameOverrides(config);
   const customGroups = normalizeRuleModelFromConfig(config).customProxyGroups;
+  const chains = readChainGroupRefs(config).map((chain) => ({ ...chain, enabled: true }));
+  for (const item of readRawList(config, "proxyChains")) {
+    if (!isRecord(item) || item.enabled !== false) continue;
+    const id = typeof item.id === "string" ? item.id.trim() : "";
+    const name = typeof item.name === "string" ? item.name.trim() : "";
+    if (id && name) chains.push({ id, name, enabled: false });
+  }
   const enabledSet = new Set(enabledModules);
   const leading = customGroups
     .find((group) => group.enabled !== false && group.memberSource === "filtered-nodes")
@@ -202,6 +228,7 @@ function buildTargetContext(config: ConfigRecord, enabledModules: string[]): Tar
     overrides,
     moduleIdByName: new Map(PROXY_GROUP_MODULES.map((module) => [resolveModuleName(module.id, overrides), module.id])),
     customGroups,
+    chains,
     fallback: leading || (firstModule ? resolveModuleName(firstModule, overrides) : "DIRECT"),
   };
 }
@@ -224,12 +251,14 @@ export function buildRuleOptions(config: ConfigRecord): RulesGenerateOptions {
     ...enabledModules.filter((id) => MODULE_BY_ID.has(id)).map((id) => resolveModuleName(id, ctx.overrides)),
     ...activeGroups.filter((group) => group.memberSource !== "filtered-nodes").map((group) => group.name.trim()),
     ...readDialerGroupNames(config),
+    ...ctx.chains.filter((chain) => chain.enabled).map((chain) => chain.name),
   ];
   const known = new Set<string>([
     ...groupNames,
     ...BUILTIN_POLICIES,
     ...ctx.moduleIdByName.keys(),
     ...ctx.customGroups.map((group) => group.name.trim()),
+    ...ctx.chains.map((chain) => chain.name),
   ]);
   const passthrough = [
     ...customRules.map((rule) => rule.target),
@@ -242,6 +271,8 @@ export function buildRuleOptions(config: ConfigRecord): RulesGenerateOptions {
     customRules,
     customRuleSets: model.customRuleSets,
     customProxyGroups: model.customProxyGroups,
+    // 链目标只在启用时才有出口组；停用的链由 resolveProxyGroupTargetName 回退到兜底组
+    chainGroups: ctx.chains.filter((chain) => chain.enabled).map(({ id, name }) => ({ id, name })),
     builtinRuleEdits: model.builtinRuleEdits,
     proxyGroupNameOverrides: ctx.overrides,
     experimentalCnUseCnRuleSet: readBoolean(
@@ -250,7 +281,7 @@ export function buildRuleOptions(config: ConfigRecord): RulesGenerateOptions {
     ),
     cnIpNoResolve: readBoolean(config.cnIpNoResolve, DEFAULT_SUBBOOST_CONFIG.cnIpNoResolve),
     ruleOrder: readStringList(config.ruleOrder),
-    availablePolicyTargets: [...groupNames, ...BUILTIN_POLICIES, ...passthrough],
+    availablePolicyTargets: [...new Set([...groupNames, ...BUILTIN_POLICIES, ...passthrough])],
     fallbackPolicyTarget: ctx.fallback,
   };
 }
@@ -259,7 +290,11 @@ export function buildRuleOptions(config: ConfigRecord): RulesGenerateOptions {
 // 目标：下拉框的值是带前缀的字符串，与配置里的 ref / 字符串互转
 // ---------------------------------------------------------------------------
 
-/** `module:<id>` | `policy:DIRECT` | `policy:REJECT` | `custom:<id>` | `raw:<原样字符串>` */
+/**
+ * `module:<id>` | `policy:DIRECT` | `policy:REJECT` | `custom:<id>` | `chain:<id>` | `raw:<原样字符串>`
+ *
+ * 链用 `chain:<链 id>` 而不是组名：链改名后目标仍然有效。
+ */
 export type RuleTargetValue = string;
 
 export type RuleTargetOption = { value: RuleTargetValue; label: string };
@@ -280,7 +315,7 @@ export function fromTargetValue(value: RuleTargetValue): ProxyGroupRuleTarget {
   const separator = value.indexOf(":");
   const kind = value.slice(0, separator);
   const rest = value.slice(separator + 1);
-  if (kind === "module" || kind === "custom") return { kind, id: rest };
+  if (kind === "module" || kind === "custom" || kind === "chain") return { kind, id: rest };
   return rest;
 }
 
@@ -302,21 +337,39 @@ function describeTarget(value: RuleTargetValue, ctx: TargetContext): { label: st
       ? { label: group.name, warning: `自定义分组「${group.name}」已停用，生成时回退到「${ctx.fallback}」` }
       : { label: group.name, warning: null };
   }
+  if (kind === "chain") {
+    const chain = ctx.chains.find((item) => item.id === rest);
+    if (!chain) return { label: rest, warning: `链「${rest}」不存在，生成时回退到「${ctx.fallback}」` };
+    const relayGroupName = chainRelayGroupName(chain.name);
+    return chain.enabled
+      ? { label: chain.name, warning: null }
+      : {
+          label: chain.name,
+          warning: `链「${chain.name}」已停用，出口组与「${relayGroupName}」都不生成，回退到「${ctx.fallback}」`,
+        };
+  }
   return {
     label: rest,
     warning: `「${rest}」不是已开启的分流组；订阅里没有同名节点时会回退到「${ctx.fallback}」`,
   };
 }
 
-/** 规则可选的目标：已开启的分流组 + DIRECT/REJECT（不支持直接指向单个节点） */
+/**
+ * 规则可选的目标：已开启的分流组 + 启用中的链出口组 + DIRECT/REJECT（不支持直接指向单个节点）
+ *
+ * 链排在分流组后面、固定策略前面，让「走这条链」和「直接走某个组」在列表里分得清。
+ */
 export function listRuleTargetOptions(config: ConfigRecord): RuleTargetOption[] {
   const enabled = new Set(getEnabledModuleIds(config));
   const overrides = readNameOverrides(config);
+  const chains = readChainGroupRefs(config);
   return [
     ...PROXY_GROUP_MODULES.filter((module) => enabled.has(module.id)).map((module) => ({
       value: `module:${module.id}`,
       label: resolveModuleName(module.id, overrides),
     })),
+    ...readDialerGroupNames(config).map((name) => ({ value: `raw:${name}`, label: name })),
+    ...chains.map((chain) => ({ value: `chain:${chain.id}`, label: chain.name })),
     { value: "policy:DIRECT", label: "DIRECT（直连）" },
     { value: "policy:REJECT", label: "REJECT（拒绝）" },
   ];
@@ -579,15 +632,17 @@ export function setModuleEnabled(config: ConfigRecord, moduleId: string, enabled
 export type CustomRuleInput = {
   type: CustomRule["type"];
   value: string;
-  target: ProxyGroupRuleTarget;
+  /** 下拉框的 value（`module:<id>` / `policy:X` / `custom:<id>` / `chain:<id>` / `raw:<名字>`） */
+  target: RuleTargetValue;
   noResolve: boolean;
 };
 
+/** 对话框的 target 是下拉 value，落盘前要换回 ref / 字符串，否则 chain:<id> 会存成裸字符串 */
 function customRuleFields(input: CustomRuleInput) {
   return {
     type: input.type,
     value: input.value.trim(),
-    target: input.target,
+    target: fromTargetValue(input.target),
     ...(supportsNoResolve(input.type) && input.noResolve ? { noResolve: true } : {}),
   };
 }
@@ -639,7 +694,8 @@ export type CustomRuleSetInput = {
   name: string;
   behavior: RuleSetBehavior;
   path: string;
-  target: ProxyGroupRuleTarget;
+  /** 下拉框的 value，落盘时由 customRuleSetFields 换成 ref */
+  target: RuleTargetValue;
   noResolve: boolean;
   /** 新建时用于分配 id 的基础名（规则库条目 id 或链接文件名） */
   idHint?: string;
@@ -654,12 +710,13 @@ export function reservedRuleSetIds(config: ConfigRecord, exceptId?: string): str
   ];
 }
 
+/** 与 saveCustomRule 同理：下拉 value 在这里才换回 ref，避免 chain:<id> 存成裸字符串 */
 function customRuleSetFields(input: CustomRuleSetInput) {
   return {
     name: input.name.trim(),
     behavior: input.behavior,
     path: input.path.trim(),
-    target: input.target,
+    target: fromTargetValue(input.target),
     ...(input.behavior === "ipcidr" && input.noResolve ? { noResolve: true } : {}),
   };
 }
@@ -704,9 +761,12 @@ export function deleteCustomRuleSet(config: ConfigRecord, id: string): ConfigRec
   };
 }
 
+/** 导入的规则集条目：target 与对话框一致存下拉 value，id 已在解析阶段分配 */
+export type ImportedRuleSetEntry = Omit<CustomRuleSetInput, "noResolve"> & { id: string; noResolve?: boolean };
+
 export type ImportedEntry =
   | { kind: "rule"; rule: CustomRuleInput }
-  | { kind: "ruleSet"; ruleSet: CustomRuleSet };
+  | { kind: "ruleSet"; ruleSet: ImportedRuleSetEntry };
 
 /** 批量导入：按导入文本的先后整体插到自定义规则段末尾 */
 export function importCustomEntries(config: ConfigRecord, entries: ImportedEntry[]): ConfigRecord {
@@ -802,7 +862,15 @@ export function setBuiltinRuleTarget(config: ConfigRecord, key: string, value: R
 // 与已保存配置对比
 // ---------------------------------------------------------------------------
 
-const VISUAL_FIELDS = ["enabledGroups", "enabledRules", "customRules", "customRuleSets", "builtinRuleEdits", "ruleOrder"] as const;
+const VISUAL_FIELDS = [
+  "enabledGroups",
+  "enabledRules",
+  "customRules",
+  "customRuleSets",
+  "builtinRuleEdits",
+  "ruleOrder",
+  "proxyChains",
+] as const;
 type VisualField = (typeof VISUAL_FIELDS)[number];
 
 function semanticValue(config: ConfigRecord, field: VisualField): string {
@@ -819,6 +887,9 @@ function semanticValue(config: ConfigRecord, field: VisualField): string {
       return stableJsonStringify(normalizeBuiltinRuleEdits(config.builtinRuleEdits));
     case "ruleOrder":
       return stableJsonStringify(fullOrderOf(config));
+    case "proxyChains":
+      // 链页写回时总会补 sourceIds: [] 等默认值，按规范化后的语义比较
+      return stableJsonStringify(normalizeProxyChains(config.proxyChains));
   }
 }
 

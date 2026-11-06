@@ -78,6 +78,62 @@ describe("rule editor view", () => {
     expect(fromTargetValue("raw:香港 01")).toBe("香港 01");
   });
 
+  it("offers enabled chains as targets and keeps chain:<id> refs when saving", () => {
+    const config = {
+      ...defaultConfig(),
+      proxyChains: [
+        { id: "c1", name: "🇺🇸 演示链", landing: { includeRegex: "落地" }, relay: { includeRegex: "香港" } },
+        { id: "c2", name: "停用链", enabled: false, landing: {}, relay: {} },
+      ],
+      customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.com", target: { kind: "chain", id: "c1" } }],
+    };
+    const options = listRuleTargetOptions(config);
+    expect(options).toContainEqual({ value: "chain:c1", label: "🇺🇸 演示链" });
+    expect(options.map((option) => option.value)).not.toContain("chain:c2");
+
+    // 存回去必须还是 ref，而不是退化成裸链 id 字符串
+    expect(fromTargetValue("chain:c1")).toEqual({ kind: "chain", id: "c1" });
+
+    const row = buildRuleEditorView(config).rows.find((item) => item.key === "custom-rule:r1");
+    expect(row).toMatchObject({ targetValue: "chain:c1", targetLabel: "🇺🇸 演示链", targetWarning: null });
+    expect(row?.text).toBe("DOMAIN-SUFFIX,example.com,🇺🇸 演示链");
+    // 编辑对话框只改类型、不动目标，落盘后仍是 ref（对话框的 target 是下拉的 value 字符串）
+    const saved = saveCustomRule(
+      config,
+      { type: "DOMAIN", value: "example.com", target: "chain:c1", noResolve: false },
+      "r1"
+    ).config;
+    expect((saved.customRules as { target: unknown }[])[0].target).toEqual({ kind: "chain", id: "c1" });
+    // 生成侧与界面一致：目标就是出口组名，不回退
+    // 链没有可用节点时出口组不生成、目标按回退处理；这里验证有节点时目标就是出口组名
+    expect(generateClashConfig(buildGenerateOptionsFromConfig(saved, { nodes: [] })).rules).toContain(
+      "DOMAIN,example.com,🚀 节点选择"
+    );
+    const withNodes = generateClashConfig(
+      buildGenerateOptionsFromConfig(saved, {
+        nodes: [
+          { name: "香港 01", type: "ss", server: "192.0.2.10", port: 8388, cipher: "aes-256-gcm", password: "pass" },
+          { name: "落地 01", type: "ss", server: "192.0.2.11", port: 8388, cipher: "aes-256-gcm", password: "pass" },
+        ] as never,
+      })
+    );
+    expect(withNodes.rules).toContain("DOMAIN,example.com,🇺🇸 演示链");
+  });
+
+  it("warns when a chain target is disabled or missing", () => {
+    const config = {
+      ...defaultConfig(),
+      proxyChains: [{ id: "c2", name: "停用链", enabled: false, landing: {}, relay: {} }],
+      customRules: [
+        { id: "off", type: "DOMAIN", value: "a.example.com", target: { kind: "chain", id: "c2" } },
+        { id: "gone", type: "DOMAIN", value: "b.example.com", target: { kind: "chain", id: "nope" } },
+      ],
+    };
+    const rows = buildRuleEditorView(config).rows;
+    expect(rows.find((row) => row.key === "custom-rule:off")?.targetWarning).toContain("已停用");
+    expect(rows.find((row) => row.key === "custom-rule:gone")?.targetWarning).toContain("不存在");
+  });
+
   it("warns about targets that will fall back during generation", () => {
     const config = {
       ...defaultConfig(),
@@ -310,6 +366,36 @@ describe("builtin rule edits", () => {
     const on = setBuiltinRuleEnabled(off, "module:private:private-ip", true);
     expect(on.builtinRuleEdits).toEqual({});
     expect(reconcileWithBaseline(on, base)).toEqual(base);
+  });
+
+  it("链改回原写法时也能回到已保存状态", () => {
+    const base: ConfigRecord = {
+      ...defaultConfig(),
+      proxyChains: [{ id: "c1", name: "🇺🇸 演示链", relay: { includeRegex: "香港" }, landing: { includeRegex: "落地" } }],
+    };
+    // 编辑过一次：补上了 sourceIds: []（链页的默认写法）
+    const dirty: ConfigRecord = {
+      ...base,
+      proxyChains: [
+        {
+          id: "c1",
+          name: "🇺🇸 演示链",
+          enabled: true,
+          relay: { sourceIds: [], includeRegex: "香港" },
+          landing: { sourceIds: [], includeRegex: "落地" },
+        },
+      ],
+    };
+    expect(isConfigChanged(dirty, base)).toBe(true);
+    // 语义没变，回滚到基线写法后视为没有未保存的修改
+    expect(reconcileWithBaseline(dirty, base)).toEqual(base);
+    expect(isConfigChanged(reconcileWithBaseline(dirty, base), base)).toBe(false);
+    // 真正改了内容时不能回滚
+    const changed: ConfigRecord = {
+      ...dirty,
+      proxyChains: [{ ...(dirty.proxyChains as ConfigRecord[])[0], name: "改了名" }],
+    };
+    expect(reconcileWithBaseline(changed, base)).toEqual(changed);
   });
 
   it("retargets a builtin rule and treats its own group as the default", () => {

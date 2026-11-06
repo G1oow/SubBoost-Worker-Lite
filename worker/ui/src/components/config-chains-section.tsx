@@ -12,6 +12,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@subboost/ui/components/ui/switch";
 import { cn } from "@subboost/ui/lib/utils";
 import type { ChainSelector, ProxyChain, ProxyGroupGroupType } from "@subboost/core/types/config";
+import { collectReservedGroupNames } from "@subboost/core/generator/index";
+import { normalizeRuleModelFromConfig } from "@subboost/core/rules/rule-model";
+import { readNameOverrides } from "../lib/rule-editor";
 import {
   CHAIN_GROUP_TYPE_OPTIONS,
   chainGroupNames,
@@ -63,6 +66,21 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
   const merged = React.useMemo(() => mergePreviewStatus(chains, previewChains), [chains, previewChains]);
   const legacyGroups = React.useMemo(() => readLegacyDialerGroups(config), [config]);
   const enabledSources = React.useMemo(() => sources.filter((source) => source.enabled), [sources]);
+  const sourceNames = React.useMemo(
+    () => new Map(sources.map((source) => [source.id, source.name])),
+    [sources]
+  );
+  // 生成期已占用的组名：链名撞上它们时会被跳过，本地校验要一起看
+  const reservedGroupNames = React.useMemo(
+    () =>
+      collectReservedGroupNames({
+        customProxyGroups: normalizeRuleModelFromConfig(config).customProxyGroups,
+        // 只为取名字，投影成最小字段即可
+        dialerProxyGroups: readLegacyDialerGroups(config).map((group) => ({ name: group.name }) as never),
+        proxyGroupNameOverrides: readNameOverrides(config),
+      }),
+    [config]
+  );
 
   const applyChains = React.useCallback(
     (next: ProxyChain[]) => onChange(writeChains(config, next)),
@@ -118,9 +136,10 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
                     chain={chain}
                     index={index}
                     total={merged.length}
-                    validation={validateChain(chain, chains)}
+                    validation={validateChain(chain, chains, reservedGroupNames)}
                     preview={preview}
                     enabledSources={enabledSources}
+                    sourceNames={sourceNames}
                     onPatch={(patch) => applyChains(patchChain(chains, chain.id, patch))}
                     onPatchSelector={(side, patch) =>
                       applyChains(patchChainSelector(chains, chain.id, side, patch))
@@ -179,6 +198,8 @@ type ChainCardProps = {
   validation: ReturnType<typeof validateChain>;
   preview: ConfigPreviewChain | null;
   enabledSources: SourceDto[];
+  /** 全部源的 id → 名字，用来给已失效的 sourceId 显示可读名称 */
+  sourceNames: Map<string, string>;
   onPatch: (patch: Partial<ProxyChain>) => void;
   onPatchSelector: (side: ChainSelectorSide, patch: Partial<ChainSelector>) => void;
   onToggleSource: (side: ChainSelectorSide, sourceId: string) => void;
@@ -194,6 +215,7 @@ function ChainCard({
   validation,
   preview,
   enabledSources,
+  sourceNames,
   onPatch,
   onPatchSelector,
   onToggleSource,
@@ -282,6 +304,12 @@ function ChainCard({
             <span className="break-words">{validation.nameConflictError}</span>
           </p>
         ) : null}
+        {validation.nameTakenError ? (
+          <p className="flex items-start gap-1.5 text-[11px] text-amber-400" role="alert">
+            <Icon icon={TriangleAlert} size="sm" className="mt-px shrink-0" />
+            <span className="break-words">{validation.nameTakenError}</span>
+          </p>
+        ) : null}
 
         <div className="grid gap-3 lg:grid-cols-3">
           <SelectorPanel
@@ -289,6 +317,7 @@ function ChainCard({
             title="① 前置（中转节点）"
             selector={chain.relay}
             enabledSources={enabledSources}
+            sourceNames={sourceNames}
             includeError={validation.relayIncludeError}
             excludeError={validation.relayExcludeError}
             onToggleSource={(sourceId) => onToggleSource("relay", sourceId)}
@@ -299,6 +328,7 @@ function ChainCard({
             title="② 落地（最终出口的节点）"
             selector={chain.landing}
             enabledSources={enabledSources}
+            sourceNames={sourceNames}
             includeError={validation.landingIncludeError}
             excludeError={validation.landingExcludeError}
             onToggleSource={(sourceId) => onToggleSource("landing", sourceId)}
@@ -321,6 +351,7 @@ type SelectorPanelProps = {
   title: string;
   selector: ChainSelector;
   enabledSources: SourceDto[];
+  sourceNames: Map<string, string>;
   includeError: string | null;
   excludeError: string | null;
   onToggleSource: (sourceId: string) => void;
@@ -332,11 +363,16 @@ function SelectorPanel({
   title,
   selector,
   enabledSources,
+  sourceNames,
   includeError,
   excludeError,
   onToggleSource,
   onPatchSelector,
 }: SelectorPanelProps) {
+  // 已停用或已删除的源：勾选过就一定列出来，否则用户取消不掉，还会误以为范围正常
+  const staleIds = selector.sourceIds.filter(
+    (sourceId) => !enabledSources.some((source) => source.id === sourceId)
+  );
   const scope = side === "relay" ? "前置" : "落地";
   return (
     <section aria-label={title} className="space-y-3 rounded-xl border border-ink/10 bg-ink/5 p-3">
@@ -347,7 +383,7 @@ function SelectorPanel({
         </p>
       </div>
 
-      {enabledSources.length === 0 ? (
+      {enabledSources.length === 0 && staleIds.length === 0 ? (
         <p className="text-[11px] leading-relaxed text-amber-400">
           还没有已启用的源，这个选择器会匹配不到任何节点。
         </p>
@@ -368,8 +404,27 @@ function SelectorPanel({
               </Button>
             );
           })}
+          {staleIds.map((sourceId) => (
+            <Button
+              key={sourceId}
+              type="button"
+              size="sm"
+              variant="outline"
+              aria-pressed
+              onClick={() => onToggleSource(sourceId)}
+              title="这个源已停用或被删除，取消勾选可去掉它"
+            >
+              <span className="break-all">{`${sourceNames.get(sourceId) ?? sourceId}（已失效）`}</span>
+            </Button>
+          ))}
         </div>
       )}
+
+      {staleIds.length > 0 && enabledSources.length > 0 ? (
+        <p className="text-[11px] leading-relaxed text-amber-400">
+          勾选里有已失效的源，取消掉才按剩下这些源筛选。
+        </p>
+      ) : null}
 
       <FormField label="匹配正则" description="留空表示不限制节点名" error={includeError}>
         <Input
@@ -412,33 +467,17 @@ function GroupPanel({ chain, exitGroupName, relayGroupName, onPatch }: GroupPane
       </div>
 
       <FormField label="出口组类型">
-        <Select value={exitGroupType} onValueChange={(value) => onPatch({ exitGroupType: value as ProxyGroupGroupType })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CHAIN_GROUP_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ChainSelect
+          value={exitGroupType}
+          onValueChange={(value) => onPatch({ exitGroupType: value as ProxyGroupGroupType })}
+        />
       </FormField>
 
       <FormField label="前置组类型">
-        <Select value={relayGroupType} onValueChange={(value) => onPatch({ relayGroupType: value as ProxyGroupGroupType })}>
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {CHAIN_GROUP_TYPE_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
+        <ChainSelect
+          value={relayGroupType}
+          onValueChange={(value) => onPatch({ relayGroupType: value as ProxyGroupGroupType })}
+        />
       </FormField>
 
       <FormField label="测速地址" description="前置组与出口组共用">
@@ -449,5 +488,28 @@ function GroupPanel({ chain, exitGroupName, relayGroupName, onPatch }: GroupPane
         />
       </FormField>
     </section>
+  );
+}
+
+type ChainSelectProps = {
+  value: ProxyGroupGroupType;
+  onValueChange: (value: string) => void;
+};
+
+/** FormField 把 id 注入到这里，再转给真正可聚焦的触发器，标签与错误态才能关联上 */
+function ChainSelect({ value, onValueChange, ...control }: ChainSelectProps) {
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger {...control}>
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {CHAIN_GROUP_TYPE_OPTIONS.map((option) => (
+          <SelectItem key={option.value} value={option.value}>
+            {option.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   );
 }
