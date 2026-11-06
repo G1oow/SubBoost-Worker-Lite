@@ -160,6 +160,47 @@ describe("generateSubscription", () => {
     expect(proxiesFrom(result.cache.yaml).map((p) => p.name)).toEqual(["a"]);
   });
 
+  it("高级分组的按源过滤真正生效，且 _sourceIds 不进 YAML", async () => {
+    const sources = await h.store.saveSources([
+      { name: "a", kind: "remote", url: "https://a.example.com/sub" },
+      { name: "b", kind: "remote", url: "https://b.example.com/sub" },
+    ]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [{ name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putSnapshot({
+      sourceId: sources[1].id,
+      nodes: [{ name: "b", type: "ss", server: "example.com", port: 8389, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putConfig({
+      enabledGroups: ["select", "auto", "final"],
+      proxyGroupAdvanced: { final: { sourceIds: [sources[0].id] } },
+    });
+
+    const { dto } = await h.store.createSubscription({ name: "all", sourceIds: [] });
+    const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
+    const result = await generateSubscription(h.deps, sub!, { onDemand: false });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    // 内部标记只用于生成期，不能漏进订阅
+    expect(result.cache.yaml).not.toContain("_sourceIds");
+
+    const parsed = yaml.load(result.cache.yaml) as {
+      "proxy-groups": Array<{ name: string; proxies: string[] }>;
+    };
+    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "🐟 漏网之鱼");
+    expect(finalGroup?.proxies).toContain("a");
+    expect(finalGroup?.proxies).not.toContain("b");
+  });
+
   it("returns no-nodes when no snapshot has nodes", async () => {
     await h.store.saveSources([{ name: "empty", kind: "manual", manualText: "ss://x" }]);
     const { dto } = await h.store.createSubscription({ name: "empty", sourceIds: [] });
@@ -220,10 +261,71 @@ describe("previewConfig", () => {
         proxyGroupCount: 3,
         ruleProviderCount: 0,
         rules: ["DOMAIN-SUFFIX,example.org,DIRECT", "MATCH,🐟 漏网之鱼"],
+        chains: [],
       },
     });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(await dumpKv(h.kv)).toEqual(before);
+  });
+
+  it("预览返回每条链的匹配数量与不生成的原因", async () => {
+    const sources = await h.store.saveSources([
+      { name: "relay", kind: "remote", url: "https://relay.example.com/sub" },
+      { name: "landing", kind: "remote", url: "https://landing.example.com/sub" },
+    ]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [{ name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putSnapshot({
+      sourceId: sources[1].id,
+      nodes: [{ name: "落地洛杉矶", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+
+    const result = await previewConfig(h.deps, {
+      enabledGroups: ["select", "auto", "final"],
+      proxyChains: [
+        {
+          id: "chain-1",
+          name: "🇺🇸 美国链",
+          relay: { sourceIds: [], includeRegex: "中转" },
+          landing: { sourceIds: [], includeRegex: "落地" },
+        },
+        {
+          id: "chain-2",
+          name: "🇺🇸 空链",
+          relay: { sourceIds: [], includeRegex: "中转" },
+          landing: { sourceIds: [], includeRegex: "不存在" },
+        },
+      ],
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.preview.chains).toEqual([
+      expect.objectContaining({
+        id: "chain-1",
+        exitGroupName: "🇺🇸 美国链",
+        relayGroupName: "🇺🇸 美国链 · 前置",
+        relayCount: 1,
+        landingCount: 1,
+        status: "ok",
+        active: true,
+      }),
+      expect.objectContaining({
+        id: "chain-2",
+        relayCount: 0,
+        landingCount: 0,
+        status: "empty-landing",
+        active: false,
+      }),
+    ]);
   });
 
   it("returns generation failures as a result instead of throwing", async () => {

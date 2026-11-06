@@ -235,7 +235,8 @@ export type NodeRegion =
 
 export type ProxyGroupTargetRef =
   | { kind: "module"; id: string }
-  | { kind: "custom"; id: string };
+  | { kind: "custom"; id: string }
+  | { kind: "chain"; id: string };
 
 export type ProxyGroupRuleTarget = ProxyGroupTargetRef | string;
 
@@ -243,6 +244,7 @@ export type ProxyGroupMemberRef =
   | { kind: "node"; name: string }
   | { kind: "module"; id: string }
   | { kind: "custom"; id: string }
+  | { kind: "chain"; id: string }
   | { kind: "direct" }
   | { kind: "reject" };
 
@@ -304,6 +306,39 @@ export interface CustomProxyGroup {
   groupType: ProxyGroupGroupType;
   strategy?: LoadBalanceStrategy;
   advanced?: ProxyGroupAdvancedConfig;
+}
+
+/**
+ * 链式代理的节点选择器：先按源限定范围，再按节点名跑 include/exclude 正则。
+ *
+ * `sourceIds` 为空表示全部已启用源；正则为空表示不限制。
+ */
+export interface ChainSelector {
+  sourceIds: string[];
+  includeRegex?: string;
+  excludeRegex?: string;
+}
+
+/**
+ * 链式代理：严格两跳（前置 → 落地）。
+ *
+ * 每条启用的链生成两个组：出口组（名字即 `name`，默认 select，成员是落地节点）
+ * 与前置组（`${name} · 前置`，默认 url-test，成员是前置节点）。落地节点的
+ * `dialer-proxy` 指向前置组，因此流量按「落地节点 → 前置节点 → 目标」两跳出去。
+ */
+export interface ProxyChain {
+  id: string;
+  /** 出口组名；前置组名自动派生为 `${name} · 前置` */
+  name: string;
+  enabled?: boolean;
+  relay: ChainSelector;
+  landing: ChainSelector;
+  /** 出口组类型，默认 select */
+  exitGroupType?: ProxyGroupGroupType;
+  /** 前置组类型，默认 url-test */
+  relayGroupType?: ProxyGroupGroupType;
+  /** 前置组测速地址，留空用全局 testUrl */
+  testUrl?: string;
 }
 
 /**

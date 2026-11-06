@@ -59,6 +59,37 @@ export function getNodeSourceIds(node: ParsedNode): string[] {
   }
   return out;
 }
+/**
+ * 汇总这批节点上真实存在的源 id。
+ *
+ * 配置里保存的源 id 可能已经指向被删除的源，用它做严格过滤会把组里的节点全部筛空，
+ * 所以调用方要先拿到「真实存在的源」再决定要不要过滤。
+ */
+export function collectNodeSourceIds(nodes: ParsedNode[]): Set<string> {
+  const out = new Set<string>();
+  for (const node of nodes) {
+    for (const id of getNodeSourceIds(node)) out.add(id);
+  }
+  return out;
+}
+
+/**
+ * 把配置里写的源 id 收敛成真正生效的过滤集合。
+ *
+ * 返回 `null` 表示「不过滤」：没写源 id，或者写的 id 没有一个命中现存的源
+ * （陈旧配置不该把整组节点打空）。
+ */
+export function resolveEffectiveSourceIds(
+  requested: string[],
+  nodes: ParsedNode[]
+): Set<string> | null {
+  const trimmed = requested.map((id) => id.trim()).filter(Boolean);
+  if (trimmed.length === 0) return null;
+  const known = collectNodeSourceIds(nodes);
+  const effective = trimmed.filter((id) => known.has(id));
+  return effective.length > 0 ? new Set(effective) : null;
+}
+
 
 export function withNodeSourceId(node: ParsedNode, sourceId: string): ParsedNode {
   const sid = (sourceId || "").trim();

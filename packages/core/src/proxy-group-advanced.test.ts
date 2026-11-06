@@ -23,6 +23,10 @@ describe("resolveProxyGroupMembers", () => {
     expect(normalizeProxyGroupMemberRef({ kind: "node", name: " Node A " })).toEqual({ kind: "node", name: "Node A" });
     expect(normalizeProxyGroupMemberRef({ kind: "module", id: " auto " })).toEqual({ kind: "module", id: "auto" });
     expect(normalizeProxyGroupMemberRef({ kind: "custom", id: " media " })).toEqual({ kind: "custom", id: "media" });
+    expect(normalizeProxyGroupMemberRef({ kind: "chain", id: " chain-1 " })).toEqual({
+      kind: "chain",
+      id: "chain-1",
+    });
     expect(normalizeProxyGroupMemberRef({ kind: "direct" })).toEqual({ kind: "direct" });
     expect(normalizeProxyGroupMemberRef({ kind: "reject" })).toEqual({ kind: "reject" });
     expect(normalizeProxyGroupMemberRef(null)).toBeNull();
@@ -340,6 +344,46 @@ describe("resolveProxyGroupMembers", () => {
     expect(noAdvanced.proxyNames).toEqual(["German Node"]);
     expect(emptyNames.included).toEqual([]);
     expect(emptyNames.excluded).toEqual([]);
+  });
+
+  it("陈旧源 id 不再把整组节点筛空，命中现存源才过滤", () => {
+    const nodes = [withNodeSourceId(node("Node A"), "source-a"), node("Node B")];
+
+    const staleOnly = resolveProxyGroupMembers({
+      defaultProxyNames: ["Node A", "Node B"],
+      nodes,
+      advanced: { sourceIds: ["source-deleted"] },
+    });
+    expect(staleOnly.proxyNames).toEqual(["Node A", "Node B"]);
+
+    const mixed = resolveProxyGroupMembers({
+      defaultProxyNames: ["Node A", "Node B"],
+      nodes,
+      advanced: { sourceIds: ["source-deleted", "source-a"] },
+    });
+    expect(mixed.proxyNames).toEqual(["Node A"]);
+  });
+
+  it("链出口组既能按名字也能按引用被成员解析选中", () => {
+    const options = {
+      nodes: [node("Node A")],
+      moduleNames: { select: "🚀 节点选择" },
+      chainGroups: [{ id: "chain-1", name: "🇺🇸 美国链" }],
+    };
+
+    const byName = resolveProxyGroupMembers({
+      ...options,
+      defaultProxyNames: ["🇺🇸 美国链", "Node A"],
+    });
+    expect(byName.proxyNames).toEqual(["🇺🇸 美国链", "Node A"]);
+    expect(byName.included[0]).toMatchObject({ kind: "chain", ref: { kind: "chain", id: "chain-1" } });
+
+    const byRef = resolveProxyGroupMembers({
+      ...options,
+      defaultProxyNames: [],
+      advanced: { extraMembers: [{ kind: "chain", id: "chain-1" }] },
+    });
+    expect(byRef.proxyNames).toEqual(["🇺🇸 美国链"]);
   });
 
   it("normalizes sparse advanced values and resolves members from fallback references", () => {

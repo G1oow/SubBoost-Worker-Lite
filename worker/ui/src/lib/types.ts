@@ -157,6 +157,20 @@ export type DashboardStats = {
   warnings: DashboardWarning[];
 };
 
+/** 链式代理逐条解析结果（对应 core 的 ProxyChainStatus） */
+export type ConfigPreviewChain = {
+  id: string;
+  name: string;
+  exitGroupName: string;
+  relayGroupName: string;
+  relayCount: number;
+  landingCount: number;
+  status: "ok" | "empty-relay" | "empty-landing" | "disabled" | "invalid-regex" | "name-conflict" | "invalid";
+  /** 是否真的会写进配置 */
+  active: boolean;
+  error?: string;
+};
+
 /** 用草稿配置试生成的结果（对应 worker/src/pipeline.ts 的 ConfigPreview） */
 export type ConfigPreview = {
   sourceCount: number;
@@ -164,6 +178,8 @@ export type ConfigPreview = {
   nodeCount: number;
   proxyGroupCount: number;
   ruleProviderCount: number;
+  /** 每条链的匹配数量与「为什么没生成」 */
+  chains: ConfigPreviewChain[];
   rules: string[];
 };
 

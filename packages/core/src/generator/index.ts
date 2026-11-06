@@ -14,9 +14,12 @@ import {
   PROXY_GROUP_MODULES,
   isSubscriptionInfoNodeName,
 } from "./proxy-groups";
-import { 
-  generateDialerProxyGroups, 
-  applyDialerProxy 
+import {
+  applyDialerProxy,
+  buildChainDialerGroups,
+  generateChainExitGroups,
+  generateDialerProxyGroups,
+  type ChainProxyGroupSpec,
 } from "./chain";
 import { DEFAULT_DNS_CONFIG } from "./dns";
 import { resolveProxyGroupModuleName } from "@subboost/core/proxy-group-name";
@@ -27,6 +30,7 @@ import type {
   CustomProxyGroup,
   CustomRuleSet,
   GroupListenerBinding,
+  ProxyChain,
   ProxyGroup,
   ProxyGroupAdvancedConfig,
   TemplateType,
@@ -36,6 +40,7 @@ import type { DialerProxyGroup } from "@subboost/core/types/template-config";
 import { collectDnsPolicyEntries, configToYaml } from "./yaml";
 import { isMihomoSupportedProxyNode, normalizeMihomoVlessForGeneration } from "../mihomo/proxy-sanitizer";
 import { getValidDialerRelayGroupNames } from "../subscription/dialer-relay-group-names";
+import { activeProxyChains, resolveProxyChains } from "../subscription/chain-nodes";
 import { chooseFallbackPolicyTarget, withBuiltinPolicyTargets } from "./policy-targets";
 import { resolveGroupListenerEntries, type GroupListenerTargetResolution } from "./group-listeners";
 
@@ -45,6 +50,7 @@ export interface GenerateOptions {
   template?: TemplateType;
   userConfig?: Partial<UserConfig>;
   dialerProxyGroups?: DialerProxyGroup[];
+  proxyChains?: ProxyChain[];
   customProxyGroups?: CustomProxyGroup[];
   customRuleSets?: CustomRuleSet[];
   proxyGroupAdvanced?: Record<string, ProxyGroupAdvancedConfig>;
@@ -177,6 +183,32 @@ function ensureUniqueProxyNames(nodes: ParsedNode[]): ParsedNode[] {
 }
 
 /**
+ * 生成期已被占用的分组名：内置模块组、自定义组、旧中转组。
+ *
+ * 链的出口组/前置组撞上这些名字时整条链跳过（不静默改覆盖），
+ * 预览与订阅生成必须用同一份集合，否则界面会显示"能生成"但实际被跳过。
+ */
+export function collectReservedGroupNames(options: {
+  customProxyGroups?: CustomProxyGroup[];
+  dialerProxyGroups?: DialerProxyGroup[];
+  proxyGroupNameOverrides?: Record<string, string>;
+}): Set<string> {
+  const names = new Set<string>();
+  for (const module of PROXY_GROUP_MODULES) {
+    names.add(resolveProxyGroupModuleName(module, options.proxyGroupNameOverrides?.[module.id]));
+  }
+  for (const group of options.customProxyGroups ?? []) {
+    const name = typeof group?.name === "string" ? group.name.trim() : "";
+    if (name) names.add(name);
+  }
+  for (const group of options.dialerProxyGroups ?? []) {
+    const name = typeof group?.name === "string" ? group.name.trim() : "";
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+/**
  * 生成完整的 Clash 配置
  */
 export function generateClashConfig(options: GenerateOptions): ClashConfig {
@@ -186,6 +218,7 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     template = "standard",
     userConfig = {},
     dialerProxyGroups = [],
+    proxyChains = [],
     customProxyGroups = [],
     customRuleSets = [],
     proxyGroupAdvanced = {},
@@ -302,9 +335,31 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
       )
     : [];
 
+  // === 链式代理（严格两跳）===
+  // 组名先占位：出口组/前置组撞上既有分组时这条链跳过，不静默覆盖
+  const reservedGroupNames = collectReservedGroupNames({
+    customProxyGroups,
+    dialerProxyGroups,
+    proxyGroupNameOverrides,
+  });
+  const resolvedChains = resolveProxyChains({ chains: proxyChains, nodes: uniqueNodes, reservedGroupNames });
+  const chainSpecs: ChainProxyGroupSpec[] = activeProxyChains(resolvedChains).map((chain) => ({
+    id: chain.id,
+    exitGroupName: chain.exitGroupName,
+    relayGroupName: chain.relayGroupName,
+    landingNodes: chain.landingNodes,
+    relayNodes: chain.relayNodes,
+    exitGroupType: chain.exitGroupType,
+    relayGroupType: chain.relayGroupType,
+    ...(chain.testUrl ? { testUrl: chain.testUrl } : {}),
+  }));
+  const chainDialerGroups = buildChainDialerGroups(chainSpecs);
+  // 链优先：同一节点既被旧中转组引用、又被链当作落地时，以链为准
+  const dialerGroupsForNodes = [...chainDialerGroups, ...sanitizedDialerProxyGroups];
+
   // 应用 dialer-proxy 到目标节点（基于最终输出的唯一节点名）
-  const allNodes = sanitizedDialerProxyGroups.length > 0
-    ? applyDialerProxy(uniqueNodes, sanitizedDialerProxyGroups)
+  const allNodes = dialerGroupsForNodes.length > 0
+    ? applyDialerProxy(uniqueNodes, dialerGroupsForNodes)
     : uniqueNodes;
   const validDialerProxyNames = new Set<string>([
     "DIRECT",
@@ -312,6 +367,8 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     ...proxyProviderNames,
     ...validRelayGroupNames,
     ...sanitizedDialerProxyGroups.map((g) => g.name.trim()).filter(Boolean),
+    ...chainDialerGroups.map((g) => g.name.trim()).filter(Boolean),
+    ...chainSpecs.map((spec) => spec.exitGroupName),
   ]);
   const outputNodes = allNodes.map((node) => {
     const record = node as unknown as Record<string, unknown>;
@@ -348,6 +405,22 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     proxyProviderNames
   ) as unknown as ProxyGroup[];
 
+  // 出口组与它自己的前置组成对出现，顺序跟着链的数组顺序
+  const chainExitGroups = generateChainExitGroups(chainSpecs, config.testUrl, config.testInterval);
+  const chainRelayGroups = generateDialerProxyGroups(
+    chainDialerGroups,
+    config.testUrl,
+    config.testInterval,
+    proxyProviderNames
+  ) as unknown as ProxyGroup[];
+  const chainRelayGroupByName = new Map(chainRelayGroups.map((group) => [group.name, group]));
+  const chainOutputGroups = chainSpecs
+    .flatMap((spec) => [
+      chainExitGroups.find((group) => group.name === spec.exitGroupName),
+      chainRelayGroupByName.get(spec.relayGroupName),
+    ])
+    .filter((group): group is ProxyGroup => Boolean(group));
+
   // 生成选项
   const generateOpts = {
     nodes: outputNodes,
@@ -359,6 +432,14 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     customProxyGroups,
     customRuleSets,
     proxyGroupAdvanced,
+    chainGroups: chainSpecs.map((spec) => ({ id: spec.id, name: spec.exitGroupName })),
+    chainMemberPlan: {
+      exitGroups: chainSpecs.map((spec) => ({
+        id: spec.id,
+        name: spec.exitGroupName,
+        landingNodes: spec.landingNodes,
+      })),
+    },
     builtinRuleEdits,
     cnIpNoResolve: config.cnIpNoResolve,
     experimentalCnUseCnRuleSet: config.experimentalCnUseCnRuleSet,
@@ -378,25 +459,26 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
     const allGroups = generateProxyGroups(generateOpts);
 
     const mergedGroups = (() => {
-      // 如果没有中转组，直接返回
-      if (dialerGroups.length === 0) {
-        return allGroups;
-      }
+      const insertGroups = [...chainOutputGroups, ...dialerGroups];
+      if (insertGroups.length === 0) return allGroups;
 
-      // 找到"节点选择"和"自动选择"的位置，在它们之后插入中转组
-      const selectIndex = allGroups.findIndex(g => g.name === "🚀 节点选择");
-      const autoIndex = allGroups.findIndex(g => g.name === "⚡ 自动选择");
+      // 插在「节点选择 / 自动选择」之后：出口组按链的顺序排在旧中转组之前
+      const moduleNameOf = (id: string) => {
+        const mod = PROXY_GROUP_MODULES.find((m) => m.id === id);
+        return mod ? resolveProxyGroupModuleName(mod, proxyGroupNameOverrides?.[id]) : "";
+      };
+      const selectIndex = allGroups.findIndex((g) => g.name === moduleNameOf("select"));
+      const autoIndex = allGroups.findIndex((g) => g.name === moduleNameOf("auto"));
       const insertAfter = Math.max(selectIndex, autoIndex);
 
       if (insertAfter >= 0) {
-        // 在节点选择和自动选择之后插入中转组
         const before = allGroups.slice(0, insertAfter + 1);
         const after = allGroups.slice(insertAfter + 1);
-        return [...before, ...dialerGroups, ...after];
+        return [...before, ...insertGroups, ...after];
       }
 
       // 如果找不到，就放在最前面
-      return [...dialerGroups, ...allGroups];
+      return [...insertGroups, ...allGroups];
     })();
 
     const orderKeys = Array.isArray(options.proxyGroupOrder)
@@ -430,9 +512,16 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
       dialerNameToKey.set(name, `dialer:${g.id}`);
     }
 
+    const chainNameToKey = new Map<string, string>();
+    for (const spec of chainSpecs) {
+      chainNameToKey.set(spec.exitGroupName, `chain:${spec.id}`);
+      chainNameToKey.set(spec.relayGroupName, `chain:${spec.id}:relay`);
+    }
+
     const getKeyByName = (name: string) => {
       return (
         dialerNameToKey.get(name) ||
+        chainNameToKey.get(name) ||
         customNameToKey.get(name) ||
         moduleNameToKey.get(name) ||
         `name:${name}`

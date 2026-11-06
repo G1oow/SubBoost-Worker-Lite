@@ -37,6 +37,8 @@ export default defineConfig({
       "test/regression/tooling/**/*.test.ts",
       "worker/src/**/*.test.ts",
       "worker/ui/src/**/*.test.ts",
+      // 组件用例写成 .test.tsx 时用 createElement/JSDOM 跑，同样要被收进来
+      "worker/ui/src/**/*.test.tsx",
     ],
     restoreMocks: true,
   },

@@ -28,6 +28,7 @@ const PREVIEW: ConfigPreview = {
   nodeCount: 5,
   proxyGroupCount: 16,
   ruleProviderCount: 30,
+  chains: [],
   rules: ["MATCH,🐟 漏网之鱼"],
 };
 

@@ -5,11 +5,14 @@ import type {
   ProxyGroupTargetRef,
 } from "@subboost/core/types/config";
 
+/** 链式代理出口组：引用形式与模块/自定义组一致，`id` 是链的 id，不是组名 */
+export type ChainGroupRef = { id: string; name: string };
+
 export function isProxyGroupTargetRef(value: unknown): value is ProxyGroupTargetRef {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const item = value as Record<string, unknown>;
   return (
-    (item.kind === "module" || item.kind === "custom") &&
+    (item.kind === "module" || item.kind === "custom" || item.kind === "chain") &&
     typeof item.id === "string" &&
     Boolean(item.id.trim())
   );
@@ -32,6 +35,8 @@ export function getProxyGroupMemberKey(member: ProxyGroupMemberRef): string {
       return `module:${member.id}`;
     case "custom":
       return `custom:${member.id}`;
+    case "chain":
+      return `chain:${member.id}`;
     case "direct":
       return "direct:DIRECT";
     case "reject":
@@ -44,6 +49,8 @@ export function resolveProxyGroupTargetName(
   options: {
     moduleNames: Record<string, string>;
     customProxyGroups?: CustomProxyGroup[];
+    /** 启用的链：`id` → 出口组名；停用或不存在的链解析为 fallback */
+    chainGroups?: ChainGroupRef[];
     fallbackTarget?: string;
   }
 ): string {
@@ -59,6 +66,13 @@ export function resolveProxyGroupTargetName(
       ? options.moduleNames[normalized.id]
       : undefined;
     return (typeof moduleName === "string" ? moduleName.trim() : "") || options.fallbackTarget || "";
+  }
+
+  if (normalized.kind === "chain") {
+    const chainName = (options.chainGroups || [])
+      .find((group) => group.id === normalized.id)
+      ?.name?.trim();
+    return chainName || options.fallbackTarget || "";
   }
 
   const customName = (options.customProxyGroups || []).find((group) => group.id === normalized.id)?.name?.trim();

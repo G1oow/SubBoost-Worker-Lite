@@ -8,7 +8,7 @@
 
 import type { ParsedNode } from "@subboost/core/types/node";
 import type { DialerProxyGroup } from "@subboost/core/types/template-config";
-import { DEFAULT_LOAD_BALANCE_STRATEGY, type ProxyGroupGroupType } from "@subboost/core/types/config";
+import { DEFAULT_LOAD_BALANCE_STRATEGY, type ProxyGroup, type ProxyGroupGroupType } from "@subboost/core/types/config";
 import { DEFAULT_SUBBOOST_CONFIG } from "@subboost/core/config/defaults";
 import { buildTypedProxyGroup, uniqueProxyNames } from "./proxy-group-type";
 
@@ -150,4 +150,61 @@ export function validateDialerConfig(
     valid: errors.length === 0,
     errors,
   };
+}
+
+/** 链式代理生成所需的组信息（由 chain-nodes 的解析结果投影而来） */
+export type ChainProxyGroupSpec = {
+  id: string;
+  exitGroupName: string;
+  relayGroupName: string;
+  landingNodes: string[];
+  relayNodes: string[];
+  exitGroupType: ProxyGroupGroupType;
+  relayGroupType: ProxyGroupGroupType;
+  testUrl?: string;
+};
+
+/**
+ * 把链翻译成内部的中转组描述，复用既有 dialer-proxy 机制。
+ *
+ * 前置为空时前置组只放 REJECT：链路显式失败，而不是留个空组被 mihomo 当成直连。
+ */
+export function buildChainDialerGroups(chains: ChainProxyGroupSpec[]): DialerProxyGroup[] {
+  return chains.map((chain) => ({
+    id: chain.id,
+    name: chain.relayGroupName,
+    type: chain.relayNodes.length > 0 ? chain.relayGroupType : "select",
+    relayNodes: chain.relayNodes.length > 0 ? chain.relayNodes : ["REJECT"],
+    targetNodes: chain.landingNodes,
+    ...(chain.testUrl ? { testUrl: chain.testUrl } : {}),
+  }));
+}
+
+/**
+ * 生成出口组：成员是落地节点。
+ *
+ * 出口组只放节点，不引用 proxy-providers，避免落地范围被 provider 悄悄扩大。
+ */
+export function generateChainExitGroups(
+  chains: ChainProxyGroupSpec[],
+  testUrl: string = DEFAULT_SUBBOOST_CONFIG.testUrl,
+  testInterval: number = DEFAULT_SUBBOOST_CONFIG.testInterval
+): ProxyGroup[] {
+  return chains.map((chain) => {
+    const proxies = (() => {
+      if (chain.exitGroupType === "direct-first") return uniqueProxyNames(["DIRECT", ...chain.landingNodes]);
+      if (chain.exitGroupType === "reject-first") return uniqueProxyNames(["REJECT", ...chain.landingNodes]);
+      return uniqueProxyNames(chain.landingNodes);
+    })();
+    return buildTypedProxyGroup({
+      name: chain.exitGroupName,
+      groupType: chain.exitGroupType,
+      proxies,
+      testUrl: chain.testUrl || testUrl,
+      testInterval,
+      strategy: DEFAULT_LOAD_BALANCE_STRATEGY,
+      extraFields: {},
+      urlTestLazy: true,
+    });
+  });
 }

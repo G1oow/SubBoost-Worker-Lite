@@ -11,6 +11,7 @@ import { SegmentedControl } from "@subboost/ui/motion/segmented-control";
 import { isConfigChanged, reconcileWithBaseline, type ConfigRecord } from "../lib/rule-editor";
 import type { ConfigSection } from "../lib/routes";
 import type { AppState, ConfigPreview } from "../lib/types";
+import { ConfigChainsSection } from "./config-chains-section";
 import { ConfigRulesSection } from "./config-rules-section";
 
 export type ConfigPanelProps = {
@@ -27,8 +28,15 @@ export type ConfigPanelProps = {
 
 const SECTION_OPTIONS: Array<{ id: ConfigSection; label: string }> = [
   { id: "rules", label: "规则" },
+  { id: "chains", label: "链式代理" },
   { id: "json", label: "高级 JSON" },
 ];
+/** tabpanel 的可访问名与分段控件用同一套文案 */
+const SECTION_LABELS: Record<ConfigSection, string> = {
+  rules: "规则",
+  chains: "链式代理",
+  json: "高级 JSON",
+};
 const PREVIEW_DEBOUNCE_MS = 600;
 
 type PreviewState =
@@ -248,6 +256,10 @@ export function ConfigPanel({
     .filter(Boolean)
     .join(" · ");
 
+  // 预览里的逐条链状态：还没跑完第一次校验、或校验直接失败时没有这层数据
+  const previewChains =
+    preview.status === "idle" || preview.status === "error" ? undefined : preview.data?.chains;
+
   return (
     <div className="space-y-4 sm:space-y-6">
       <Card>
@@ -295,15 +307,22 @@ export function ConfigPanel({
         </CardContent>
       </Card>
 
-      <div role="tabpanel" aria-label={activeSection === "rules" ? "规则" : "高级 JSON"} className="space-y-4 sm:space-y-6">
-        {activeSection === "rules" ? (
-          <ConfigRulesSection config={draft} onChange={applyVisual} />
-        ) : (
+      <div role="tabpanel" aria-label={SECTION_LABELS[activeSection]} className="space-y-4 sm:space-y-6">
+        {activeSection === "rules" ? <ConfigRulesSection config={draft} onChange={applyVisual} /> : null}
+        {activeSection === "chains" ? (
+          <ConfigChainsSection
+            config={draft}
+            sources={state.sources}
+            previewChains={previewChains}
+            onChange={applyVisual}
+          />
+        ) : null}
+        {activeSection === "json" ? (
           <Card>
             <CardHeader className="space-y-1">
               <CardTitle>高级 JSON</CardTitle>
               <p className="text-xs leading-relaxed text-fg-45">
-                与「规则」共用同一份草稿：可视化不认识的字段在这里原样保留。JSON 写坏时不能切回可视化，也不能保存。
+                与「规则」「链式代理」共用同一份草稿：可视化不认识的字段在这里原样保留。JSON 写坏时不能切回可视化，也不能保存。
               </p>
             </CardHeader>
             <CardContent className="space-y-3">
@@ -334,7 +353,7 @@ export function ConfigPanel({
               </div>
             </CardContent>
           </Card>
-        )}
+        ) : null}
       </div>
 
       {/* 保存条是 fixed 的：留出等高空白，最后一张卡不会被它挡住 */}

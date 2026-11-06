@@ -4,6 +4,7 @@ import type {
   CustomRule,
   CustomRuleSet,
   LoadBalanceStrategy,
+  ProxyChain,
   ProxyGroupAdvancedConfig,
   ProxyGroupGroupType,
   TemplateType,
@@ -36,6 +37,8 @@ export type SubBoostTemplateConfig = {
   cnIpNoResolve?: boolean;
   experimentalCnUseCnRuleSet?: boolean;
   dialerProxyGroups: DialerProxyGroup[];
+  /** 链式代理（严格两跳）：旧 dialerProxyGroups 继续生效，这里只描述新写法 */
+  proxyChains?: ProxyChain[];
   proxyGroupNameOverrides?: Record<string, string>;
   dnsYaml: string;
   mixedPort: number;
