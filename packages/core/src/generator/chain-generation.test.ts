@@ -205,3 +205,59 @@ describe("链式代理生成", () => {
     expect(yaml).not.toContain("_sourceIds");
   });
 });
+
+describe("链作为规则目标", () => {
+  function rulesOf(config: ClashConfig): string[] {
+    return (config.rules ?? []) as string[];
+  }
+
+  it("自定义规则可以把目标指向链出口组", () => {
+    const config = generate([chainEntry()], {
+      customRules: [
+        {
+          id: "rule-1",
+          type: "DOMAIN-SUFFIX",
+          value: "chat.example.com",
+          target: { kind: "chain", id: "chain-us" },
+        },
+      ],
+    });
+    expect(rulesOf(config)).toContain(`DOMAIN-SUFFIX,chat.example.com,${EXIT_GROUP}`);
+  });
+
+  it("链停用后规则目标回退到兜底策略组", () => {
+    const config = generate([chainEntry({ enabled: false })], {
+      customRules: [
+        {
+          id: "rule-1",
+          type: "DOMAIN-SUFFIX",
+          value: "chat.example.com",
+          target: { kind: "chain", id: "chain-us" },
+        },
+      ],
+    });
+
+    const rule = rulesOf(config).find((item) => item.startsWith("DOMAIN-SUFFIX,chat.example.com,"));
+    expect(rule).toBeDefined();
+    expect(rule).not.toContain(EXIT_GROUP);
+    // 回退到首选策略组（🚀 节点选择），与模块目标的行为一致
+    expect(rule?.endsWith(",🚀 节点选择")).toBe(true);
+  });
+
+  it("链出口组可以当成分组的高级成员引用", () => {
+    const config = generate([chainEntry()], {
+      customProxyGroups: [
+        {
+          id: "custom-1",
+          name: "🎬 自定义",
+          groupType: "select",
+          enabled: true,
+          memberSource: "manual",
+          advanced: { extraMembers: [{ kind: "chain", id: "chain-us" }] },
+        },
+      ],
+    });
+
+    expect(membersOf(config, "🎬 自定义")).toContain(EXIT_GROUP);
+  });
+});

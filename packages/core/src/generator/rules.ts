@@ -2,7 +2,7 @@ import type { BuiltinRuleEdits, CustomRule, CustomRuleSet, ProxyGroupRuleTarget 
 import type { CustomProxyGroup } from "@subboost/core/types/config";
 import { getCustomRuleOrderKey } from "@subboost/core/rules/custom-rule-utils";
 import { resolveProxyGroupModuleName } from "@subboost/core/proxy-group-name";
-import { resolveProxyGroupTargetName } from "@subboost/core/proxy-group-targets";
+import { resolveProxyGroupTargetName, type ChainGroupRef } from "@subboost/core/proxy-group-targets";
 import { PROXY_GROUP_MODULES, type ProxyGroupModule, type ProxyGroupRule } from "./proxy-group-modules";
 import { getEffectiveModuleRules, getModuleRuleOrderKey } from "./module-rules";
 import { createPolicyTargetResolver } from "./policy-targets";
@@ -29,6 +29,8 @@ export interface RulesGenerateOptions {
   customRules: CustomRuleLike[];
   customRuleSets?: CustomRuleSetLike[];
   customProxyGroups?: CustomProxyGroup[];
+  /** 启用的链：规则目标可以把 chain:<id> 指向出口组名 */
+  chainGroups?: ChainGroupRef[];
   builtinRuleEdits?: BuiltinRuleEdits;
   proxyGroupNameOverrides?: Record<string, string>;
   experimentalCnUseCnRuleSet?: boolean;
@@ -162,6 +164,7 @@ function buildModuleRuleEntry(
   proxyGroupNameOverrides?: Record<string, string>,
   cnIpNoResolve?: boolean,
   customProxyGroups: CustomProxyGroup[] = [],
+  chainGroups: ChainGroupRef[] = [],
   resolvePolicyTarget: (target: string) => string = (target) => target
 ): GeneratedRuleEntry {
   const key = getModuleRuleOrderKey(module.id, rule.id);
@@ -171,6 +174,7 @@ function buildModuleRuleEntry(
   const targetName = resolveProxyGroupTargetName(edit?.target || defaultTarget, {
     moduleNames,
     customProxyGroups,
+    chainGroups,
     fallbackTarget: defaultTarget,
   });
   const target = resolvePolicyTarget(targetName);
@@ -198,10 +202,13 @@ function buildCustomRuleEntry(
   rule: CustomRuleLike,
   moduleNames: Record<string, string>,
   customProxyGroups: CustomProxyGroup[] = [],
+  chainGroups: ChainGroupRef[] = [],
   resolvePolicyTarget: (target: string) => string = (target) => target
 ): GeneratedRuleEntry {
   const noResolve = Boolean(rule.noResolve) && (rule.type === "IP-CIDR" || rule.type === "IP-CIDR6");
-  const target = resolvePolicyTarget(resolveProxyGroupTargetName(rule.target, { moduleNames, customProxyGroups }));
+  const target = resolvePolicyTarget(
+    resolveProxyGroupTargetName(rule.target, { moduleNames, customProxyGroups, chainGroups })
+  );
   let text = `${rule.type},${rule.value},${target}`;
   if (noResolve) text += ",no-resolve";
 
@@ -222,10 +229,13 @@ function buildCustomRuleSetEntry(
   ruleSet: CustomRuleSetLike,
   moduleNames: Record<string, string>,
   customProxyGroups: CustomProxyGroup[] = [],
+  chainGroups: ChainGroupRef[] = [],
   resolvePolicyTarget: (target: string) => string = (target) => target
 ): GeneratedRuleEntry {
   const noResolve = Boolean(ruleSet.noResolve);
-  const target = resolvePolicyTarget(resolveProxyGroupTargetName(ruleSet.target, { moduleNames, customProxyGroups }));
+  const target = resolvePolicyTarget(
+    resolveProxyGroupTargetName(ruleSet.target, { moduleNames, customProxyGroups, chainGroups })
+  );
   let text = `RULE-SET,${ruleSet.id},${target}`;
   if (noResolve) text += ",no-resolve";
 
@@ -248,11 +258,16 @@ function buildOrderedEditableEntries(
   ruleOrder?: string[],
   moduleNames: Record<string, string> = {},
   customProxyGroups: CustomProxyGroup[] = [],
+  chainGroups: ChainGroupRef[] = [],
   resolvePolicyTarget: (target: string) => string = (target) => target
 ): GeneratedRuleEntry[] {
   const defaultEntries: GeneratedRuleEntry[] = [
-    ...customRules.map((rule) => buildCustomRuleEntry(rule, moduleNames, customProxyGroups, resolvePolicyTarget)),
-    ...customRuleSets.map((ruleSet) => buildCustomRuleSetEntry(ruleSet, moduleNames, customProxyGroups, resolvePolicyTarget)),
+    ...customRules.map((rule) =>
+      buildCustomRuleEntry(rule, moduleNames, customProxyGroups, chainGroups, resolvePolicyTarget)
+    ),
+    ...customRuleSets.map((ruleSet) =>
+      buildCustomRuleSetEntry(ruleSet, moduleNames, customProxyGroups, chainGroups, resolvePolicyTarget)
+    ),
   ];
   const editableKeys = defaultEntries.map((entry) => entry.key);
   const normalizedEditableOrder = normalizeEditableRuleOrderKeys(ruleOrder, editableKeys);
@@ -416,6 +431,7 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     customRules,
     customRuleSets = [],
     customProxyGroups = [],
+    chainGroups = [],
     builtinRuleEdits,
     proxyGroupNameOverrides,
     experimentalCnUseCnRuleSet,
@@ -434,6 +450,7 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     undefined,
     moduleNames,
     activeCustomProxyGroups,
+    chainGroups,
     resolvePolicyTarget
   );
   const emittedRuleKeys = new Set<string>();
@@ -453,6 +470,7 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
       proxyGroupNameOverrides,
       cnIpNoResolve,
       activeCustomProxyGroups,
+      chainGroups,
       resolvePolicyTarget
     );
     if (emittedRuleKeys.has(entry.key)) return;
@@ -627,6 +645,7 @@ export function buildGeneratedRuleEntries(options: RulesGenerateOptions): Genera
     customRules: options.customRules,
     customRuleSets: options.customRuleSets,
     customProxyGroups: options.customProxyGroups,
+    chainGroups: options.chainGroups,
     builtinRuleEdits: options.builtinRuleEdits,
     proxyGroupNameOverrides: options.proxyGroupNameOverrides,
     experimentalCnUseCnRuleSet: options.experimentalCnUseCnRuleSet,
