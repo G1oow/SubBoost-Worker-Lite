@@ -1,4 +1,4 @@
-import { getNodeSourceIds } from "@subboost/core/subscription/node-source-state";
+import { getNodeSourceIds, resolveEffectiveSourceIds } from "@subboost/core/subscription/node-source-state";
 import {
   DEFAULT_LOAD_BALANCE_STRATEGY,
   isLoadBalanceStrategy,
@@ -279,16 +279,16 @@ function buildMemberFromRef(
 function nodePassesAdvancedFilters(
   member: ProxyGroupResolvedMember,
   nodeByName: Map<string, ParsedNode>,
-  advanced: ProxyGroupAdvancedConfig
+  advanced: ProxyGroupAdvancedConfig,
+  effectiveSourceIds: Set<string> | null
 ): boolean {
   if (member.ref.kind !== "node") return true;
   const node = nodeByName.get(member.ref.name);
   if (!node) return false;
 
-  const sourceIds = normalizeStringList(advanced.sourceIds);
-  if (sourceIds.length > 0) {
-    const sourceIdSet = new Set(sourceIds);
-    if (!getNodeSourceIds(node).some((id) => sourceIdSet.has(id))) return false;
+  // 陈旧源 id 不参与限定（见 resolveEffectiveSourceIds）：命中不到现存源就不过滤
+  if (effectiveSourceIds && !getNodeSourceIds(node).some((id) => effectiveSourceIds.has(id))) {
+    return false;
   }
 
   const regions = normalizeRegions(advanced.regions);
@@ -304,6 +304,11 @@ function nodePassesAdvancedFilters(
 
 export function resolveProxyGroupMembers(options: ResolveProxyGroupMembersOptions): ResolveProxyGroupMembersResult {
   const advanced = normalizeProxyGroupAdvancedConfig(options.advanced);
+  // 源过滤只按「真实存在的源」生效：删源后残留的 id 不能把整组节点打空
+  const effectiveSourceIds = resolveEffectiveSourceIds(
+    normalizeStringList(advanced.sourceIds),
+    options.nodes
+  );
   const nodeByName = new Map(options.nodes.map((node) => [node.name, node]));
   const nodeNameSet = new Set(nodeByName.keys());
   const moduleNameToId = new Map<string, string>();
@@ -366,9 +371,8 @@ export function resolveProxyGroupMembers(options: ResolveProxyGroupMembersOption
   const includedBase = candidates.filter((member) => {
     if (excludedKeys.has(member.key)) return false;
     if (extraKeys.has(member.key)) return true;
-    return nodePassesAdvancedFilters(member, nodeByName, advanced);
+    return nodePassesAdvancedFilters(member, nodeByName, advanced, effectiveSourceIds);
   });
-
   const byKey = new Map(includedBase.map((member) => [member.key, member]));
   const ordered: ProxyGroupResolvedMember[] = [];
   const used = new Set<string>();

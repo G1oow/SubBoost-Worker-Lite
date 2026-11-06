@@ -160,6 +160,47 @@ describe("generateSubscription", () => {
     expect(proxiesFrom(result.cache.yaml).map((p) => p.name)).toEqual(["a"]);
   });
 
+  it("高级分组的按源过滤真正生效，且 _sourceIds 不进 YAML", async () => {
+    const sources = await h.store.saveSources([
+      { name: "a", kind: "remote", url: "https://a.example.com/sub" },
+      { name: "b", kind: "remote", url: "https://b.example.com/sub" },
+    ]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [{ name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putSnapshot({
+      sourceId: sources[1].id,
+      nodes: [{ name: "b", type: "ss", server: "example.com", port: 8389, cipher: "aes-256-gcm", password: "x" }],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putConfig({
+      enabledGroups: ["select", "auto", "final"],
+      proxyGroupAdvanced: { final: { sourceIds: [sources[0].id] } },
+    });
+
+    const { dto } = await h.store.createSubscription({ name: "all", sourceIds: [] });
+    const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
+    const result = await generateSubscription(h.deps, sub!, { onDemand: false });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    // 内部标记只用于生成期，不能漏进订阅
+    expect(result.cache.yaml).not.toContain("_sourceIds");
+
+    const parsed = yaml.load(result.cache.yaml) as {
+      "proxy-groups": Array<{ name: string; proxies: string[] }>;
+    };
+    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "🐟 漏网之鱼");
+    expect(finalGroup?.proxies).toContain("a");
+    expect(finalGroup?.proxies).not.toContain("b");
+  });
+
   it("returns no-nodes when no snapshot has nodes", async () => {
     await h.store.saveSources([{ name: "empty", kind: "manual", manualText: "ss://x" }]);
     const { dto } = await h.store.createSubscription({ name: "empty", sourceIds: [] });

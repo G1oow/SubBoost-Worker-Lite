@@ -1,6 +1,7 @@
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
 import { configToYaml, generateClashConfig, generateClashYaml } from "@subboost/core/generator";
 import { buildNodeContentKey, stableJsonStringify } from "@subboost/core/node-identity";
+import { withNodeSourceId } from "@subboost/core/subscription/node-source-state";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { sha256Hex } from "./crypto";
@@ -102,7 +103,7 @@ function targetSources<T extends { id: string; enabled: boolean }>(
  * 订阅生成与配置预览共用，保证两边看到的节点集合一致。
  */
 function mergeSnapshotNodes(
-  targets: ReadonlyArray<{ nodeRenames?: NodeRenames }>,
+  targets: ReadonlyArray<{ id: string; nodeRenames?: NodeRenames }>,
   snapshots: ReadonlyArray<SnapshotRecord | null>
 ): ParsedNode[] {
   const seen = new Set<string>();
@@ -116,7 +117,8 @@ function mergeSnapshotNodes(
       const key = buildNodeContentKey(node);
       if (seen.has(key)) continue;
       seen.add(key);
-      nodes.push(applyNodeRenames(node, renames));
+      // 先记源再改名：_originName 记的是源里的原始名，展示名随改名走
+      nodes.push(applyNodeRenames(withNodeSourceId(node, targets[index].id), renames));
     }
   }
   return nodes;
