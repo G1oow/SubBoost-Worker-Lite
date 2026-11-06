@@ -101,9 +101,12 @@ describe("演示模式后端", () => {
     // 节点来自种子刷新后的快照：两个启用源共 6 个节点
     expect(preview.nodeCount).toBe(6);
     expect(preview.rules).toContain("DOMAIN-SUFFIX,example.org,DIRECT");
+    // 演示配置里那条链能匹配到演示节点，另一条故意匹配不到落地
+    expect(preview.chains.map((chain) => chain.status)).toEqual(["ok", "empty-landing"]);
 
     const after = await readJson<AppState>(await backend.dispatch("/api/state"));
-    expect(after.configIsDefault).toBe(true);
+    // 演示种子写入过链式代理配置，所以不再是「默认配置」
+    expect(after.configIsDefault).toBe(false);
   });
 
   it("不向外部发起请求：远程源刷新直接失败而不是真的去抓", async () => {

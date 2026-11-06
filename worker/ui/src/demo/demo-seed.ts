@@ -78,3 +78,26 @@ export const DEMO_SUBSCRIPTIONS: Array<{ name: string; sourceIndexes: number[] }
 
 /** 改名后的展示名，测试与文档复用同一处定义 */
 export const DEMO_RENAMED_NODE = RENAME_TARGET;
+
+/**
+ * 演示用的配置种子：只放两条链式代理，其余字段走默认值。
+ *
+ * 「演示链」的落地正则能匹配到真实的演示节点，界面上能看到计数与出口组；
+ * 「演示空链」的落地正则故意匹配不到节点，用来展示「落地为空，不生成」的提示。
+ */
+export const DEMO_CONFIG = {
+  proxyChains: [
+    {
+      id: "demo-chain-us",
+      name: "🇺🇸 演示链",
+      relay: { sourceIds: [], includeRegex: "东京 · 演示" },
+      landing: { sourceIds: [], includeRegex: "洛杉矶 · 备用" },
+    },
+    {
+      id: "demo-chain-empty",
+      name: "🇩🇪 演示空链",
+      relay: { sourceIds: [], includeRegex: "东京 · 演示" },
+      landing: { sourceIds: [], includeRegex: "不存在的落地" },
+    },
+  ],
+};

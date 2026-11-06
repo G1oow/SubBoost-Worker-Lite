@@ -1,7 +1,7 @@
 import { handleRequest, type WorkerDeps } from "../../../src/index";
 import type { AppState } from "../lib/types";
 import { createDemoKv } from "./demo-kv";
-import { DEMO_SOURCES, DEMO_SUBSCRIPTIONS } from "./demo-seed";
+import { DEMO_CONFIG, DEMO_SOURCES, DEMO_SUBSCRIPTIONS } from "./demo-seed";
 
 /**
  * 纯静态预览站用的「假后端」。
@@ -85,6 +85,15 @@ export function createDemoBackend(options: { origin?: string } = {}): DemoBacken
       });
     }
 
+
+    // 演示配置（两条链式代理）走真实保存接口，其余字段仍按默认值生成
+    const configResponse = await send("/api/config", {
+      method: "PUT",
+      body: JSON.stringify(DEMO_CONFIG),
+    });
+    if (!configResponse.ok) {
+      throw new Error(`演示数据初始化失败：写入配置返回 ${configResponse.status}`);
+    }
     await send("/api/refresh", { method: "POST" });
   }
 
