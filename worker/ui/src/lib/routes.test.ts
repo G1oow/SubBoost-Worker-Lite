@@ -13,7 +13,7 @@ describe("app hash routes", () => {
     expect(parseAppHash("#/config")).toEqual({ page: "config", configSection: "rules" });
     expect(parseAppHash("#/config/json")).toEqual({ page: "config", configSection: "json" });
     expect(parseAppHash("#/config/rules")).toEqual({ page: "config", configSection: "rules" });
-    expect(parseAppHash("#/config/chains")).toEqual({ page: "config", configSection: "rules" });
+    expect(parseAppHash("#/config/chains")).toEqual({ page: "config", configSection: "chains" });
     // 子页只属于 config：其他页面带上同名后缀也不会被当成子页
     expect(parseAppHash("#/sources/json")).toEqual({ page: "sources", configSection: "rules" });
   });
@@ -21,6 +21,7 @@ describe("app hash routes", () => {
   it("formats routes back into hashes", () => {
     expect(formatAppHash({ page: "status", configSection: "json" })).toBe("#/status");
     expect(formatAppHash({ page: "config", configSection: "json" })).toBe("#/config/json");
+    expect(formatAppHash({ page: "config", configSection: "chains" })).toBe("#/config/chains");
     expect(formatAppHash(parseAppHash("#/config"))).toBe("#/config/rules");
   });
 });

@@ -3,13 +3,13 @@ import type { PageId } from "./types";
 /**
  * 管理页的 hash 路由。
  *
- * 顶层是五个页面（`#/sources`）；「生成配置」再分子页（`#/config/rules`、`#/config/json`），
- * 子页共用同一份草稿，切换子页不是换页面，因此单独解析。
+ * 顶层是五个页面（`#/sources`）；「生成配置」再分子页（`#/config/rules`、`#/config/chains`、
+ * `#/config/json`），子页共用同一份草稿，切换子页不是换页面，因此单独解析。
  */
 export const PAGE_IDS: PageId[] = ["dashboard", "sources", "subscriptions", "status", "config"];
 export const DEFAULT_PAGE: PageId = "dashboard";
 
-export const CONFIG_SECTIONS = ["rules", "json"] as const;
+export const CONFIG_SECTIONS = ["rules", "chains", "json"] as const;
 export type ConfigSection = (typeof CONFIG_SECTIONS)[number];
 export const DEFAULT_CONFIG_SECTION: ConfigSection = "rules";
 
