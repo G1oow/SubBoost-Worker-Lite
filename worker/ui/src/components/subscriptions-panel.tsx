@@ -509,10 +509,10 @@ export function SubscriptionsPanel({
                         onClick={() => toggleSource(source.id)}
                         aria-pressed={checked}
                         className={cn(
-                          "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-all duration-200",
+                          "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-[border-color,background-color,color] duration-200",
                           checked
                             ? "border-primary-500/50 bg-primary-500/20 text-fg"
-                            : "border-ink/10 bg-ink/5 text-fg-70 hover:-translate-y-px hover:bg-ink/10"
+                            : "border-ink/10 bg-ink/5 text-fg-70 hover:border-ink/20 hover:bg-ink/10"
                         )}
                       >
                         <span className="flex items-center gap-2">

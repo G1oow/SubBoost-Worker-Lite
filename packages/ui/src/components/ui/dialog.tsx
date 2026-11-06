@@ -61,7 +61,7 @@ const DialogContent = React.forwardRef<
         {...props}
       >
         {children}
-        <DialogPrimitive.Close className="absolute right-2 top-2 rounded-lg p-2 opacity-70 transition-all hover:opacity-100 hover:bg-ink/5 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:pointer-events-none sm:right-4 sm:top-4 sm:p-1">
+        <DialogPrimitive.Close className="absolute right-2 top-2 rounded-lg p-2 opacity-70 transition-[opacity,background-color] duration-150 hover:opacity-100 hover:bg-ink/5 focus:outline-none focus:ring-2 focus:ring-focus-ring disabled:pointer-events-none sm:right-4 sm:top-4 sm:p-1">
           <Icon icon={X} size="md" className="text-fg-60" />
           <span className="sr-only">关闭</span>
         </DialogPrimitive.Close>

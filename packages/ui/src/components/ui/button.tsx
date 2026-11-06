@@ -5,20 +5,26 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@subboost/ui/lib/utils";
 
+/*
+ * 动效只走颜色：hover 150ms 渐变，按下瞬间切到更深一档的按压底色（active:duration-75），
+ * 松开再按 150ms 回弹。按压不做缩放 —— scale 会把带文字的按钮提升为合成层，
+ * 按下的那一下文字发虚；也不做全量过渡 —— 那会把 box-shadow 一起纳入过渡，
+ * 每帧重算阴影。规范见 docs/frontend-guidelines.md「动效」。
+ */
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-all duration-200 active:scale-[0.97] motion-reduce:active:scale-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl text-sm font-medium transition-[color,background-color,border-color,opacity] duration-150 ease-out active:duration-75 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
         default:
-          "border border-btn-primary-border bg-btn-primary text-btn-primary-fg hover:bg-btn-primary-hover hover:border-btn-primary-border-hover shadow-(--btn-primary-shadow) hover:shadow-(--btn-primary-shadow-hover)",
+          "border border-btn-primary-border bg-btn-primary text-btn-primary-fg hover:bg-btn-primary-hover active:bg-btn-primary-active hover:border-btn-primary-border-hover shadow-(--btn-primary-shadow) hover:shadow-(--btn-primary-shadow-hover)",
         destructive:
-          "border border-btn-danger-border bg-btn-danger text-btn-danger-fg hover:bg-btn-danger-hover hover:border-btn-danger-border-hover shadow-(--btn-danger-shadow) hover:shadow-(--btn-danger-shadow-hover)",
+          "border border-btn-danger-border bg-btn-danger text-btn-danger-fg hover:bg-btn-danger-hover active:bg-btn-danger-active hover:border-btn-danger-border-hover shadow-(--btn-danger-shadow) hover:shadow-(--btn-danger-shadow-hover)",
         outline:
-          "border border-btn-outline-border bg-btn-outline hover:bg-btn-outline-hover text-btn-outline-fg hover:text-btn-outline-fg-hover shadow-(--btn-outline-shadow)",
+          "border border-btn-outline-border bg-btn-outline hover:bg-btn-outline-hover active:bg-btn-outline-active text-btn-outline-fg hover:text-btn-outline-fg-hover shadow-(--btn-outline-shadow)",
         secondary:
-          "bg-btn-outline hover:bg-btn-outline-hover text-btn-outline-fg hover:text-btn-outline-fg-hover border border-btn-outline-border shadow-(--btn-outline-shadow)",
-        ghost: "hover:bg-ink/5 text-fg-60 hover:text-fg",
+          "bg-btn-outline hover:bg-btn-outline-hover active:bg-btn-outline-active text-btn-outline-fg hover:text-btn-outline-fg-hover border border-btn-outline-border shadow-(--btn-outline-shadow)",
+        ghost: "hover:bg-ink/5 active:bg-ink/10 text-fg-60 hover:text-fg",
         link: "text-indigo-400 underline-offset-4 hover:underline hover:text-indigo-300",
       },
       size: {
