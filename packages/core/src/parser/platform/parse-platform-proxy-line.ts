@@ -246,13 +246,18 @@ function normalizePlatformProxyInPlace(proxy: Record<string, unknown>) {
     if (network && network !== "tcp") {
       throw new Error(`AnyTLS 平台配置不支持 network=${network}（Mihomo 仅支持纯 TCP）`);
     }
-    if (proxy["reality-opts"] || pickString(proxy.security).toLowerCase() === "reality") {
-      throw new Error("AnyTLS 平台配置不支持 Reality 参数（Mihomo 不支持）");
+    // 只有 security=reality 标记、没有 reality-opts 的节点按普通 TLS AnyTLS 保留（与链接解析一致）
+    if (proxy["reality-opts"]) {
+      throw new Error(
+        "AnyTLS 平台配置不支持 Reality 参数（Mihomo 不支持 anytls+reality，请改用 VLESS/Trojan，或为该节点启用 ECH 隐藏 SNI）"
+      );
     }
     if (pickString(proxy.servername) && !pickString(proxy.sni)) {
       proxy.sni = pickString(proxy.servername);
       delete proxy.servername;
     }
+    // AnyTLS 恒为 TLS，security 只是冗余标记（Reality 已在上面拦掉），不写进节点
+    delete proxy.security;
   }
 }
 

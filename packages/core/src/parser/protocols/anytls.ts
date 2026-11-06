@@ -80,14 +80,32 @@ function normalizeEncodedUserinfoUri(uri: string): { uri: string; usedEncodedUse
   return { uri: `anytls://${decoded}${parts.suffix}`, usedEncodedUserinfo: true };
 }
 
-function normalizeAnyTlsSecurity(raw: string | null): "tls" {
+type AnyTlsSecurity = "tls" | "reality";
+
+/**
+ * Mihomo 不支持 AnyTLS + Reality（官方明确「未来也不会支持」），
+ * 但订阅里常见只有 security=reality 标记、没有任何 Reality 材料的链接，
+ * 这类链接在任何客户端都无法真正走 Reality，按普通 TLS AnyTLS 处理即可。
+ */
+function normalizeAnyTlsSecurity(raw: string | null): AnyTlsSecurity {
   const value = (raw || "").trim().toLowerCase();
   if (!value || value === "tls" || value === "none") return "tls";
-  if (value === "reality") {
-    throw new Error("AnyTLS 不支持 security=reality / reality-opts（Mihomo 不支持）");
-  }
+  if (value === "reality") return "reality";
   throw new Error(`AnyTLS 不支持 security=${raw}`);
 }
+
+/** 真实的 Reality 材料：命中任一说明这条链接确实要点 Reality */
+const ANYTLS_REALITY_MATERIAL_KEYS = [
+  "pbk",
+  "sid",
+  "spx",
+  "public-key",
+  "public_key",
+  "publicKey",
+  "short-id",
+  "short_id",
+  "shortId",
+] as const;
 
 function normalizeAnyTlsTransport(params: URLSearchParams): "tcp" {
   const typeRaw = (params.get("type") || params.get("network") || params.get("transport") || "").trim();
@@ -104,18 +122,15 @@ function normalizeAnyTlsTransport(params: URLSearchParams): "tcp" {
   throw new Error(`AnyTLS 不支持 type=${typeRaw}（Mihomo 仅支持纯 TCP）`);
 }
 
-function rejectUnsupportedAnyTlsAdvancedParams(params: URLSearchParams): void {
-  const unsupportedRealityParams = [
-    "pbk",
-    "sid",
-    "spx",
-    "public-key",
-    "public_key",
-    "publicKey",
-    "short-id",
-    "short_id",
-    "shortId",
-  ];
+function rejectUnsupportedAnyTlsRealityParams(params: URLSearchParams): void {
+  const foundReality = ANYTLS_REALITY_MATERIAL_KEYS.filter((key) => params.has(key));
+  if (foundReality.length === 0) return;
+  throw new Error(
+    `AnyTLS 不支持 Reality 参数: ${foundReality.join(", ")}（Mihomo 不支持 anytls+reality，请改用 VLESS/Trojan，或为该节点启用 ECH 隐藏 SNI）`
+  );
+}
+
+function rejectUnsupportedAnyTlsTransportParams(params: URLSearchParams): void {
   const unsupportedTransportParams = [
     "serviceName",
     "service_name",
@@ -126,11 +141,6 @@ function rejectUnsupportedAnyTlsAdvancedParams(params: URLSearchParams): void {
     "seed",
     "mode",
   ];
-
-  const foundReality = unsupportedRealityParams.filter((key) => params.has(key));
-  if (foundReality.length > 0) {
-    throw new Error(`AnyTLS 不支持 Reality 参数: ${foundReality.join(", ")}`);
-  }
 
   const foundTransport = unsupportedTransportParams.filter((key) => params.has(key));
   if (foundTransport.length > 0) {
@@ -180,7 +190,8 @@ export function parseAnyTLS(uri: string): AnyTLSNode {
 
   normalizeAnyTlsSecurity(params.get("security"));
   normalizeAnyTlsTransport(params);
-  rejectUnsupportedAnyTlsAdvancedParams(params);
+  rejectUnsupportedAnyTlsRealityParams(params);
+  rejectUnsupportedAnyTlsTransportParams(params);
 
   const sni =
     params.get("sni") ||

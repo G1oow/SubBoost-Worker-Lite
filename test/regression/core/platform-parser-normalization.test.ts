@@ -127,7 +127,22 @@ describe("platform parser normalization with controlled parser outputs", () => {
       password: "secret",
       security: "reality",
     });
-    await expect(parse("AnyTLS Reality = anytls, anytls.example.com, 443")).rejects.toThrow("不支持 Reality");
+    // 只有 security=reality 标记、没有 reality-opts → 按普通 TLS AnyTLS 保留，标记本身不写进节点
+    const anyTlsMarkerOnly = await parse("AnyTLS Reality = anytls, anytls.example.com, 443");
+    expect(anyTlsMarkerOnly).toMatchObject({ type: "anytls", server: "anytls.example.com" });
+    expect(anyTlsMarkerOnly).not.toHaveProperty("security");
+
+    parserMocks.surge.mockReturnValueOnce({
+      name: "AnyTLS Reality Opts",
+      type: "anytls",
+      server: "anytls.example.com",
+      port: 443,
+      password: "secret",
+      "reality-opts": { "public-key": "A".repeat(43) },
+    });
+    await expect(parse("AnyTLS Reality Opts = anytls, anytls.example.com, 443")).rejects.toThrow(
+      "AnyTLS 平台配置不支持 Reality 参数"
+    );
   });
 
   it("keeps Surge WireGuard section fallback names observable", async () => {
