@@ -24,3 +24,8 @@ worker/dist/
 # Vercel CLI 的本地链接信息与它生成的 .env.local（含 VERCEL_OIDC_TOKEN，禁止提交）
 .vercel
 .env.local
+# PI-Desktop 的计划文档与浏览器走查截图（本机证据，不进仓库）
+.pi/
+.playwright-mcp/
+# Claude Code 会话导出（MB 级，含本机地址与 token）
+claudecode-session-*.json
