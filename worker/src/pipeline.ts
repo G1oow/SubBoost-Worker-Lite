@@ -1,6 +1,12 @@
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
-import { configToYaml, generateClashConfig, generateClashYaml } from "@subboost/core/generator";
+import {
+  collectReservedGroupNames,
+  configToYaml,
+  generateClashConfig,
+  generateClashYaml,
+} from "@subboost/core/generator";
 import { buildNodeContentKey, stableJsonStringify } from "@subboost/core/node-identity";
+import { resolveProxyChains, type ProxyChainStatus } from "@subboost/core/subscription/chain-nodes";
 import { withNodeSourceId } from "@subboost/core/subscription/node-source-state";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 import type { ParsedNode } from "@subboost/core/types/node";
@@ -240,6 +246,18 @@ export type ConfigPreview = {
   nodeCount: number;
   proxyGroupCount: number;
   ruleProviderCount: number;
+  /** 链式代理逐条解析结果：界面据此显示匹配数量与「为什么没生成」 */
+  chains: Array<{
+    id: string;
+    name: string;
+    exitGroupName: string;
+    relayGroupName: string;
+    relayCount: number;
+    landingCount: number;
+    status: ProxyChainStatus;
+    active: boolean;
+    error?: string;
+  }>;
   /** 最终 rules 段，与订阅输出逐行一致 */
   rules: string[];
 };
@@ -263,12 +281,22 @@ export async function previewConfig(
   const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
   const nodes = mergeSnapshotNodes(targets, snapshots);
 
+  const generateOptions = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes });
+
   try {
-    const clash = generateClashConfig(
-      buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes })
-    );
+    const clash = generateClashConfig(generateOptions);
     // 订阅输出还要再序列化一次，这一步失败同样算生成失败
     configToYaml(clash);
+    // 同一份草稿、同一批节点、同一份已占用组名：预览与订阅生成看到的链必须一致
+    const resolvedChains = resolveProxyChains({
+      chains: generateOptions.proxyChains,
+      nodes,
+      reservedGroupNames: collectReservedGroupNames({
+        customProxyGroups: generateOptions.customProxyGroups,
+        dialerProxyGroups: generateOptions.dialerProxyGroups,
+        proxyGroupNameOverrides: generateOptions.proxyGroupNameOverrides,
+      }),
+    });
     return {
       ok: true,
       preview: {
@@ -278,6 +306,17 @@ export async function previewConfig(
         proxyGroupCount: clash["proxy-groups"]?.length ?? 0,
         ruleProviderCount: Object.keys(clash["rule-providers"] ?? {}).length,
         rules: clash.rules ?? [],
+        chains: resolvedChains.map((chain) => ({
+          id: chain.id,
+          name: chain.name,
+          exitGroupName: chain.exitGroupName,
+          relayGroupName: chain.relayGroupName,
+          relayCount: chain.relayNodes.length,
+          landingCount: chain.landingNodes.length,
+          status: chain.status,
+          active: chain.active,
+          ...(chain.error ? { error: chain.error } : {}),
+        })),
       },
     };
   } catch (err) {

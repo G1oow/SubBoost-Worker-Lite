@@ -183,6 +183,32 @@ function ensureUniqueProxyNames(nodes: ParsedNode[]): ParsedNode[] {
 }
 
 /**
+ * 生成期已被占用的分组名：内置模块组、自定义组、旧中转组。
+ *
+ * 链的出口组/前置组撞上这些名字时整条链跳过（不静默改覆盖），
+ * 预览与订阅生成必须用同一份集合，否则界面会显示"能生成"但实际被跳过。
+ */
+export function collectReservedGroupNames(options: {
+  customProxyGroups?: CustomProxyGroup[];
+  dialerProxyGroups?: DialerProxyGroup[];
+  proxyGroupNameOverrides?: Record<string, string>;
+}): Set<string> {
+  const names = new Set<string>();
+  for (const module of PROXY_GROUP_MODULES) {
+    names.add(resolveProxyGroupModuleName(module, options.proxyGroupNameOverrides?.[module.id]));
+  }
+  for (const group of options.customProxyGroups ?? []) {
+    const name = typeof group?.name === "string" ? group.name.trim() : "";
+    if (name) names.add(name);
+  }
+  for (const group of options.dialerProxyGroups ?? []) {
+    const name = typeof group?.name === "string" ? group.name.trim() : "";
+    if (name) names.add(name);
+  }
+  return names;
+}
+
+/**
  * 生成完整的 Clash 配置
  */
 export function generateClashConfig(options: GenerateOptions): ClashConfig {
@@ -311,17 +337,11 @@ export function generateClashConfig(options: GenerateOptions): ClashConfig {
 
   // === 链式代理（严格两跳）===
   // 组名先占位：出口组/前置组撞上既有分组时这条链跳过，不静默覆盖
-  const reservedGroupNames = new Set<string>([
-    ...PROXY_GROUP_MODULES.map((module) =>
-      resolveProxyGroupModuleName(module, proxyGroupNameOverrides?.[module.id])
-    ),
-    ...customProxyGroups
-      .map((group) => (typeof group?.name === "string" ? group.name.trim() : ""))
-      .filter(Boolean),
-    ...dialerProxyGroups
-      .map((group) => (typeof group?.name === "string" ? group.name.trim() : ""))
-      .filter(Boolean),
-  ]);
+  const reservedGroupNames = collectReservedGroupNames({
+    customProxyGroups,
+    dialerProxyGroups,
+    proxyGroupNameOverrides,
+  });
   const resolvedChains = resolveProxyChains({ chains: proxyChains, nodes: uniqueNodes, reservedGroupNames });
   const chainSpecs: ChainProxyGroupSpec[] = activeProxyChains(resolvedChains).map((chain) => ({
     id: chain.id,
