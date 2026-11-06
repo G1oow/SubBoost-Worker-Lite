@@ -281,3 +281,60 @@ describe("activeProxyChains / mapLandingNodesToExitGroups", () => {
     expect(map.get("中转-东京")).toBeUndefined();
   });
 });
+
+describe("链式代理的失败分支", () => {
+  it("前置正则写坏时该链不生成", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [chain({ relay: { sourceIds: [], includeRegex: "(" } })],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "invalid-regex", active: false });
+    expect(resolved.error).toContain("匹配正则");
+  });
+
+  it("落地排除正则写坏时该链不生成", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [chain({ landing: { sourceIds: [], excludeRegex: "[" } })],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "invalid-regex", active: false });
+    expect(resolved.error).toContain("排除正则");
+  });
+
+  it("选择器的排除正则非法时返回错误而不是抛异常", () => {
+    const picked = selectChainNodes({ sourceIds: [], excludeRegex: "[" }, NODES);
+    expect(picked.nodes).toEqual([]);
+    expect(picked.error).toContain("排除正则");
+  });
+});
+
+describe("链式代理的防御分支", () => {
+  it("id/name 不是字符串时标记为配置不完整", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [
+        {
+          id: 123 as never,
+          name: undefined as never,
+          relay: { sourceIds: [] },
+          landing: { sourceIds: [] },
+        },
+      ],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "invalid", active: false });
+  });
+
+  it("同一个落地节点只会归属到最先声明它的出口组", () => {
+    const resolved = activeProxyChains(
+      resolveProxyChains({
+        chains: [
+          chain({ id: "a", name: "美国 A", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
+        ],
+        nodes: NODES,
+      })
+    );
+    const map = mapLandingNodesToExitGroups([...resolved, ...resolved]);
+    expect(map.size).toBe(1);
+    expect(map.get("落地-洛杉矶")).toBe("美国 A");
+  });
+});

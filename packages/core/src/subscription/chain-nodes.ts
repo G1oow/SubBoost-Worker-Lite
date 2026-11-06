@@ -48,6 +48,18 @@ export function chainRelayGroupName(name: string): string {
   return `${name.trim()}${CHAIN_RELAY_GROUP_SUFFIX}`;
 }
 
+/** 编译后的选择器：正则只编译一次，落地与前置两轮筛选共用 */
+type CompiledChainSelector = {
+  include: RegExp | null;
+  exclude: RegExp | null;
+  /** `null` = 不限源 */
+  sourceIds: Set<string> | null;
+};
+
+type CompileResult =
+  | { ok: true; value: CompiledChainSelector }
+  | { ok: false; error: string };
+
 type RegexResult = { ok: true; value: RegExp | null } | { ok: false; error: string };
 
 function compileChainRegex(pattern: string | undefined, label: string): RegexResult {
@@ -61,6 +73,38 @@ function compileChainRegex(pattern: string | undefined, label: string): RegexRes
   }
 }
 
+function compileChainSelector(
+  selector: ChainSelector | undefined,
+  nodes: ParsedNode[]
+): CompileResult {
+  const include = compileChainRegex(selector?.includeRegex, "匹配正则");
+  if (!include.ok) return include;
+  const exclude = compileChainRegex(selector?.excludeRegex, "排除正则");
+  if (!exclude.ok) return exclude;
+  return {
+    ok: true,
+    value: {
+      include: include.value,
+      exclude: exclude.value,
+      // 陈旧源 id 不参与限定：全部命中不到现存源时按「不限源」处理
+      sourceIds: resolveEffectiveSourceIds(selector?.sourceIds ?? [], nodes),
+    },
+  };
+}
+
+/** 按编译好的选择器挑节点，顺序沿用传入的节点顺序（即订阅里节点的真实顺序） */
+function filterChainNodes(nodes: ParsedNode[], selector: CompiledChainSelector): ParsedNode[] {
+  return nodes.filter((node) => {
+    const name = typeof node.name === "string" ? node.name : "";
+    if (selector.sourceIds && !getNodeSourceIds(node).some((id) => selector.sourceIds?.has(id))) {
+      return false;
+    }
+    if (selector.include && !selector.include.test(name)) return false;
+    if (selector.exclude && selector.exclude.test(name)) return false;
+    return true;
+  });
+}
+
 export type ChainNodeSelection = { nodes: ParsedNode[]; error?: string };
 
 /**
@@ -72,23 +116,9 @@ export function selectChainNodes(
   selector: ChainSelector | undefined,
   nodes: ParsedNode[]
 ): ChainNodeSelection {
-  const include = compileChainRegex(selector?.includeRegex, "匹配正则");
-  if (!include.ok) return { nodes: [], error: include.error };
-  const exclude = compileChainRegex(selector?.excludeRegex, "排除正则");
-  if (!exclude.ok) return { nodes: [], error: exclude.error };
-
-  // 陈旧源 id 不参与限定：全部命中不到现存源时按「不限源」处理
-  const sourceIds = resolveEffectiveSourceIds(selector?.sourceIds ?? [], nodes);
-
-  const picked = nodes.filter((node) => {
-    if (sourceIds && !getNodeSourceIds(node).some((id) => sourceIds.has(id))) return false;
-    const name = typeof node.name === "string" ? node.name : "";
-    if (include.value && !include.value.test(name)) return false;
-    if (exclude.value && exclude.value.test(name)) return false;
-    return true;
-  });
-
-  return { nodes: picked };
+  const compiled = compileChainSelector(selector, nodes);
+  if (!compiled.ok) return { nodes: [], error: compiled.error };
+  return { nodes: filterChainNodes(nodes, compiled.value) };
 }
 
 function normalizeGroupType(value: unknown, fallback: ProxyGroupGroupType): ProxyGroupGroupType {
@@ -104,8 +134,8 @@ export type ResolveProxyChainsOptions = {
 
 type ChainDraft = {
   resolved: ResolvedProxyChain;
-  selectorRelay: ChainSelector | undefined;
-  selectorLanding: ChainSelector | undefined;
+  /** 落地没通过校验时为空；通过后用于第二轮筛前置 */
+  compiledRelay?: CompiledChainSelector;
 };
 
 /**
@@ -131,6 +161,16 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
   // 已分配给某条链的落地节点：后面的链不能再拿来当落地，也不能当任何链的前置
   const claimedLanding = new Set<string>();
 
+  const pushInactive = (
+    base: Omit<ResolvedProxyChain, "status" | "active">,
+    status: ProxyChainStatus,
+    error?: string
+  ) => {
+    drafts.push({
+      resolved: { ...base, status, active: false, ...(error ? { error } : {}) },
+    });
+  };
+
   for (const chain of chains) {
     if (!chain || typeof chain !== "object") continue;
     const id = typeof chain.id === "string" ? chain.id.trim() : "";
@@ -152,63 +192,36 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
     };
 
     if (!id || !name) {
-      drafts.push({
-        resolved: { ...base, status: "invalid", active: false, error: "链缺少 id 或名称" },
-        selectorRelay: undefined,
-        selectorLanding: undefined,
-      });
+      pushInactive(base, "invalid", "链缺少 id 或名称");
       continue;
     }
 
     if (chain.enabled === false) {
-      drafts.push({
-        resolved: { ...base, status: "disabled", active: false },
-        selectorRelay: undefined,
-        selectorLanding: undefined,
-      });
+      pushInactive(base, "disabled");
       continue;
     }
 
     if (reserved.has(exitGroupName) || reserved.has(relayGroupName) || exitGroupName === relayGroupName) {
-      drafts.push({
-        resolved: {
-          ...base,
-          status: "name-conflict",
-          active: false,
-          error: `组名「${exitGroupName}」与现有分组重复，这条链不会生成`,
-        },
-        selectorRelay: undefined,
-        selectorLanding: undefined,
-      });
+      pushInactive(base, "name-conflict", `组名「${exitGroupName}」与现有分组重复，这条链不会生成`);
       continue;
     }
 
-    const landing = selectChainNodes(chain.landing, nodes);
-    const relay = selectChainNodes(chain.relay, nodes);
-    const regexError = landing.error || relay.error;
-    if (regexError) {
-      drafts.push({
-        resolved: { ...base, status: "invalid-regex", active: false, error: regexError },
-        selectorRelay: undefined,
-        selectorLanding: undefined,
-      });
+    const landingSelector = compileChainSelector(chain.landing, nodes);
+    if (!landingSelector.ok) {
+      pushInactive(base, "invalid-regex", landingSelector.error);
+      continue;
+    }
+    const relaySelector = compileChainSelector(chain.relay, nodes);
+    if (!relaySelector.ok) {
+      pushInactive(base, "invalid-regex", relaySelector.error);
       continue;
     }
 
-    const landingNodes = landing.nodes
+    const landingNodes = filterChainNodes(nodes, landingSelector.value)
       .map((node) => node.name)
       .filter((nodeName) => typeof nodeName === "string" && nodeName && !claimedLanding.has(nodeName));
     if (landingNodes.length === 0) {
-      drafts.push({
-        resolved: {
-          ...base,
-          status: "empty-landing",
-          active: false,
-          error: "没有节点匹配落地选择器，这条链不会生成",
-        },
-        selectorRelay: undefined,
-        selectorLanding: undefined,
-      });
+      pushInactive(base, "empty-landing", "没有节点匹配落地选择器，这条链不会生成");
       continue;
     }
 
@@ -219,26 +232,14 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
 
     drafts.push({
       resolved: { ...base, landingNodes, status: "ok", active: true },
-      selectorRelay: chain.relay,
-      selectorLanding: chain.landing,
+      compiledRelay: relaySelector.value,
     });
   }
 
   // 第二轮才定前置：要先把所有链的落地收齐，前置才能避开任意链的落地（否则会转成自环）
   for (const draft of drafts) {
-    if (!draft.resolved.active) continue;
-    const relay = selectChainNodes(draft.selectorRelay, nodes);
-    if (relay.error) {
-      draft.resolved = {
-        ...draft.resolved,
-        relayNodes: [],
-        status: "invalid-regex",
-        active: false,
-        error: relay.error,
-      };
-      continue;
-    }
-    const relayNodes = relay.nodes
+    if (!draft.resolved.active || !draft.compiledRelay) continue;
+    const relayNodes = filterChainNodes(nodes, draft.compiledRelay)
       .map((node) => node.name)
       .filter((nodeName) => typeof nodeName === "string" && nodeName && !claimedLanding.has(nodeName));
     draft.resolved = {

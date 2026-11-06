@@ -261,3 +261,87 @@ describe("链作为规则目标", () => {
     expect(membersOf(config, "🎬 自定义")).toContain(EXIT_GROUP);
   });
 });
+
+describe("链式代理与自定义分组的边界", () => {
+  it("内置模块里没有 ai 时，手动成员的自定义组追加在末尾", () => {
+    const config = generateClashConfig(
+      buildGenerateOptionsFromConfig(
+        {
+          enabledGroups: ["select", "auto"],
+          customProxyGroups: [
+            {
+              id: "custom-1",
+              name: "🎬 自定义",
+              groupType: "select",
+              enabled: true,
+              memberSource: "manual",
+            },
+          ],
+        },
+        { nodes: NODES }
+      )
+    );
+    expect(groupNames(config)).toContain("🎬 自定义");
+  });
+
+  it("停用的自定义分组不影响指向链的规则", () => {
+    const config = generate([chainEntry()], {
+      customProxyGroups: [
+        {
+          id: "custom-off",
+          name: "🚫 停用组",
+          groupType: "select",
+          enabled: false,
+          memberSource: "manual",
+        },
+      ],
+      customRules: [
+        {
+          id: "rule-2",
+          type: "DOMAIN",
+          value: "example.com",
+          target: { kind: "chain", id: "chain-us" },
+        },
+      ],
+    });
+
+    expect((config.rules ?? []) as string[]).toContain(`DOMAIN,example.com,${EXIT_GROUP}`);
+  });
+});
+
+describe("出口组的前置成员", () => {
+  it("reject-first / direct-first 在落地节点前面补 REJECT / DIRECT", () => {
+    const reject = generate([chainEntry({ exitGroupType: "reject-first" })]);
+    expect(membersOf(reject, EXIT_GROUP)).toEqual(["REJECT", "美国落地-1", "美国落地-2"]);
+
+    const direct = generate([chainEntry({ exitGroupType: "direct-first" })]);
+    expect(membersOf(direct, EXIT_GROUP)).toEqual(["DIRECT", "美国落地-1", "美国落地-2"]);
+  });
+});
+
+describe("链规则集的规则提供者", () => {
+  it("目标指向链的规则集照常生成 provider，即使存在停用的自定义分组", () => {
+    const config = generate([chainEntry()], {
+      customProxyGroups: [
+        {
+          id: "custom-off",
+          name: "🚫 停用组",
+          groupType: "select",
+          enabled: false,
+          memberSource: "manual",
+        },
+      ],
+      customRuleSets: [
+        {
+          id: "demo-set",
+          name: "示例规则集",
+          behavior: "domain",
+          path: "geosite/example.mrs",
+          target: { kind: "chain", id: "chain-us" },
+        },
+      ],
+    });
+
+    expect((config["rule-providers"] ?? {}) as Record<string, unknown>).toHaveProperty("demo-set");
+  });
+});

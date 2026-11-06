@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildGenerateOptionsFromConfig,
   getEffectiveTestOptions,
+  normalizeProxyChains,
 } from "./config-utils";
 import { generateClashConfig } from "@subboost/core/generator";
 import type { ParsedNode } from "@subboost/core/types/node";
@@ -597,4 +598,35 @@ describe("subscription config utils", () => {
     expect(buildGenerateOptionsFromConfig({}, { nodes: [node()] })).not.toHaveProperty("groupListeners");
   });
 
+});
+
+describe("normalizeProxyChains", () => {
+  it("容忍残缺数据：非数组、非对象条目、缺失 id/名称、非法组类型", () => {
+    expect(normalizeProxyChains(undefined)).toEqual([]);
+    expect(normalizeProxyChains("nope")).toEqual([]);
+    expect(normalizeProxyChains([null, 1, "x"])).toEqual([]);
+
+    const [chain] = normalizeProxyChains([
+      {
+        id: " chain-1 ",
+        name: " 美国 ",
+        enabled: false,
+        relay: { sourceIds: [" s1 ", 1, ""], includeRegex: " 中转 ", excludeRegex: "  " },
+        landing: "not-an-object",
+        exitGroupType: "nope",
+        relayGroupType: "fallback",
+        testUrl: "  https://example.com/generate_204 ",
+      },
+    ]);
+
+    expect(chain).toEqual({
+      id: "chain-1",
+      name: "美国",
+      enabled: false,
+      relay: { sourceIds: ["s1"], includeRegex: "中转" },
+      landing: { sourceIds: [] },
+      relayGroupType: "fallback",
+      testUrl: "https://example.com/generate_204",
+    });
+  });
 });
