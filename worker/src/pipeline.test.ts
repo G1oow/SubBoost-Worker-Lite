@@ -10,8 +10,10 @@ import {
   type PipelineDeps,
 } from "./pipeline";
 import { createStore, snapshotKey } from "./store";
+import { nodeRenameKey } from "./node-renames";
 import { MemoryKV } from "./test-utils/memory-kv";
 import type { CacheRecord } from "./types";
+import type { ParsedNode } from "@subboost/core/types/node";
 
 const ENCRYPTION_KEY = "pipeline-test-key-0123456789";
 
@@ -160,6 +162,99 @@ describe("generateSubscription", () => {
     expect(proxiesFrom(result.cache.yaml).map((p) => p.name)).toEqual(["a"]);
   });
 
+  it("只生成订阅勾选的链，未勾选的链不出现", async () => {
+    const sources = await h.store.saveSources([{ name: "a", kind: "manual", manualText: `${ssNode("a", 8388)}\n${ssNode("b", 8389)}` }]);
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [
+        { name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" },
+        { name: "b", type: "ss", server: "example.com", port: 8389, cipher: "aes-256-gcm", password: "x" },
+      ],
+      nodeCount: 2,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    const nodeA = { name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    const nodeB = { name: "b", type: "ss", server: "example.com", port: 8389, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    await h.store.putConfig({
+      enabledGroups: ["select", "auto", "final"],
+      proxyChains: [
+        {
+          id: "chain-on",
+          name: "🇺🇸 已勾选链",
+          relayNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(nodeA as never) }],
+          landingNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(nodeB as never) }],
+        },
+        {
+          id: "chain-off",
+          name: "🇯🇵 未勾选链",
+          relayNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(nodeA as never) }],
+          landingNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(nodeB as never) }],
+        },
+      ],
+    });
+
+    const { dto } = await h.store.createSubscription({ name: "勾了链", sourceIds: [], chainIds: ["chain-on"] });
+    const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
+    const result = await generateSubscription(h.deps, sub!, { onDemand: false });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+
+    const parsed = yaml.load(result.cache.yaml) as Record<string, unknown>;
+    const groupNames = ((parsed["proxy-groups"] ?? []) as Array<{ name: string }>).map((group) => group.name);
+    expect(groupNames).toContain("🇺🇸 已勾选链");
+    expect(groupNames).not.toContain("🇯🇵 未勾选链");
+    // 落地节点被出口组顶替，且带上前置组的 dialer-proxy
+    const landing = proxiesFrom(result.cache.yaml).find((proxy) => proxy.name === "b") as unknown as Record<string, unknown>;
+    expect(landing["dialer-proxy"]).toBe("🇺🇸 已勾选链 · 前置");
+  });
+
+  it("链引用的源即使没勾进订阅也参与生成", async () => {
+    const sources = await h.store.saveSources([
+      { name: "订阅源", kind: "manual", manualText: ssNode("a", 8388) },
+      { name: "链专用源", kind: "manual", manualText: ssNode("b", 8389) },
+    ]);
+    const nodeA = { name: "a", type: "ss", server: "example.com", port: 8388, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    const nodeB = { name: "b", type: "ss", server: "example.com", port: 8389, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [nodeA],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putSnapshot({
+      sourceId: sources[1].id,
+      nodes: [nodeB],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putConfig({
+      enabledGroups: ["select", "auto", "final"],
+      proxyChains: [
+        {
+          id: "chain-1",
+          name: "🇺🇸 跨源链",
+          relayNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(nodeA as never) }],
+          landingNodes: [{ sourceId: sources[1].id, nodeKey: nodeRenameKey(nodeB as never) }],
+        },
+      ],
+    });
+
+    // 订阅只勾了第一个源，链的落地来自第二个源
+    const { dto } = await h.store.createSubscription({
+      name: "跨源",
+      sourceIds: [sources[0].id],
+      chainIds: ["chain-1"],
+    });
+    const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
+    const result = await generateSubscription(h.deps, sub!, { onDemand: false });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(proxiesFrom(result.cache.yaml).map((proxy) => proxy.name)).toEqual(["a", "b"]);
+  });
+
   it("高级分组的按源过滤真正生效，且 _sourceIds 不进 YAML", async () => {
     const sources = await h.store.saveSources([
       { name: "a", kind: "remote", url: "https://a.example.com/sub" },
@@ -273,35 +368,39 @@ describe("previewConfig", () => {
       { name: "relay", kind: "remote", url: "https://relay.example.com/sub" },
       { name: "landing", kind: "remote", url: "https://landing.example.com/sub" },
     ]);
+    const relayNode = { name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    const landingNode = { name: "落地洛杉矶", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
     await h.store.putSnapshot({
       sourceId: sources[0].id,
-      nodes: [{ name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" }],
+      nodes: [relayNode],
       nodeCount: 1,
       fetchedAt: "2026-10-01T00:00:00.000Z",
       parseErrors: [],
     });
     await h.store.putSnapshot({
       sourceId: sources[1].id,
-      nodes: [{ name: "落地洛杉矶", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" }],
+      nodes: [landingNode],
       nodeCount: 1,
       fetchedAt: "2026-10-01T00:00:00.000Z",
       parseErrors: [],
     });
 
+    const relayRef = { sourceId: sources[0].id, nodeKey: nodeRenameKey(relayNode as never) };
+    const landingRef = { sourceId: sources[1].id, nodeKey: nodeRenameKey(landingNode as never) };
     const result = await previewConfig(h.deps, {
       enabledGroups: ["select", "auto", "final"],
       proxyChains: [
         {
           id: "chain-1",
           name: "🇺🇸 美国链",
-          relay: { sourceIds: [], includeRegex: "中转" },
-          landing: { sourceIds: [], includeRegex: "落地" },
+          relayNodes: [relayRef],
+          landingNodes: [landingRef],
         },
         {
           id: "chain-2",
           name: "🇺🇸 空链",
-          relay: { sourceIds: [], includeRegex: "中转" },
-          landing: { sourceIds: [], includeRegex: "不存在" },
+          relayNodes: [relayRef],
+          landingNodes: [{ sourceId: sources[1].id, nodeKey: "0000000000000000" }],
         },
       ],
     });
@@ -333,12 +432,11 @@ describe("previewConfig", () => {
     const sources = await h.store.saveSources([
       { name: "演示源", kind: "remote", url: "https://demo.example.com/sub" },
     ]);
+    const relayNode = { name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
+    const landingNode = { name: "落地", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" } as ParsedNode;
     await h.store.putSnapshot({
       sourceId: sources[0].id,
-      nodes: [
-        { name: "中转东京", type: "ss", server: "example.com", port: 8391, cipher: "aes-256-gcm", password: "x" },
-        { name: "落地", type: "ss", server: "example.com", port: 8392, cipher: "aes-256-gcm", password: "x" },
-      ],
+      nodes: [relayNode, landingNode],
       nodeCount: 2,
       fetchedAt: "2026-10-01T00:00:00.000Z",
       parseErrors: [],
@@ -350,8 +448,8 @@ describe("previewConfig", () => {
         {
           id: "chain-x",
           name: "🇺🇸 一致性链",
-          relay: { sourceIds: [], includeRegex: "中转" },
-          landing: { sourceIds: [], includeRegex: "^落地$" },
+          relayNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(relayNode as never) }],
+          landingNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(landingNode as never) }],
         },
       ],
     });

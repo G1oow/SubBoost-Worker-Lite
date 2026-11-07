@@ -33,6 +33,7 @@ const STATE: AppState = {
       id: "sub1",
       name: "默认订阅",
       sourceIds: ["s1", DANGLING_SOURCE_ID],
+      chainIds: [],
       link: "https://worker.example.com/sub/tokenvalue",
       createdAt: "2026-10-01T00:00:00.000Z",
       updatedAt: "2026-10-01T00:00:00.000Z",
@@ -71,6 +72,7 @@ describe("SubscriptionsPanel 修改订阅的绑定源", () => {
     expect(onUpdate).toHaveBeenCalledWith("sub1", {
       name: "默认订阅",
       sourceIds: ["s1"],
+      chainIds: [],
     });
   });
 

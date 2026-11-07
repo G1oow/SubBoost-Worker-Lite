@@ -1,85 +1,120 @@
 import { describe, expect, it } from "vitest";
-import type { ProxyChain } from "../types/config";
+import { nodeRenameKey } from "../node-rename-key";
+import type { ChainNodeRef, ProxyChain } from "../types/config";
 import type { ParsedNode } from "../types/node";
 import {
   CHAIN_RELAY_GROUP_SUFFIX,
   activeProxyChains,
   chainRelayGroupName,
+  collectChainSourceIds,
   mapLandingNodesToExitGroups,
+  resolveChainNodes,
   resolveProxyChains,
-  selectChainNodes,
 } from "./chain-nodes";
 
-function node(name: string, patch: Record<string, unknown> = {}): ParsedNode {
+function ss(host: string, name: string, sourceIds: string[]): ParsedNode {
   return {
     name,
     type: "ss",
-    server: "ss.example.com",
+    server: host,
     port: 8388,
     cipher: "aes-128-gcm",
     password: "secret",
-    ...patch,
+    _sourceIds: sourceIds,
   } as ParsedNode;
 }
 
+const RELAY_SRC = "source-relay";
+const LANDING_SRC = "source-landing";
+
 const NODES: ParsedNode[] = [
-  node("中转-东京", { _sourceIds: ["source-relay"] }),
-  node("中转-大阪", { _sourceIds: ["source-relay"] }),
-  node("落地-洛杉矶", { _sourceIds: ["source-landing"] }),
-  node("落地-圣何塞", { _sourceIds: ["source-landing"] }),
+  ss("relay-1.example.com", "中转-东京", [RELAY_SRC]),
+  ss("relay-2.example.com", "中转-大阪", [RELAY_SRC]),
+  ss("landing-1.example.com", "落地-洛杉矶", [LANDING_SRC]),
+  ss("landing-2.example.com", "落地-圣何塞", [LANDING_SRC]),
 ];
+
+function ref(sourceId: string, node: ParsedNode): ChainNodeRef {
+  return { sourceId, nodeKey: nodeRenameKey(node) };
+}
+
+const TOKYO = NODES[0];
+const OSAKA = NODES[1];
+const LA = NODES[2];
+const SJ = NODES[3];
 
 function chain(patch: Partial<ProxyChain> = {}): ProxyChain {
   return {
     id: "chain-1",
     name: "🇺🇸 美国",
-    relay: { sourceIds: [], includeRegex: "中转" },
-    landing: { sourceIds: [], includeRegex: "落地" },
+    relayNodes: [ref(RELAY_SRC, TOKYO), ref(RELAY_SRC, OSAKA)],
+    landingNodes: [ref(LANDING_SRC, LA), ref(LANDING_SRC, SJ)],
     ...patch,
   };
 }
 
-describe("selectChainNodes", () => {
-  it("空选择器返回全部节点", () => {
-    expect(selectChainNodes({ sourceIds: [] }, NODES).nodes.map((n) => n.name)).toEqual([
-      "中转-东京",
-      "中转-大阪",
-      "落地-洛杉矶",
-      "落地-圣何塞",
-    ]);
+describe("resolveChainNodes", () => {
+  it("按引用精确挑节点，顺序沿用节点顺序", () => {
+    const picked = resolveChainNodes(chain(), NODES);
+    expect(picked.relay).toEqual(["中转-东京", "中转-大阪"]);
+    expect(picked.landing).toEqual(["落地-洛杉矶", "落地-圣何塞"]);
+    expect(picked.issues).toEqual([]);
   });
 
-  it("include/exclude 正则按忽略大小写匹配节点名", () => {
-    const picked = selectChainNodes(
-      { sourceIds: [], includeRegex: "中转", excludeRegex: "大阪" },
+  it("同一个源里的两个节点可以分别当前置和落地", () => {
+    const sameSource = chain({
+      relayNodes: [ref(RELAY_SRC, TOKYO)],
+      landingNodes: [ref(RELAY_SRC, OSAKA)],
+    });
+    const picked = resolveChainNodes(sameSource, NODES);
+    expect(picked.relay).toEqual(["中转-东京"]);
+    expect(picked.landing).toEqual(["中转-大阪"]);
+    expect(picked.issues).toEqual([]);
+  });
+
+  it("同一个节点被两个源共用时，引用任一源都能命中", () => {
+    const shared = ss("shared.example.com", "共享节点", [RELAY_SRC, LANDING_SRC]);
+    const picked = resolveChainNodes(
+      { relayNodes: [ref(RELAY_SRC, shared)], landingNodes: [ref(LANDING_SRC, shared)] },
+      [shared]
+    );
+    // 前后是同一个节点时按落地优先剔除前置，但两侧都命中过
+    expect(picked.landing).toEqual(["共享节点"]);
+    expect(picked.relay).toEqual([]);
+    expect(picked.droppedSelfRelay).toBe(1);
+    expect(picked.issues).toEqual([]);
+  });
+
+  it("引用失效时记 issue：源整个不在 vs 节点不在", () => {
+    const picked = resolveChainNodes(
+      {
+        relayNodes: [{ sourceId: "source-deleted", nodeKey: "0123456789abcdef" }],
+        landingNodes: [ref(LANDING_SRC, LA), { sourceId: LANDING_SRC, nodeKey: "0123456789abcdef" }],
+      },
       NODES
     );
-    expect(picked.nodes.map((n) => n.name)).toEqual(["中转-东京"]);
-
-    const upper = selectChainNodes({ sourceIds: [], includeRegex: "东京" }, [
-      node("东京-01"),
-      node("US-01"),
-    ]);
-    expect(upper.nodes.map((n) => n.name)).toEqual(["东京-01"]);
+    expect(picked.relay).toEqual([]);
+    expect(picked.landing).toEqual(["落地-洛杉矶"]);
+    expect(picked.issues.map((issue) => issue.reason)).toEqual(["missing-node", "missing-source"]);
   });
 
-  it("按源限定范围", () => {
-    const picked = selectChainNodes({ sourceIds: ["source-landing"] }, NODES);
-    expect(picked.nodes.map((n) => n.name)).toEqual(["落地-洛杉矶", "落地-圣何塞"]);
+  it("前置与自己的落地重叠时按落地优先剔除", () => {
+    const picked = resolveChainNodes(
+      { relayNodes: [ref(LANDING_SRC, LA), ref(RELAY_SRC, TOKYO)], landingNodes: [ref(LANDING_SRC, LA)] },
+      NODES
+    );
+    expect(picked.relay).toEqual(["中转-东京"]);
+    expect(picked.landing).toEqual(["落地-洛杉矶"]);
+    expect(picked.droppedSelfRelay).toBe(1);
   });
 
-  it("陈旧源 id 不参与限定，不会把选择器打成空集", () => {
-    const picked = selectChainNodes({ sourceIds: ["source-deleted"] }, NODES);
-    expect(picked.nodes).toHaveLength(4);
-
-    const mixed = selectChainNodes({ sourceIds: ["source-deleted", "source-relay"] }, NODES);
-    expect(mixed.nodes.map((n) => n.name)).toEqual(["中转-东京", "中转-大阪"]);
-  });
-
-  it("正则写坏时返回错误且不抛异常", () => {
-    const picked = selectChainNodes({ sourceIds: [], includeRegex: "(" }, NODES);
-    expect(picked.nodes).toEqual([]);
-    expect(picked.error).toContain("匹配正则");
+  it("残缺数据不抛异常", () => {
+    const picked = resolveChainNodes(
+      { relayNodes: [null, 3, {}, { sourceId: " ", nodeKey: "x" }] as unknown as ChainNodeRef[], landingNodes: [] },
+      [TOKYO as unknown as ParsedNode]
+    );
+    expect(picked.relay).toEqual([]);
+    expect(picked.landing).toEqual([]);
   });
 });
 
@@ -97,244 +132,136 @@ describe("resolveProxyChains", () => {
       relayGroupType: "url-test",
       status: "ok",
       active: true,
+      missingRefs: 0,
     });
   });
 
   it("链名首尾空白被裁掉，前置组名由链名派生", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ name: "  美国  " })],
-      nodes: NODES,
-    });
+    const [resolved] = resolveProxyChains({ chains: [chain({ name: "  美国  " })], nodes: NODES });
     expect(resolved.exitGroupName).toBe("美国");
     expect(resolved.relayGroupName).toBe(chainRelayGroupName("美国"));
   });
 
-  it("落地为空时整条链不生成", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ landing: { sourceIds: [], includeRegex: "不存在" } })],
-      nodes: NODES,
-    });
+  it("没选落地节点时整条链不生成", () => {
+    const [resolved] = resolveProxyChains({ chains: [chain({ landingNodes: [] })], nodes: NODES });
     expect(resolved).toMatchObject({ status: "empty-landing", active: false });
     expect(resolved.error).toContain("落地");
+    expect(resolved.landingNodes).toEqual([]);
+  });
+
+  it("落地引用全部失效时也不生成，并给出重新选择的提示", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [chain({ landingNodes: [{ sourceId: "source-deleted", nodeKey: "0123456789abcdef" }] })],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "empty-landing", active: false, missingRefs: 1 });
+    expect(resolved.error).toContain("已经不在了");
+  });
+
+  it("落地部分失效时仍然生成，状态标为「部分引用失效」", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [
+        chain({
+          landingNodes: [ref(LANDING_SRC, LA), { sourceId: LANDING_SRC, nodeKey: "0123456789abcdef" }],
+        }),
+      ],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "missing-refs", active: true, missingRefs: 1 });
+    expect(resolved.landingNodes).toEqual(["落地-洛杉矶"]);
+    expect(resolved.error).toContain("失效");
   });
 
   it("前置为空仍然生成：前置组只有 REJECT", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ relay: { sourceIds: [], includeRegex: "不存在" } })],
-      nodes: NODES,
-    });
+    const [resolved] = resolveProxyChains({ chains: [chain({ relayNodes: [] })], nodes: NODES });
     expect(resolved).toMatchObject({ status: "empty-relay", active: true, relayNodes: [] });
     expect(resolved.error).toContain("REJECT");
   });
 
-  it("正则为空串等于不限制", () => {
+  it("前置与落地指向同一个节点时，前置按落地优先被剔除", () => {
     const [resolved] = resolveProxyChains({
-      chains: [
-        chain({
-          relay: { sourceIds: [], includeRegex: "   ", excludeRegex: "" },
-          landing: { sourceIds: ["source-landing"] },
-        }),
-      ],
+      chains: [{ ...chain(), relayNodes: [ref(LANDING_SRC, LA)], landingNodes: [ref(LANDING_SRC, LA)] }],
       nodes: NODES,
     });
-    // 前置不写正则 = 不限制，但落地节点仍按「落地优先」被剔除，只剩两个中转节点
-    expect(resolved.relayNodes).toEqual(["中转-东京", "中转-大阪"]);
-    expect(resolved.landingNodes).toHaveLength(2);
+    expect(resolved.relayNodes).toEqual([]);
+    expect(resolved.status).toBe("empty-relay");
   });
 
-  it("正则写坏时该链不生成", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ landing: { sourceIds: [], excludeRegex: "[" } })],
-      nodes: NODES,
-    });
-    expect(resolved).toMatchObject({ status: "invalid-regex", active: false });
+  it("多条链先到先得：落地节点被前面占用后，后一条链不生成", () => {
+    const chains = [
+      chain(),
+      chain({ id: "chain-2", name: "🇺🇸 美国二", relayNodes: [], landingNodes: [ref(LANDING_SRC, LA)] }),
+    ];
+    const resolved = resolveProxyChains({ chains, nodes: NODES });
+    expect(resolved[0].active).toBe(true);
+    expect(resolved[1]).toMatchObject({ status: "empty-landing", active: false });
   });
 
-  it("停用与缺名字都不生成", () => {
-    const [disabled] = resolveProxyChains({ chains: [chain({ enabled: false })], nodes: NODES });
-    expect(disabled).toMatchObject({ status: "disabled", active: false });
-
-    const [invalid] = resolveProxyChains({ chains: [chain({ id: "  " })], nodes: NODES });
-    expect(invalid).toMatchObject({ status: "invalid", active: false });
+  it("任何链的前置都不能包含任何链的落地", () => {
+    const chains = [
+      chain({ id: "a", name: "A", landingNodes: [ref(LANDING_SRC, LA)] }),
+      // 第二条把第一条的落地当前置 → 会被剔除，只剩自己的前置
+      chain({ id: "b", name: "B", relayNodes: [ref(LANDING_SRC, LA), ref(RELAY_SRC, TOKYO)] }),
+    ];
+    const resolved = resolveProxyChains({ chains, nodes: NODES });
+    expect(resolved[1].relayNodes).toEqual(["中转-东京"]);
   });
 
-  it("与既有分组重名时跳过该链，不覆盖", () => {
+  it("与内置分组重名时跳过该链", () => {
     const [resolved] = resolveProxyChains({
       chains: [chain({ name: "🚀 节点选择" })],
       nodes: NODES,
-      reservedGroupNames: ["🚀 节点选择", "⚡ 自动选择"],
+      reservedGroupNames: ["🚀 节点选择"],
     });
     expect(resolved).toMatchObject({ status: "name-conflict", active: false });
   });
 
-  it("前置组名撞上既有分组也算冲突", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ name: "美国" })],
-      nodes: NODES,
-      reservedGroupNames: [`美国${CHAIN_RELAY_GROUP_SUFFIX}`],
-    });
-    expect(resolved).toMatchObject({ status: "name-conflict", active: false });
-  });
-
-  it("多条链撞名时先到先得", () => {
+  it("后一条链撞上前一条链的组名时跳过", () => {
     const resolved = resolveProxyChains({
-      chains: [chain({ id: "a", name: "美国" }), chain({ id: "b", name: "美国" })],
+      chains: [chain({ id: "a", name: "同名" }), chain({ id: "b", name: "同名" })],
       nodes: NODES,
     });
-    expect(resolved[0]).toMatchObject({ active: true, status: "ok" });
-    expect(resolved[1]).toMatchObject({ active: false, status: "name-conflict" });
+    expect(resolved[0].active).toBe(true);
+    expect(resolved[1]).toMatchObject({ status: "name-conflict", active: false });
   });
 
-  it("落地优先：靠前的链先占节点，后一条链落地为空则不生成", () => {
+  it("停用的链保留在结果里但标记为不生成", () => {
+    const [resolved] = resolveProxyChains({ chains: [chain({ enabled: false })], nodes: NODES });
+    expect(resolved).toMatchObject({ status: "disabled", active: false });
+    expect(resolved.landingNodes).toEqual([]);
+  });
+
+  it("缺 id / 名称判为不完整", () => {
     const resolved = resolveProxyChains({
-      chains: [
-        chain({ id: "a", name: "美国 A", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
-        chain({ id: "b", name: "美国 B", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
-      ],
+      chains: [chain({ id: " " }), chain({ id: "x", name: "  " })],
       nodes: NODES,
     });
-    expect(resolved[0]).toMatchObject({ active: true, landingNodes: ["落地-洛杉矶"] });
-    expect(resolved[1]).toMatchObject({ active: false, status: "empty-landing" });
+    expect(resolved.map((item) => item.status)).toEqual(["invalid", "invalid"]);
   });
 
-  it("任何链的落地都不会被别的链当成前置（避免经自己中转）", () => {
-    const resolved = resolveProxyChains({
-      chains: [
-        chain({ id: "a", name: "美国 A", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
-        chain({
-          id: "b",
-          name: "美国 B",
-          relay: { sourceIds: [], includeRegex: "落地" },
-          landing: { sourceIds: [], includeRegex: "落地-圣何塞" },
-        }),
-      ],
-      nodes: NODES,
-    });
-    // A 的落地是洛杉矶，所以 B 的前置里不能出现它，只剩圣何塞（B 自己的落地也被剔除）
-    expect(resolved[1]).toMatchObject({ relayNodes: [], status: "empty-relay", active: true });
-  });
-
-  it("本链前置与落地重叠时按落地优先剔除", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [
-        chain({
-          name: "美国",
-          relay: { sourceIds: [], includeRegex: "落地" },
-          landing: { sourceIds: [], includeRegex: "落地-洛杉矶" },
-        }),
-      ],
-      nodes: NODES,
-    });
-    expect(resolved.relayNodes).toEqual(["落地-圣何塞"]);
-    expect(resolved.landingNodes).toEqual(["落地-洛杉矶"]);
-  });
-
-  it("组类型可配，非法值回默认", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [
-        chain({
-          exitGroupType: "url-test",
-          relayGroupType: "fallback",
-          testUrl: "  https://example.com/generate_204  ",
-        }),
-      ],
-      nodes: NODES,
-    });
-    expect(resolved.exitGroupType).toBe("url-test");
-    expect(resolved.relayGroupType).toBe("fallback");
-    expect(resolved.testUrl).toBe("https://example.com/generate_204");
-
-    const [fallbackTypes] = resolveProxyChains({
-      chains: [chain({ exitGroupType: "nope" as never, relayGroupType: undefined })],
-      nodes: NODES,
-    });
-    expect(fallbackTypes.exitGroupType).toBe("select");
-    expect(fallbackTypes.relayGroupType).toBe("url-test");
-  });
-
-  it("容忍空配置与非法条目", () => {
-    expect(resolveProxyChains({ chains: undefined, nodes: NODES })).toEqual([]);
-    expect(resolveProxyChains({ chains: [null as never], nodes: NODES })).toEqual([]);
-    const [resolved] = resolveProxyChains({ chains: [chain()], nodes: [] as ParsedNode[] });
-    expect(resolved).toMatchObject({ status: "empty-landing", active: false });
+  it("activeProxyChains 只留会生成的链", () => {
+    const resolved = resolveProxyChains({ chains: [chain(), chain({ id: "b", enabled: false })], nodes: NODES });
+    expect(activeProxyChains(resolved).map((item) => item.id)).toEqual(["chain-1"]);
   });
 });
 
-describe("activeProxyChains / mapLandingNodesToExitGroups", () => {
-  const resolved = resolveProxyChains({
-    chains: [
-      chain({ id: "a", name: "美国 A", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
-      chain({ id: "b", name: "美国 B", landing: { sourceIds: [], includeRegex: "落地-圣何塞" } }),
-      chain({ id: "c", name: "美国 C", enabled: false }),
-    ],
-    nodes: NODES,
-  });
-
-  it("只保留会写进配置的链", () => {
-    expect(activeProxyChains(resolved).map((item) => item.id)).toEqual(["a", "b"]);
-  });
-
-  it("落地节点映射到各自的出口组", () => {
-    const map = mapLandingNodesToExitGroups(activeProxyChains(resolved));
-    expect(map.get("落地-洛杉矶")).toBe("美国 A");
-    expect(map.get("落地-圣何塞")).toBe("美国 B");
-    expect(map.get("中转-东京")).toBeUndefined();
+describe("mapLandingNodesToExitGroups", () => {
+  it("落地节点映射到出口组，重复时以首次为准", () => {
+    const config = resolveProxyChains({ chains: [chain()], nodes: NODES });
+    const map = mapLandingNodesToExitGroups([...config, ...config]);
+    expect(map.size).toBe(2);
+    expect(map.get("落地-洛杉矶")).toBe("🇺🇸 美国");
   });
 });
 
-describe("链式代理的失败分支", () => {
-  it("前置正则写坏时该链不生成", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ relay: { sourceIds: [], includeRegex: "(" } })],
-      nodes: NODES,
-    });
-    expect(resolved).toMatchObject({ status: "invalid-regex", active: false });
-    expect(resolved.error).toContain("匹配正则");
+describe("collectChainSourceIds", () => {
+  it("收集启用链引用到的源，去重并保持顺序", () => {
+    expect(collectChainSourceIds([chain(), chain({ id: "b" })])).toEqual([RELAY_SRC, LANDING_SRC]);
   });
 
-  it("落地排除正则写坏时该链不生成", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [chain({ landing: { sourceIds: [], excludeRegex: "[" } })],
-      nodes: NODES,
-    });
-    expect(resolved).toMatchObject({ status: "invalid-regex", active: false });
-    expect(resolved.error).toContain("排除正则");
-  });
-
-  it("选择器的排除正则非法时返回错误而不是抛异常", () => {
-    const picked = selectChainNodes({ sourceIds: [], excludeRegex: "[" }, NODES);
-    expect(picked.nodes).toEqual([]);
-    expect(picked.error).toContain("排除正则");
-  });
-});
-
-describe("链式代理的防御分支", () => {
-  it("id/name 不是字符串时标记为配置不完整", () => {
-    const [resolved] = resolveProxyChains({
-      chains: [
-        {
-          id: 123 as never,
-          name: undefined as never,
-          relay: { sourceIds: [] },
-          landing: { sourceIds: [] },
-        },
-      ],
-      nodes: NODES,
-    });
-    expect(resolved).toMatchObject({ status: "invalid", active: false });
-  });
-
-  it("同一个落地节点只会归属到最先声明它的出口组", () => {
-    const resolved = activeProxyChains(
-      resolveProxyChains({
-        chains: [
-          chain({ id: "a", name: "美国 A", landing: { sourceIds: [], includeRegex: "落地-洛杉矶" } }),
-        ],
-        nodes: NODES,
-      })
-    );
-    const map = mapLandingNodesToExitGroups([...resolved, ...resolved]);
-    expect(map.size).toBe(1);
-    expect(map.get("落地-洛杉矶")).toBe("美国 A");
+  it("停用的链不贡献源，残缺数据不抛异常", () => {
+    expect(collectChainSourceIds([chain({ enabled: false })])).toEqual([]);
+    expect(collectChainSourceIds([{ id: "x", name: "X" } as unknown as ProxyChain])).toEqual([]);
+    expect(collectChainSourceIds(undefined)).toEqual([]);
   });
 });

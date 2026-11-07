@@ -298,6 +298,93 @@ describe("PATCH /api/subscriptions/:id", () => {
     );
     expect(missing.status).toBe(404);
   });
+
+  it("validates the new name and 404s for missing subscriptions", async () => {
+    const h = createHarness();
+    const created = await createSubscription(h);
+
+    const badName = await route(
+      apiRequest(`/api/subscriptions/${created.id}`, { method: "PATCH", body: JSON.stringify({ name: " " }) }),
+      h.env,
+      h.deps
+    );
+    expect(badName.status).toBe(400);
+
+    const missing = await route(
+      apiRequest("/api/subscriptions/ghost", { method: "PATCH", body: JSON.stringify({ name: "x" }) }),
+      h.env,
+      h.deps
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("saves chain ids and drops the cache when they change", async () => {
+    const h = createHarness();
+    const created = await createSubscription(h);
+    await h.store.putConfig({
+      proxyChains: [{ id: "chain-1", name: "演示链", relayNodes: [], landingNodes: [] }],
+    });
+
+    const response = await route(
+      apiRequest(`/api/subscriptions/${created.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chainIds: ["chain-1", "chain-1"] }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { subscription: { chainIds: string[] } };
+    // 去重后落库
+    expect(body.subscription.chainIds).toEqual(["chain-1"]);
+    await expect(h.store.getCache(created.id)).resolves.toBeNull();
+  });
+
+  it("rejects unknown chain ids with a hint to refresh", async () => {
+    const h = createHarness();
+    const created = await createSubscription(h);
+    const response = await route(
+      apiRequest(`/api/subscriptions/${created.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ chainIds: ["ghost-chain"] }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toContain("ghost-chain");
+    expect(body.error).toContain("链可能已被删除");
+  });
+
+  it("creates a subscription with chain ids and rejects a non-array", async () => {
+    const h = createHarness();
+    await h.store.putConfig({
+      proxyChains: [{ id: "chain-1", name: "演示链", relayNodes: [], landingNodes: [] }],
+    });
+
+    const ok = await route(
+      apiRequest("/api/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({ name: "带链订阅", sourceIds: [], chainIds: ["chain-1"] }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(ok.status).toBe(201);
+    const body = (await ok.json()) as { subscription: { chainIds: string[] } };
+    expect(body.subscription.chainIds).toEqual(["chain-1"]);
+
+    const bad = await route(
+      apiRequest("/api/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({ name: "坏链", sourceIds: [], chainIds: "chain-1" }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(bad.status).toBe(400);
+  });
 });
 
 describe("GET /api/dashboard", () => {

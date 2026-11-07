@@ -3,11 +3,11 @@ import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogHost } from "@subboost/ui/components/ui/confirm-dialog";
-import type { ConfigPreviewChain, SourceDto } from "../lib/types";
+import type { ConfigPreviewChain, SourceDto, SourceNodesResponse } from "../lib/types";
 import { ConfigChainsSection, type ConfigChainsSectionProps } from "./config-chains-section";
 
 /**
- * 链式代理子页的交互测试：新建、删除确认、启停与状态文案都活在事件和预览数据里，
+ * 链式代理子页的交互测试：选源 → 挑节点、新建、删除确认、启停与状态文案都活在事件和预览数据里，
  * 静态渲染跑不到，这里用 jsdom 真跑一遍。
  */
 
@@ -33,16 +33,46 @@ const SOURCES: SourceDto[] = [
 
 const CONFIG: Record<string, unknown> = {
   proxyChains: [
-    { id: "c1", name: "落地美国", relay: { sourceIds: ["s1"] }, landing: { sourceIds: [] } },
+    {
+      id: "c1",
+      name: "落地美国",
+      relayNodes: [{ sourceId: "s1", nodeKey: "key-relay" }],
+      landingNodes: [],
+    },
     {
       id: "c2",
       name: "落地日本",
       enabled: false,
-      relay: { sourceIds: [] },
-      landing: { sourceIds: [] },
+      relayNodes: [],
+      landingNodes: [],
     },
   ],
 };
+
+function nodesResponse(sourceId: string, name: string, keys: string[]): SourceNodesResponse {
+  return {
+    source: { id: sourceId, name, kind: "manual", enabled: true, nodeRenames: {} },
+    fetchedAt: "2026-10-01T00:00:00.000Z",
+    nodeCount: keys.length,
+    renamedCount: 0,
+    nodes: keys.map((key) => ({
+      key,
+      name: `节点 ${key}`,
+      originName: `原 ${key}`,
+      type: "ss",
+      server: "192.0.2.10",
+      port: 8388,
+      renamed: false,
+    })),
+    parseErrors: [],
+  };
+}
+
+/** 默认的节点来源：s1 里有两个节点，key-relay 是已选前置 */
+const defaultLoadNodes = async (sourceId: string): Promise<SourceNodesResponse> =>
+  sourceId === "s1"
+    ? nodesResponse("s1", "示例源 A", ["key-relay", "key-landing"])
+    : nodesResponse(sourceId, "示例源 B（已停用）", ["key-b"]);
 
 function previewChain(overrides: Partial<ConfigPreviewChain> & { id: string }): ConfigPreviewChain {
   return {
@@ -53,6 +83,7 @@ function previewChain(overrides: Partial<ConfigPreviewChain> & { id: string }): 
     landingCount: 0,
     status: "ok",
     active: true,
+    missingRefs: 0,
     ...overrides,
   };
 }
@@ -67,6 +98,7 @@ function renderSection(overrides: Partial<ConfigChainsSectionProps> = {}) {
     config: CONFIG,
     sources: SOURCES,
     previewChains: PREVIEW_CHAINS,
+    onLoadNodes: defaultLoadNodes,
     onChange: () => {},
     ...overrides,
   };
@@ -92,6 +124,11 @@ function expandCard(card: HTMLElement) {
   fireEvent.click(within(card).getByRole("button", { name: /^展开 /u }));
 }
 
+/** 找到某条链的某一侧面板 */
+function sidePanel(card: HTMLElement, side: "① 前置（中转节点）" | "② 落地（最终出口的节点）") {
+  return within(within(card).getByRole("region", { name: side }));
+}
+
 describe("折叠", () => {
   it("默认全部收起，只渲染摘要行与常驻状态，不挂载三分栏", () => {
     const { container } = renderSection();
@@ -106,12 +143,12 @@ describe("折叠", () => {
   it("点摘要行展开同一条，再点收起；摘要行在两种状态下是同一个节点", async () => {
     const { container } = renderSection();
     const card = cards(container)[0];
-    const summary = within(card).getByRole("button", { name: "落地美国" });
+    const summary = within(card).getByRole("button", { name: /^落地美国/u });
 
     fireEvent.click(summary);
     expect(within(card).getByRole("region", { name: "① 前置（中转节点）" })).toBeTruthy();
     // 链名输入框放在正文里，摘要行不被替换：开合时摘要行高度不跳
-    expect(within(card).getByRole("button", { name: "落地美国" })).toBe(summary);
+    expect(within(card).getByRole("button", { name: /^落地美国/u })).toBe(summary);
     expect(summary.getAttribute("aria-expanded")).toBe("true");
     expect(summary.getAttribute("aria-controls")).toBe("chain-body-c1");
     expect(within(card).getByRole("button", { name: "收起 落地美国" }).getAttribute("aria-expanded")).toBe("true");
@@ -137,7 +174,7 @@ describe("折叠", () => {
 
   it("摘要行可用键盘 Enter 与空格展开", () => {
     const { container } = renderSection();
-    const summary = within(cards(container)[0]).getByRole("button", { name: "落地美国" });
+    const summary = within(cards(container)[0]).getByRole("button", { name: /^落地美国/u });
 
     fireEvent.keyDown(summary, { key: "Enter" });
     expect(within(cards(container)[0]).getByRole("button", { name: "收起 落地美国" })).toBeTruthy();
@@ -150,14 +187,14 @@ describe("折叠", () => {
     const { container } = renderSection();
     const card = cards(container)[0];
 
-    expect(within(card).queryByLabelText("链名")).toBeNull();
+    expect(within(card).queryByLabelText(/^链名/u)).toBeNull();
     expandCard(card);
-    expect(within(card).getByLabelText("链名")).toBeTruthy();
+    expect(within(card).getByLabelText(/^链名/u)).toBeTruthy();
   });
 
   it("链名留空时，收起的卡片也在状态行里提示", () => {
     const { container } = renderSection({
-      config: { proxyChains: [{ id: "c1", name: "", relay: { sourceIds: [] }, landing: { sourceIds: [] } }] },
+      config: { proxyChains: [{ id: "c1", name: "", relayNodes: [], landingNodes: [] }] },
       previewChains: undefined,
     });
     const card = cards(container)[0];
@@ -166,7 +203,7 @@ describe("折叠", () => {
     // 展开后错误跟着输入框走，状态行里不再重复
     expandCard(card);
     expect(within(card).getByRole("status").textContent).not.toContain("请填写链名");
-    expect(within(card).getByLabelText("链名").getAttribute("aria-invalid")).toBe("true");
+    expect(within(card).getByLabelText(/^链名/u).getAttribute("aria-invalid")).toBe("true");
   });
 });
 
@@ -174,7 +211,9 @@ describe("排序", () => {
   /** 带状态的外壳：挪动要真的写回 config 才会重排 */
   function StatefulSection() {
     const [config, setConfig] = React.useState<Record<string, unknown>>(CONFIG);
-    return <ConfigChainsSection config={config} sources={SOURCES} onChange={setConfig} />;
+    return (
+      <ConfigChainsSection config={config} sources={SOURCES} onLoadNodes={defaultLoadNodes} onChange={setConfig} />
+    );
   }
 
   it("挪动后焦点留在这张卡片上；挪到底时交给反方向的按钮", async () => {
@@ -201,8 +240,14 @@ describe("链卡片渲染", () => {
     expect(first.getByRole("status").textContent).toContain("正常");
     expect(first.getByRole("status").textContent).toContain("前置 3 个节点 · 落地 2 个节点");
     expect(second.getByRole("status").textContent).toContain("已停用");
-    // 停用那条链没有被预览计数以外的东西污染：计数照样显示 0
     expect(second.getByRole("status").textContent).toContain("前置 0 个节点 · 落地 0 个节点");
+  });
+
+  it("摘要行按「一个节点」呈现：链路标记与前置→落地计数", () => {
+    const { container } = renderSection();
+    const card = cards(container)[0];
+    // 链名与前缀计数都在摘要行里
+    expect(card.textContent).toContain("前置 1 → 落地 0");
   });
 
   it("三段结构：前置 / 落地 / 出口组各一段", () => {
@@ -215,16 +260,36 @@ describe("链卡片渲染", () => {
     expect(card.getByPlaceholderText("留空使用全局测速地址")).toBeTruthy();
   });
 
-  it("选择器解释「一个源都不选 = 全部已启用源」，并且只列已启用的源", () => {
+  it("先选源再挑节点：源按钮可切换，只列出全部源并标注已停用", () => {
     const { container } = renderSection();
-    const rendered = cards(container)[0];
-    expandCard(rendered);
-    const card = within(rendered);
-    const relay = within(card.getByRole("region", { name: "① 前置（中转节点）" }));
-    expect(relay.getByText(/一个源都不选 = 全部已启用源/u)).toBeTruthy();
-    expect(relay.getByRole("group", { name: "前置可选的源" })).toBeTruthy();
-    expect(relay.getByRole("button", { name: "示例源 A" }).getAttribute("aria-pressed")).toBe("true");
-    expect(relay.queryByRole("button", { name: "示例源 B（已停用）" })).toBeNull();
+    expandCard(cards(container)[0]);
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
+    const group = relay.getByRole("group", { name: "前置可选的源" });
+    expect(within(group).getByRole("button", { name: /示例源 A/u })).toBeTruthy();
+    // 已停用的源也能选：链可能引用停用源的节点
+    expect(within(group).getByRole("button", { name: /示例源 B/u })).toBeTruthy();
+    // 已选前置的源默认是被选中的
+    expect(within(group).getByRole("button", { name: /示例源 A/u }).getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("已选节点以 chips 展示，引用失效时给出可读提示", async () => {
+    const { container } = renderSection();
+    expandCard(cards(container)[0]);
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
+    // key-relay 能解析到真实节点名：chip 与列表项共用展示名，所以出现两次
+    await waitFor(() => expect(relay.getAllByText("节点 key-relay")).toHaveLength(2));
+  });
+
+  it("引用解析不到时 chip 变成「引用已失效」并计数", async () => {
+    // 读取到的节点列表里没有 key-relay，chip 就只能显示失效态
+    const onlyOther = async (sourceId: string): Promise<SourceNodesResponse> =>
+      nodesResponse(sourceId, "示例源 A", ["key-other"]);
+    const { container } = renderSection({ onLoadNodes: onlyOther });
+    expandCard(cards(container)[0]);
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
+    await waitFor(() => expect(relay.getByText("引用已失效")).toBeTruthy());
+    expect(relay.getByText(/1 个引用已失效/u)).toBeTruthy();
+    expect(relay.getByRole("button", { name: "移除 已失效节点" })).toBeTruthy();
   });
 
   it("旧中转组有数据时只读展示，标题说明要在高级 JSON 里改", () => {
@@ -260,12 +325,89 @@ describe("编辑操作", () => {
     expect(chains).toHaveLength(3);
     // 默认名取没被占用的最小序号：已有两条链但没占用「链式代理 N」
     expect(chains[2].name).toBe("链式代理 1");
-    expect(chains[2].relay).toEqual({ sourceIds: [] });
-    expect(chains[2].landing).toEqual({ sourceIds: [] });
+    expect(chains[2].relayNodes).toEqual([]);
+    expect(chains[2].landingNodes).toEqual([]);
     // 默认值不落盘
     expect("enabled" in chains[2]).toBe(false);
     expect("exitGroupType" in chains[2]).toBe(false);
     expect(new Set(chains.map((chain) => chain.id)).size).toBe(3);
+  });
+
+  /** 带状态的外壳：点击要真的写回 config 才会重渲染 */
+  function StatefulSection({ onChange }: { onChange?: (next: Record<string, unknown>) => void }) {
+    const [config, setConfig] = React.useState<Record<string, unknown>>(CONFIG);
+    return (
+      <ConfigChainsSection
+        config={config}
+        sources={SOURCES}
+        previewChains={PREVIEW_CHAINS}
+        onLoadNodes={defaultLoadNodes}
+        onChange={(next) => {
+          setConfig(next);
+          onChange?.(next);
+        }}
+      />
+    );
+  }
+
+  it("点节点即加入该侧，再点移除", async () => {
+    const changes: Record<string, unknown>[] = [];
+    render(<StatefulSection onChange={(next) => changes.push(next)} />);
+    const card = cards(document.body)[0];
+    expandCard(card);
+    const landing = sidePanel(card, "② 落地（最终出口的节点）");
+
+    // 落地还没选源，先选示例源 A
+    fireEvent.click(landing.getByRole("button", { name: /示例源 A/u }));
+    // 按钮的可访问名由「协议 + 节点名 + 原名 + 服务器」拼成，用 /key-landing/ 宽松匹配
+    const nodeButton = await landing.findByRole("button", { name: /key-landing/u });
+    fireEvent.click(nodeButton);
+
+    const chains = (changes.at(-1)?.proxyChains ?? []) as Array<{ landingNodes: Array<{ nodeKey: string }> }>;
+    expect(chains[0].landingNodes).toEqual([{ sourceId: "s1", nodeKey: "key-landing" }]);
+
+    // 再点一次同一个列表项即移除：选完重渲染后 DOM 里还有一个 chip 的「移除 …」按钮，
+    // 用 aria-pressed 只认列表项
+    fireEvent.click(landing.getByRole("button", { name: /key-landing/u, pressed: true }));
+    const removed = (changes.at(-1)?.proxyChains ?? []) as Array<{ landingNodes: unknown[] }>;
+    expect(removed[0].landingNodes).toEqual([]);
+  });
+
+  it("同一个源的不同节点可以分别当前置和落地", async () => {
+    const changes: Record<string, unknown>[] = [];
+    const { container } = renderSection({ onChange: (next) => changes.push(next) });
+    expandCard(cards(container)[0]);
+    const card = cards(container)[0];
+    const landing = sidePanel(card, "② 落地（最终出口的节点）");
+
+    fireEvent.click(landing.getByRole("button", { name: /示例源 A/u }));
+    fireEvent.click(await landing.findByRole("button", { name: /key-landing/u }));
+
+    const chains = (changes.at(-1)?.proxyChains ?? []) as Array<{
+      relayNodes: Array<{ nodeKey: string }>;
+      landingNodes: Array<{ nodeKey: string }>;
+    }>;
+    expect(chains[0].relayNodes).toEqual([{ sourceId: "s1", nodeKey: "key-relay" }]);
+    expect(chains[0].landingNodes).toEqual([{ sourceId: "s1", nodeKey: "key-landing" }]);
+  });
+
+  it("前置可与落地重叠时给出落地优先的提示", async () => {
+    const { container } = renderSection({
+      config: {
+        proxyChains: [
+          {
+            id: "c1",
+            name: "同节点链",
+            relayNodes: [{ sourceId: "s1", nodeKey: "key-relay" }],
+            landingNodes: [{ sourceId: "s1", nodeKey: "key-relay" }],
+          },
+        ],
+      },
+      previewChains: undefined,
+    });
+    expandCard(cards(container)[0]);
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
+    await waitFor(() => expect(relay.getByText(/落地优先/u)).toBeTruthy());
   });
 
   it("启停开关按链上报", () => {
@@ -291,9 +433,7 @@ describe("编辑操作", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "删除" }));
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
-    const chains = (onChange.mock.calls[0][0] as Record<string, unknown>).proxyChains as Array<{
-      id: string;
-    }>;
+    const chains = (onChange.mock.calls[0][0] as Record<string, unknown>).proxyChains as Array<{ id: string }>;
     expect(chains.map((chain) => chain.id)).toEqual(["c2"]);
   });
 
@@ -315,18 +455,36 @@ describe("编辑操作", () => {
     expect((screen.getByRole("button", { name: "下移 落地美国" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
-  it("改链名上报整条链，非法选择器只在本地提示", () => {
+  it("改链名上报整条链", () => {
     const onChange = vi.fn();
     renderSection({ onChange });
 
     expandCard(cards(document.body)[0]);
-    const nameInputs = screen.getAllByLabelText("链名");
+    const nameInputs = screen.getAllByLabelText(/^链名/u);
     fireEvent.change(nameInputs[0], { target: { value: "落地美国 2" } });
     const chains = (onChange.mock.calls[0][0] as Record<string, unknown>).proxyChains as Array<{
       id: string;
       name: string;
     }>;
     expect(chains[0]).toMatchObject({ id: "c1", name: "落地美国 2" });
+  });
+
+  it("节点列表加载失败时可重试", async () => {
+    // 一直失败直到点重试：挂载时 effect 可能连续跑两次，用一次性 reject 会被第二次成功盖掉
+    let shouldFail = true;
+    const loadNodes = vi.fn<() => Promise<SourceNodesResponse>>(async () => {
+      if (shouldFail) throw new Error("读取节点失败");
+      return nodesResponse("s1", "示例源 A", ["key-relay"]);
+    });
+    const { container } = renderSection({ onLoadNodes: loadNodes });
+    expandCard(cards(container)[0]);
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
+
+    // 前置已选源 s1，挂载即拉节点 → 失败落在错误态
+    await waitFor(() => expect(relay.getByText("读取节点失败")).toBeTruthy());
+    shouldFail = false;
+    fireEvent.click(relay.getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(relay.getAllByText("节点 key-relay")).toHaveLength(2));
   });
 });
 
@@ -346,13 +504,7 @@ describe("状态文案", () => {
   it("前置为空与组名冲突带服务端原因", () => {
     const { container } = renderSection({
       previewChains: [
-        previewChain({
-          id: "c1",
-          status: "empty-relay",
-          relayCount: 0,
-          landingCount: 4,
-          active: true,
-        }),
+        previewChain({ id: "c1", status: "empty-relay", relayCount: 0, landingCount: 4, active: true }),
         previewChain({
           id: "c2",
           status: "name-conflict",
@@ -362,10 +514,26 @@ describe("状态文案", () => {
       ],
     });
     const [first, second] = cards(container).map((card) => within(card));
-    expect(first.getByRole("status").textContent).toContain("前置无节点，落地不可用");
+    expect(first.getByRole("status").textContent).toContain("前置无节点");
     expect(first.getByRole("status").textContent).toContain("落地 4 个节点");
     expect(second.getByRole("status").textContent).toContain("组名冲突");
     expect(second.getByText("组名「落地日本」与现有分组重复，这条链不会生成")).toBeTruthy();
+  });
+
+  it("引用失效有独立文案", () => {
+    const { container } = renderSection({
+      previewChains: [
+        previewChain({
+          id: "c1",
+          status: "missing-refs",
+          missingRefs: 2,
+          error: "2 个节点引用已失效（源被删除/停用或节点已不存在），已跳过",
+        }),
+      ],
+    });
+    const status = within(cards(container)[0]).getByRole("status");
+    expect(status.textContent).toContain("部分引用失效");
+    expect(status.textContent).toContain("2 个节点引用已失效");
   });
 
   it("没有预览数据时显示未预览", () => {
@@ -375,23 +543,14 @@ describe("状态文案", () => {
     expect(first.getByRole("status").textContent).not.toContain("个节点");
   });
 
-  it("本地校验与预览互不替代：非法正则在输入框下报错", () => {
+  it("本地校验与预览互不替代：没选落地就在状态行报错", () => {
     const { container } = renderSection({
-      config: {
-        proxyChains: [
-          {
-            id: "c1",
-            name: "落地美国",
-            relay: { sourceIds: [], includeRegex: "香港(" },
-            landing: { sourceIds: [] },
-          },
-        ],
-      },
+      config: { proxyChains: [{ id: "c1", name: "落地美国", relayNodes: [], landingNodes: [] }] },
       previewChains: [previewChain({ id: "c1" })],
     });
-    expandCard(cards(container)[0]);
     const card = within(cards(container)[0]);
-    expect(card.getByText("前置 · 匹配正则 不是有效的正则表达式")).toBeTruthy();
+    expect(card.getByRole("status").textContent).toContain("还没有选择落地节点");
+    // 预览仍然独立显示，两者互不覆盖
     expect(card.getByRole("status").textContent).toContain("正常");
   });
 
@@ -407,28 +566,21 @@ describe("状态文案", () => {
 
   it("链名撞上内置分组名时本地就报占用", () => {
     const { container } = renderSection({
-      config: { proxyChains: [{ id: "c1", name: "🚀 节点选择", relay: {}, landing: {} }] },
+      config: { proxyChains: [{ id: "c1", name: "🚀 节点选择", relayNodes: [], landingNodes: [] }] },
       previewChains: undefined,
     });
     expect(within(cards(container)[0]).getByText(/已被内置分组/)).toBeTruthy();
   });
 
-  it("勾选里的失效源会渲染成可取消的「已失效」项", () => {
+  it("芯片上的移除按钮能去掉已选节点", async () => {
     const changes: Record<string, unknown>[] = [];
-    const { container } = renderSection({
-      config: {
-        proxyChains: [{ id: "c1", name: "落地美国", relay: { sourceIds: ["gone"] }, landing: {} }],
-      },
-      onChange: (next) => changes.push(next),
-    });
+    const { container } = renderSection({ onChange: (next) => changes.push(next) });
     expandCard(cards(container)[0]);
-    const card = within(cards(container)[0]);
-    const stale = card.getByRole("button", { name: "gone（已失效）" });
-    expect(stale.getAttribute("aria-pressed")).toBe("true");
-    expect(card.getByText("勾选里有已失效的源，取消掉才按剩下这些源筛选。")).toBeTruthy();
+    const relay = sidePanel(cards(container)[0], "① 前置（中转节点）");
 
-    fireEvent.click(stale);
-    const chains = (changes.at(-1)?.proxyChains ?? []) as { relay: { sourceIds: string[] } }[];
-    expect(chains[0].relay.sourceIds).toEqual([]);
+    const remove = await relay.findByRole("button", { name: "移除 节点 key-relay" });
+    fireEvent.click(remove);
+    const chains = (changes.at(-1)?.proxyChains ?? []) as Array<{ relayNodes: unknown[] }>;
+    expect(chains[0].relayNodes).toEqual([]);
   });
 });

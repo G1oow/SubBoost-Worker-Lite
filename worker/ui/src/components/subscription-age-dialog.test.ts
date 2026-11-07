@@ -15,6 +15,7 @@ const SUBSCRIPTION: SubscriptionDto = {
   id: "sub-1",
   name: "默认订阅",
   sourceIds: [],
+  chainIds: [],
   link: "https://worker.example.com/sub/tokenvalue",
   createdAt: "2026-01-01T00:00:00.000Z",
   updatedAt: "2026-01-01T00:00:00.000Z",

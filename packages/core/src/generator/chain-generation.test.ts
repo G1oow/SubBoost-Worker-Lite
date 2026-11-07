@@ -1,25 +1,43 @@
 import { describe, expect, it } from "vitest";
 import type { ParsedNode } from "@subboost/core/types/node";
-import type { ClashConfig } from "@subboost/core/types/config";
+import type { ChainNodeRef, ClashConfig } from "@subboost/core/types/config";
+import { nodeRenameKey } from "@subboost/core/node-rename-key";
 import { generateClashConfig, generateClashYaml } from "./index";
 import { buildGenerateOptionsFromConfig } from "../subscription/config-utils";
 
-function ss(name: string, patch: Record<string, unknown> = {}): ParsedNode {
+const SRC = "src-1";
+
+/** 每个节点用不同的 server：内容指纹相同会被当成同一个节点去重，链也就分不出前置换地 */
+function ss(name: string, host = "ss.example.com", patch: Record<string, unknown> = {}): ParsedNode {
   return {
     name,
     type: "ss",
-    server: "ss.example.com",
+    server: host,
     port: 8388,
     cipher: "aes-128-gcm",
     password: "secret",
+    // 链的节点引用按 (源, 内容指纹) 解析，节点必须带源标记
+    _sourceIds: [SRC],
     ...patch,
   } as ParsedNode;
 }
 
-const NODES: ParsedNode[] = [ss("日本中转"), ss("美国落地-1"), ss("美国落地-2"), ss("香港节点")];
+const NODES: ParsedNode[] = [
+  ss("日本中转", "relay.example.com"),
+  ss("美国落地-1", "us1.example.com"),
+  ss("美国落地-2", "us2.example.com"),
+  ss("香港节点", "hk.example.com"),
+];
 
 const EXIT_GROUP = "🇺🇸 美国链";
 const RELAY_GROUP = "🇺🇸 美国链 · 前置";
+
+/** 按名字取节点引用：测试里用名字写，落成真实的内容指纹 */
+function ref(name: string, sourceId = SRC): ChainNodeRef {
+  const node = NODES.find((item) => item.name === name);
+  if (!node) throw new Error(`测试节点不存在：${name}`);
+  return { sourceId, nodeKey: nodeRenameKey(node) };
+}
 
 function generate(proxyChains: unknown[], extra: Record<string, unknown> = {}): ClashConfig {
   return generateClashConfig(
@@ -54,12 +72,11 @@ function chainEntry(patch: Record<string, unknown> = {}): Record<string, unknown
   return {
     id: "chain-us",
     name: EXIT_GROUP,
-    relay: { sourceIds: [], includeRegex: "日本中转" },
-    landing: { sourceIds: [], includeRegex: "美国落地" },
+    relayNodes: [ref("日本中转")],
+    landingNodes: [ref("美国落地-1"), ref("美国落地-2")],
     ...patch,
   };
 }
-
 function nodeByName(config: ClashConfig, name: string): Record<string, unknown> | undefined {
   return (config.proxies ?? []).find((node) => node.name === name) as unknown as
     | Record<string, unknown>
@@ -75,6 +92,8 @@ describe("链式代理生成", () => {
       proxies: ["美国落地-1", "美国落地-2"],
     });
     expect(findGroup(config, RELAY_GROUP)).toMatchObject({
+
+
       type: "url-test",
       proxies: ["日本中转"],
     });
@@ -131,7 +150,7 @@ describe("链式代理生成", () => {
 
   it("前置为空时前置组只放 REJECT，落地仍然生成", () => {
     const config = generate([
-      chainEntry({ relay: { sourceIds: [], includeRegex: "不存在的中转" } }),
+      chainEntry({ relayNodes: [] }),
     ]);
 
     expect(membersOf(config, RELAY_GROUP)).toEqual(["REJECT"]);
@@ -141,7 +160,7 @@ describe("链式代理生成", () => {
 
   it("落地为空时整条链不生成，节点仍在分组里可用", () => {
     const config = generate([
-      chainEntry({ landing: { sourceIds: [], includeRegex: "不存在的落地" } }),
+      chainEntry({ landingNodes: [{ sourceId: SRC, nodeKey: "0000000000000000" }] }),
     ]);
 
     expect(findGroup(config, EXIT_GROUP)).toBeUndefined();
@@ -180,7 +199,7 @@ describe("链式代理生成", () => {
       chainEntry({
         id: "chain-second",
         name: "🇺🇸 美国链二",
-        landing: { sourceIds: [], includeRegex: "美国落地-1" },
+        landingNodes: [ref("美国落地-1")],
       }),
     ]);
 
