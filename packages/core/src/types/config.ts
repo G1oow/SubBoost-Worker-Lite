@@ -309,30 +309,45 @@ export interface CustomProxyGroup {
 }
 
 /**
- * 链式代理的节点选择器：先按源限定范围，再按节点名跑 include/exclude 正则。
+ * 链式代理的节点引用：源 + 节点内容指纹。
  *
- * `sourceIds` 为空表示全部已启用源；正则为空表示不限制。
+ * `nodeKey` 是节点内容指纹（`nodeRenameKey`，忽略名称），所以：
+ * - 节点改名后引用仍然有效；
+ * - 同一个源里的不同节点可以分别当「前置」和「落地」（一条链可以是同源两跳）；
+ * - 带上 `sourceId` 后，跨源同名节点不会撞在一起。
  */
-export interface ChainSelector {
-  sourceIds: string[];
-  includeRegex?: string;
-  excludeRegex?: string;
+export interface ChainNodeRef {
+  sourceId: string;
+  nodeKey: string;
+}
+
+/** 每条链的前置/落地各自的节点上限：够用，也不会把配置撑爆 */
+export const MAX_CHAIN_NODES = 64;
+
+export function isChainNodeRef(value: unknown): value is ChainNodeRef {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const item = value as Record<string, unknown>;
+  return typeof item.sourceId === "string" && Boolean(item.sourceId.trim()) && typeof item.nodeKey === "string" && Boolean(item.nodeKey.trim());
 }
 
 /**
- * 链式代理：严格两跳（前置 → 落地）。
+ * 链式代理：严格两跳（前置 → 落地），节点按引用精确选择。
  *
  * 每条启用的链生成两个组：出口组（名字即 `name`，默认 select，成员是落地节点）
- * 与前置组（`${name} · 前置`，默认 url-test，成员是前置节点）。落地节点的
- * `dialer-proxy` 指向前置组，因此流量按「落地节点 → 前置节点 → 目标」两跳出去。
+ * 与前置组（`${name} · 前置`，成员是前置节点）。落地节点的 `dialer-proxy` 指向前置组，
+ * 因此流量按「落地节点 → 前置节点 → 目标」两跳出去。
+ *
+ * 链本身在订阅里当作一个「源」：只有把链勾进订阅，该订阅才会生成它。
  */
 export interface ProxyChain {
   id: string;
-  /** 出口组名；前置组名自动派生为 `${name} · 前置` */
+  /** 出口组名，同时也是它在订阅里作为源出现的名字；前置组名自动派生为 `${name} · 前置` */
   name: string;
   enabled?: boolean;
-  relay: ChainSelector;
-  landing: ChainSelector;
+  /** 前置（中转）节点，顺序即前置组成员顺序 */
+  relayNodes: ChainNodeRef[];
+  /** 落地（最终出口）节点 */
+  landingNodes: ChainNodeRef[];
   /** 出口组类型，默认 select */
   exitGroupType?: ProxyGroupGroupType;
   /** 前置组类型，默认 url-test */
