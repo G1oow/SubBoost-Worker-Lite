@@ -281,7 +281,34 @@ describe("resolveProxyChains", () => {
     const resolved = resolveProxyChains({ chains: [chain(), chain({ id: "b", enabled: false })], nodes: NODES });
     expect(activeProxyChains(resolved).map((item) => item.id)).toEqual(["chain-1"]);
   });
+
+  it("容忍空配置与非法条目", () => {
+    expect(resolveProxyChains({ chains: undefined, nodes: NODES })).toEqual([]);
+    expect(resolveProxyChains({ chains: [null as never, 3 as never], nodes: NODES })).toEqual([]);
+    // 节点为空时落地一律失效，整条链不生成
+    const [resolved] = resolveProxyChains({ chains: [chain()], nodes: [] });
+    expect(resolved).toMatchObject({ status: "empty-landing", active: false });
+  });
+
+  it("id/name 不是字符串时判为不完整", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [{ id: 1, name: 2, relayNodes: [], landingNodes: [] } as never],
+      nodes: NODES,
+    });
+    expect(resolved).toMatchObject({ status: "invalid", active: false });
+    expect(resolved.id).toBe("");
+  });
+
+  it("组类型非法时回落到默认值", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [chain({ exitGroupType: "nope" as never, relayGroupType: "nope" as never })],
+      nodes: NODES,
+    });
+    expect(resolved.exitGroupType).toBe("select");
+    expect(resolved.relayGroupType).toBe("url-test");
+  });
 });
+
 
 describe("mapLandingNodesToExitGroups", () => {
   it("落地节点映射到出口组，重复时以首次为准", () => {
@@ -301,5 +328,9 @@ describe("collectChainSourceIds", () => {
     expect(collectChainSourceIds([chain({ enabled: false })])).toEqual([]);
     expect(collectChainSourceIds([{ id: "x", name: "X" } as unknown as ProxyChain])).toEqual([]);
     expect(collectChainSourceIds(undefined)).toEqual([]);
+  });
+
+  it("非对象条目直接跳过", () => {
+    expect(collectChainSourceIds([null as never])).toEqual([]);
   });
 });
