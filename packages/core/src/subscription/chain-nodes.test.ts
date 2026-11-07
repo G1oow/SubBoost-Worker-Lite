@@ -116,6 +116,25 @@ describe("resolveChainNodes", () => {
     expect(picked.relay).toEqual([]);
     expect(picked.landing).toEqual([]);
   });
+
+  it("同一源里出现两个同内容节点时两个都记进索引", () => {
+    // 生成前会去重，但直接调用解析时可能拿到重复内容：第二个走 byRef 的追加分支
+    const dup = ss("relay-1.example.com", "中转-东京（重复）", [RELAY_SRC]);
+    const picked = resolveChainNodes({ relayNodes: [ref(RELAY_SRC, TOKYO)], landingNodes: [] }, [TOKYO, dup]);
+    expect(picked.relay).toEqual(["中转-东京"]);
+    expect(picked.issues).toEqual([]);
+  });
+
+  it("节点指纹算不出来时跳过该节点而不是抛异常", () => {
+    // BigInt 会让 JSON.stringify 抛错，走的是 nodeRenameKey 的 catch 分支
+    const weird = { name: "怪节点", type: "ss", server: "bigint.example.com", extra: 1n } as unknown as ParsedNode;
+    const picked = resolveChainNodes(
+      { relayNodes: [{ sourceId: RELAY_SRC, nodeKey: "0123456789abcdef" }], landingNodes: [] },
+      [weird, TOKYO]
+    );
+    expect(picked.relay).toEqual([]);
+    expect(picked.issues).toHaveLength(1);
+  });
 });
 
 describe("resolveProxyChains", () => {
@@ -136,10 +155,29 @@ describe("resolveProxyChains", () => {
     });
   });
 
+
   it("链名首尾空白被裁掉，前置组名由链名派生", () => {
     const [resolved] = resolveProxyChains({ chains: [chain({ name: "  美国  " })], nodes: NODES });
     expect(resolved.exitGroupName).toBe("美国");
     expect(resolved.relayGroupName).toBe(chainRelayGroupName("美国"));
+  });
+
+  it("前置部分失效时也标为 missing-refs 并单独说明", () => {
+    const [resolved] = resolveProxyChains({
+      chains: [
+        chain({
+          relayNodes: [ref(RELAY_SRC, TOKYO), { sourceId: RELAY_SRC, nodeKey: "0123456789abcdef" }],
+          landingNodes: [ref(LANDING_SRC, LA)],
+        }),
+      ],
+      nodes: NODES,
+    });
+    // 只有那条前置引用失效
+    expect(resolved).toMatchObject({ status: "missing-refs", active: true, missingRefs: 1 });
+    expect(resolved.relayNodes).toEqual(["中转-东京"]);
+    expect(resolved.error).toContain("前置引用已失效");
+    // 前置还有可用节点，不该同时报「只放 REJECT」
+    expect(resolved.error).not.toContain("REJECT");
   });
 
   it("没选落地节点时整条链不生成", () => {

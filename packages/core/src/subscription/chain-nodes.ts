@@ -92,7 +92,6 @@ export function resolveChainNodes(
   for (const node of nodes) {
     const name = typeof node.name === "string" ? node.name : "";
     if (!name) continue;
-    const key = `${getNodeSourceIds(node).join(",")}`;
     // 先按 (源, 指纹) 建索引：同一内容在多源里各有一份，引用必须精确到源
     let nodeKey: string;
     try {
@@ -106,7 +105,6 @@ export function resolveChainNodes(
       if (list) list.push(node);
       else byRef.set(indexKey, [node]);
     }
-    void key;
   }
 
   const availableSourceIds = new Set<string>();
@@ -242,17 +240,18 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
       continue;
     }
 
-    const selection = resolveChainNodes(chain, nodes);
-    if (selection.landing.length === 0) {
+    // 两侧分开解析：一轮里同时解析前置与落地，issues 会混在一起，第二轮再算一次就重复计数
+    const landingSelection = resolveChainNodes({ relayNodes: [], landingNodes: chain.landingNodes }, nodes);
+    if (landingSelection.landing.length === 0) {
       const reason =
-        selection.issues.length > 0
+        landingSelection.issues.length > 0
           ? "落地引用的节点（或它所在的源）已经不在了，请重新选择"
           : "还没有选择落地节点，这条链不会生成";
-      pushInactive(base, "empty-landing", reason, selection.issues.length);
+      pushInactive(base, "empty-landing", reason, landingSelection.issues.length);
       continue;
     }
     // 有落地但缺引用：可能只缺一部分，仍然可以生成，但要让用户看见
-    const landingNodes = selection.landing.filter((nodeName) => !claimedLanding.has(nodeName));
+    const landingNodes = landingSelection.landing.filter((nodeName) => !claimedLanding.has(nodeName));
     if (landingNodes.length === 0) {
       pushInactive(base, "empty-landing", "落地节点都被前面的链占用，这条链不会生成");
       continue;
@@ -263,7 +262,7 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
     reserved.add(relayGroupName);
     for (const nodeName of landingNodes) claimedLanding.add(nodeName);
 
-    const missing = selection.issues.length;
+    const missing = landingSelection.issues.length;
     drafts.push({
       resolved: {
         ...base,
@@ -271,9 +270,7 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
         status: missing > 0 ? "missing-refs" : "ok",
         active: true,
         missingRefs: missing,
-        ...(missing > 0
-          ? { error: `${missing} 个节点引用已失效（源被删除/停用或节点已不存在），已跳过` }
-          : {}),
+        ...(missing > 0 ? { error: `${missing} 个落地引用已失效，已跳过` } : {}),
       },
       relayRefs: normalizeRefs(chain.relayNodes),
     });
@@ -287,8 +284,9 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
       nodes
     );
     const relayNodes = selection.relay.filter((nodeName) => !claimedLanding.has(nodeName));
-    const missingTotal = draft.resolved.missingRefs + selection.issues.length;
-    // 前置为空只有在落地没有失效时才单列：既有失效又多前置的情况留给 missing-refs，信息更完整
+    const relayIssues = selection.issues.length;
+    const missingTotal = draft.resolved.missingRefs + relayIssues;
+    // 前置为空只有在落地没有失效时才单列：既有失效又没前置的情况留给 missing-refs，信息更完整
     const status: ProxyChainStatus =
       relayNodes.length === 0 && draft.resolved.missingRefs === 0
         ? "empty-relay"
@@ -296,12 +294,10 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
           ? "missing-refs"
           : "ok";
 
-    const errors: string[] = [];
-    if (draft.resolved.missingRefs > 0) {
-      errors.push(`${draft.resolved.missingRefs} 个落地引用已失效，已跳过`);
-    }
-    if (selection.issues.length > 0) {
-      errors.push(`${selection.issues.length} 个前置引用已失效，已跳过`);
+    // 落地那侧的错误已经在第一轮写好，这里只补前置的
+    const errors: string[] = [...(draft.resolved.error ? [draft.resolved.error] : [])];
+    if (relayIssues > 0) {
+      errors.push(`${relayIssues} 个前置引用已失效，已跳过`);
     }
     if (relayNodes.length === 0) {
       errors.push("前置没有可用节点，前置组只放 REJECT");
