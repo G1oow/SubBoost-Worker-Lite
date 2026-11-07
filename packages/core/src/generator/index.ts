@@ -19,6 +19,7 @@ import {
   buildChainDialerGroups,
   generateChainExitGroups,
   generateDialerProxyGroups,
+  stripDanglingDialerProxy,
   type ChainProxyGroupSpec,
 } from "./chain";
 import { DEFAULT_DNS_CONFIG } from "./dns";
@@ -368,7 +369,8 @@ export function generateClashConfig(
   const allNodes = dialerGroupsForNodes.length > 0
     ? applyDialerProxy(uniqueNodes, dialerGroupsForNodes)
     : uniqueNodes;
-  const validDialerProxyNames = new Set<string>([
+  // 第一道闸：先按「本可以生成」的名字集合摘掉明显无效的引用（节点已被过滤/改名）
+  const intendedDialerProxyNames = new Set<string>([
     "DIRECT",
     ...nodeNameSet,
     ...proxyProviderNames,
@@ -377,13 +379,7 @@ export function generateClashConfig(
     ...chainDialerGroups.map((g) => g.name.trim()).filter(Boolean),
     ...chainSpecs.map((spec) => spec.exitGroupName),
   ]);
-  const outputNodes = allNodes.map((node) => {
-    const record = node as unknown as Record<string, unknown>;
-    const dialerProxy = typeof record["dialer-proxy"] === "string" ? record["dialer-proxy"].trim() : "";
-    if (!dialerProxy || validDialerProxyNames.has(dialerProxy)) return node;
-    const { ["dialer-proxy"]: _dialerProxy, ...withoutDialerProxy } = record;
-    return withoutDialerProxy as unknown as ParsedNode;
-  });
+  const outputNodes = stripDanglingDialerProxy(allNodes, intendedDialerProxyNames);
 
   // 为部分节点生成 listeners（mixed inbound → 固定走指定 proxy）
   const listeners = (() => {
@@ -561,14 +557,26 @@ export function generateClashConfig(
     return nextKeys.map((key) => byKey.get(key)).filter(Boolean) as ProxyGroup[];
   })();
 
+  // 第二道闸：分组到这里才定型（可能被过滤、重名覆盖、按 proxyGroupOrder 重排），
+  // 以最终真正写进配置的 proxies / proxy-groups 名字为准再校一次，确保不会把
+  // mihomo 会拒绝的悬空 dialer-proxy 写进 YAML。
+  const finalOutputNodes = stripDanglingDialerProxy(
+    outputNodes,
+    withBuiltinPolicyTargets([
+      ...outputNodes.map((node) => node.name),
+      ...proxyGroups.map((group) => group.name),
+      ...proxyProviderNames,
+    ])
+  );
+
   const availablePolicyTargets = withBuiltinPolicyTargets([
     ...proxyGroups.map((group) => group.name),
-    ...outputNodes.filter((node) => !isSubscriptionInfoNodeName(node.name)).map((node) => node.name),
+    ...finalOutputNodes.filter((node) => !isSubscriptionInfoNodeName(node.name)).map((node) => node.name),
   ]);
   const fallbackPolicyTarget = chooseFallbackPolicyTarget(
     [
       proxyGroups[0]?.name,
-      outputNodes.find((node) => !isSubscriptionInfoNodeName(node.name))?.name,
+      finalOutputNodes.find((node) => !isSubscriptionInfoNodeName(node.name))?.name,
       "DIRECT",
     ],
     availablePolicyTargets
@@ -664,7 +672,7 @@ export function generateClashConfig(
     ...(resolvedListeners !== undefined ? { listeners: resolvedListeners } : {}),
     
     // 代理节点
-    proxies: outputNodes,
+    proxies: finalOutputNodes,
 
     ...(mergedProxyProviders !== undefined ? { "proxy-providers": mergedProxyProviders } : {}),
     
@@ -705,5 +713,6 @@ export {
   generateRuleProviders,
   generateDialerProxyGroups,
   applyDialerProxy,
+  stripDanglingDialerProxy,
   configToYaml,
 };
