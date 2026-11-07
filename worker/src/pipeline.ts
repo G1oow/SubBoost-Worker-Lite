@@ -52,8 +52,37 @@ export type GetOrGenerateResult =
   | { kind: "not-found" }
   | { kind: "no-nodes" };
 
+/**
+ * 生成行为的缓存版本。
+ *
+ * 订阅 YAML 的缓存新鲜度只由哈希决定（哈希一致就直接复用旧产物），所以生成逻辑
+ * 本身变化时不会自动失效：升级部署后客户端仍会拿到旧 YAML，表现为「代码改了，
+ * 输出的配置没变」。生成结果有任何可见变化都把这个版本 +1。
+ */
+export const GENERATOR_CACHE_VERSION = 2;
+
 export async function computeConfigHash(config: Record<string, unknown>): Promise<string> {
-  return sha256Hex(stableJsonStringify(config));
+  return sha256Hex(stableJsonStringify({ generator: GENERATOR_CACHE_VERSION, config }));
+}
+
+/**
+ * 订阅输出的缓存键：配置 + 这条订阅的源/链勾选 + 生成器版本。
+ *
+ * 只按配置算哈希会漏掉订阅级改动——勾上一条链或改选源都属于「输出变了但配置没变」，
+ * 结果是旧的 YAML 一直被复用，用户看到链不生效。
+ */
+export async function computeSubscriptionCacheHash(
+  config: Record<string, unknown>,
+  sub: Pick<StoredSubscription, "sourceIds" | "chainIds">
+): Promise<string> {
+  return sha256Hex(
+    stableJsonStringify({
+      generator: GENERATOR_CACHE_VERSION,
+      config,
+      sourceIds: [...(sub.sourceIds ?? [])].sort(),
+      chainIds: [...(sub.chainIds ?? [])].sort(),
+    })
+  );
 }
 
 /**
@@ -285,7 +314,7 @@ export async function generateSubscription(
     yaml,
     nodeCount: nodes.length,
     generatedAt: deps.now().toISOString(),
-    configHash: await computeConfigHash(config),
+    configHash: await computeSubscriptionCacheHash(config, sub),
   };
   await store.putCache(cache);
   return { kind: "ok", cache, info };
@@ -395,7 +424,7 @@ async function getOrGenerateForStored(
 ): Promise<GetOrGenerateResult> {
   const { store } = deps;
   const { config } = await store.getConfig();
-  const configHash = await computeConfigHash(config);
+  const configHash = await computeSubscriptionCacheHash(config, sub);
   const cached = await store.getCache(sub.id);
   if (cached && cached.configHash === configHash) {
     return { kind: "ok", sub, cache: cached, info: await resolveCachedInfo(deps, sub) };

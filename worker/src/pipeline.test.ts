@@ -2,6 +2,7 @@ import yaml from "js-yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   computeConfigHash,
+  computeSubscriptionCacheHash,
   generateSubscription,
   getOrGenerateSubscription,
   normalizeConfigForGeneration,
@@ -14,6 +15,8 @@ import { nodeRenameKey } from "./node-renames";
 import { MemoryKV } from "./test-utils/memory-kv";
 import type { CacheRecord } from "./types";
 import type { ParsedNode } from "@subboost/core/types/node";
+import { stableJsonStringify } from "@subboost/core/node-identity";
+import { sha256Hex } from "./crypto";
 
 const ENCRYPTION_KEY = "pipeline-test-key-0123456789";
 
@@ -60,6 +63,11 @@ async function createHarness(): Promise<Harness> {
 function proxiesFrom(yamlText: string): Array<{ name: string }> {
   const parsed = yaml.load(yamlText) as { proxies: Array<{ name: string }> };
   return parsed.proxies;
+}
+
+function groupNamesFrom(yamlText: string): string[] {
+  const parsed = yaml.load(yamlText) as { "proxy-groups"?: Array<{ name: string }> };
+  return (parsed["proxy-groups"] ?? []).map((group) => group.name);
 }
 
 describe("generateSubscription", () => {
@@ -637,8 +645,95 @@ describe("refreshAll", () => {
     if (result.kind !== "ok") return;
     expect(h.kv.expirationTtls.get(`cache:${dto.id}`)).toBe(172800);
     const { config } = await h.store.getConfig();
-    expect(result.cache.configHash).toBe(await computeConfigHash(config));
+    const stored = await h.store.findSubscriptionByToken(token);
+    expect(result.cache.configHash).toBe(await computeSubscriptionCacheHash(config, stored!));
     expect(h.kv.has(snapshotKey((await h.store.listSources())[0].id))).toBe(true);
+  });
+
+  it("勾选链后即使配置没变也会重新生成，前置组随之出现", async () => {
+    const sources = await h.store.saveSources([
+      { name: "m", kind: "manual", manualText: `${ssNode("relay", 8388)}\n${ssNode("landing", 8389)}` },
+    ]);
+    const relayNode = {
+      name: "relay",
+      type: "ss",
+      server: "example.com",
+      port: 8388,
+      cipher: "aes-256-gcm",
+      password: "x",
+    } as ParsedNode;
+    const landingNode = {
+      name: "landing",
+      type: "ss",
+      server: "example.com",
+      port: 8389,
+      cipher: "aes-256-gcm",
+      password: "x",
+    } as ParsedNode;
+    await h.store.putSnapshot({
+      sourceId: sources[0].id,
+      nodes: [relayNode, landingNode],
+      nodeCount: 2,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.putConfig({
+      enabledGroups: ["select", "auto", "final"],
+      proxyChains: [
+        {
+          id: "chain-e2e",
+          name: "跨源链",
+          relayNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(relayNode as never) }],
+          landingNodes: [{ sourceId: sources[0].id, nodeKey: nodeRenameKey(landingNode as never) }],
+        },
+      ],
+    });
+
+    const { token, dto } = await h.store.createSubscription({ name: "s", sourceIds: [], chainIds: [] });
+    const before = await getOrGenerateSubscription(h.deps, token);
+    expect(before.kind).toBe("ok");
+    if (before.kind !== "ok") return;
+    expect(groupNamesFrom(before.cache.yaml)).not.toContain("跨源链");
+
+    // 只改订阅的链勾选，配置一个字都不动
+    await h.store.updateSubscription(dto.id, { chainIds: ["chain-e2e"] }, "");
+    const after = await getOrGenerateSubscription(h.deps, token);
+    expect(after.kind).toBe("ok");
+    if (after.kind !== "ok") return;
+    expect(groupNamesFrom(after.cache.yaml)).toEqual(expect.arrayContaining(["跨源链", "跨源链 · 前置"]));
+    const landing = proxiesFrom(after.cache.yaml).find((proxy) => proxy.name === "landing") as unknown as
+      | Record<string, unknown>
+      | undefined;
+    expect(landing?.["dialer-proxy"]).toBe("跨源链 · 前置");
+  });
+
+  it("缓存哈希包含订阅勾选与生成器版本", async () => {
+    const { config } = await h.store.getConfig();
+    const base = { sourceIds: [] as string[], chainIds: [] as string[] };
+    const current = await computeSubscriptionCacheHash(config, base);
+    expect(current).toBe(await computeSubscriptionCacheHash(config, base));
+    expect(await computeSubscriptionCacheHash(config, { sourceIds: [], chainIds: ["x"] })).not.toBe(current);
+    expect(await computeSubscriptionCacheHash(config, { sourceIds: ["s"], chainIds: [] })).not.toBe(current);
+    expect(current).not.toBe(await computeConfigHash(config));
+  });
+
+  it("升级前只按配置哈希留下的旧缓存不再复用", async () => {
+    await h.store.saveSources([{ name: "m", kind: "manual", manualText: ssNode("m", 8388) }]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+    const first = await getOrGenerateSubscription(h.deps, token);
+    expect(first.kind).toBe("ok");
+    if (first.kind !== "ok") return;
+
+    // 旧口径：哈希只由 config 决定，代码升级不会让它失效
+    const { config } = await h.store.getConfig();
+    const legacyHash = await sha256Hex(stableJsonStringify(config));
+    await h.store.putCache({ ...first.cache, yaml: "legacy: true", configHash: legacyHash });
+
+    const second = await getOrGenerateSubscription(h.deps, token);
+    expect(second.kind).toBe("ok");
+    if (second.kind !== "ok") return;
+    expect(second.cache.yaml).not.toBe("legacy: true");
+    expect(second.cache.configHash).toBe(await computeSubscriptionCacheHash(config, second.sub));
   });
 });
 
