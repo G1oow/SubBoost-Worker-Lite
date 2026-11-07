@@ -202,6 +202,7 @@ export function createStore(env: Env) {
       id: stored.id,
       name: stored.name,
       sourceIds: stored.sourceIds,
+      chainIds: stored.chainIds ?? [],
       link: `${origin}/sub/${token}`,
       // 创建订阅时 origin 为空，此时不产出半截短链
       ...(stored.shortCode && origin ? { shortLink: `${origin}/s/${stored.shortCode}` } : {}),
@@ -223,6 +224,7 @@ export function createStore(env: Env) {
   async function createSubscription(input: {
     name: string;
     sourceIds: string[];
+    chainIds?: string[];
   }): Promise<{ dto: SubscriptionDto; token: string }> {
     const secret = requireEncryptionKey(env);
     const subs = await listStoredSubscriptions();
@@ -235,6 +237,7 @@ export function createStore(env: Env) {
       tokenHash,
       tokenEnc: await encryptString(token, secret),
       sourceIds: input.sourceIds,
+      chainIds: input.chainIds ?? [],
       createdAt: now,
       updatedAt: now,
     };
@@ -288,14 +291,15 @@ export function createStore(env: Env) {
   }
 
   /**
-   * 更新订阅的名称与所含源。链接与 token 保持不变，
-   * 但源集合变化会改变生成的 YAML，因此必须清掉该订阅的缓存。
+   * 更新订阅的名称、所含源与所含链。链接与 token 保持不变，
+   * 但源/链集合变化会改变生成的 YAML，因此必须清掉该订阅的缓存。
    */
   async function updateSubscription(
     id: string,
-    patch: { name?: string; sourceIds?: string[] },
+    patch: { name?: string; sourceIds?: string[]; chainIds?: string[] },
     origin: string
   ): Promise<SubscriptionDto | null> {
+
     const subs = await listStoredSubscriptions();
     const index = subs.findIndex((item) => item.id === id);
     if (index < 0) return null;
@@ -305,6 +309,7 @@ export function createStore(env: Env) {
       ...previous,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
       ...(patch.sourceIds !== undefined ? { sourceIds: patch.sourceIds } : {}),
+      ...(patch.chainIds !== undefined ? { chainIds: patch.chainIds } : {}),
       updatedAt: new Date().toISOString(),
     };
     subs[index] = updated;

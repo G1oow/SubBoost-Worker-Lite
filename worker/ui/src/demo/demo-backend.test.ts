@@ -101,8 +101,13 @@ describe("演示模式后端", () => {
     // 节点来自种子刷新后的快照：两个启用源共 6 个节点
     expect(preview.nodeCount).toBe(6);
     expect(preview.rules).toContain("DOMAIN-SUFFIX,example.org,DIRECT");
-    // 演示配置里那条链能匹配到演示节点，另一条故意匹配不到落地
-    expect(preview.chains.map((chain) => chain.status)).toEqual(["ok", "empty-landing"]);
+    // 三条演示链：同源两跳与跨源都能生成，第三条故意匹配不到落地
+    expect(preview.chains.map((chain) => chain.status)).toEqual(["ok", "ok", "empty-landing"]);
+    expect(preview.chains.map((chain) => chain.name)).toEqual([
+      "⛓ 演示本地两跳链",
+      "🇺🇸 演示跨源链",
+      "🇩🇪 演示失效链",
+    ]);
 
     const after = await readJson<AppState>(await backend.dispatch("/api/state"));
     // 演示种子写入过链式代理配置，所以不再是「默认配置」

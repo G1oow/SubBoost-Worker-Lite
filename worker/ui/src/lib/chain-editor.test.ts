@@ -1,34 +1,42 @@
 import { describe, expect, it } from "vitest";
-import { PROXY_GROUP_GROUP_TYPES, type ProxyChain } from "@subboost/core/types/config";
+import { MAX_CHAIN_NODES, PROXY_GROUP_GROUP_TYPES, type ChainNodeRef, type ProxyChain } from "@subboost/core/types/config";
 import {
   CHAIN_GROUP_TYPE_OPTIONS,
   CHAIN_STATUS_META,
   chainGroupNames,
+  chainNodesOf,
   chainStatusMeta,
-  compileChainRegex,
   createChain,
   createChainId,
+  hasChainNode,
   mergePreviewStatus,
   moveChain,
+  moveChainNode,
   nextChainName,
   patchChain,
-  patchChainSelector,
+  readChainNodeRefs,
   readChains,
   readLegacyDialerGroups,
+  refKey,
   removeChain,
+  removeChainNode,
   toggleChain,
-  toggleChainSource,
+  toggleChainNode,
   UNPREVIEWED_STATUS_META,
   validateChain,
   writeChains,
 } from "./chain-editor";
 import type { ConfigPreviewChain } from "./types";
 
+function ref(sourceId: string, nodeKey: string): ChainNodeRef {
+  return { sourceId, nodeKey };
+}
+
 function chain(overrides: Partial<ProxyChain> & { id: string; name: string }): ProxyChain {
   return {
     enabled: true,
-    relay: { sourceIds: [] },
-    landing: { sourceIds: [] },
+    relayNodes: [],
+    landingNodes: [],
     exitGroupType: "select",
     relayGroupType: "url-test",
     ...overrides,
@@ -44,9 +52,41 @@ function preview(overrides: Partial<ConfigPreviewChain> & { id: string }): Confi
     landingCount: 0,
     status: "ok",
     active: true,
+    missingRefs: 0,
     ...overrides,
   };
 }
+
+describe("读取节点引用", () => {
+  it("非数组当空，非法项丢弃", () => {
+    expect(readChainNodeRefs(undefined)).toEqual([]);
+    expect(readChainNodeRefs("oops")).toEqual([]);
+    expect(readChainNodeRefs([null, 3, "x", {}, { sourceId: "s1" }, { nodeKey: "k1" }])).toEqual([]);
+  });
+
+  it("修剪空白、按 (源, 指纹) 去重、保持顺序", () => {
+    const refs = readChainNodeRefs([
+      { sourceId: " s1 ", nodeKey: " k1 " },
+      { sourceId: "s1", nodeKey: "k1" },
+      { sourceId: "s1", nodeKey: "k2" },
+      { sourceId: "s2", nodeKey: "k1" },
+    ]);
+    expect(refs).toEqual([ref("s1", "k1"), ref("s1", "k2"), ref("s2", "k1")]);
+  });
+
+  it("同一个源里的两个节点都保留（同源两跳）", () => {
+    const refs = readChainNodeRefs([{ sourceId: "s1", nodeKey: "relay" }, { sourceId: "s1", nodeKey: "landing" }]);
+    expect(refs).toHaveLength(2);
+  });
+
+  it("每侧封顶", () => {
+    const many = Array.from({ length: MAX_CHAIN_NODES + 5 }, (_, index) => ({
+      sourceId: "s1",
+      nodeKey: `k${index}`,
+    }));
+    expect(readChainNodeRefs(many)).toHaveLength(MAX_CHAIN_NODES);
+  });
+});
 
 describe("读取 proxyChains", () => {
   it("非数组当空，不是对象的条目直接忽略", () => {
@@ -61,8 +101,10 @@ describe("读取 proxyChains", () => {
         {
           id: " a ",
           name: "  链 A  ",
-          relay: { sourceIds: ["s1", " s1 ", "", 7], includeRegex: "  ", excludeRegex: " 过期 " },
-          landing: null,
+          relayNodes: [{ sourceId: " s1 ", nodeKey: " k1 " }],
+          landingNodes: null,
+          // 旧配置残留的 relay/landing 选择器应被忽略
+          relay: { sourceIds: ["legacy"], includeRegex: "香港" },
           exitGroupType: "not-a-type",
           relayGroupType: "fallback",
           testUrl: "  https://example.com/ping  ",
@@ -75,15 +117,13 @@ describe("读取 proxyChains", () => {
         id: "a",
         name: "链 A",
         enabled: true,
-        relay: { sourceIds: ["s1"], excludeRegex: "过期" },
-        landing: { sourceIds: [] },
+        relayNodes: [ref("s1", "k1")],
+        landingNodes: [],
         exitGroupType: "select",
         relayGroupType: "fallback",
         testUrl: "https://example.com/ping",
       },
     ]);
-    // 空正则不落字段：写回时也不会凭空多出 includeRegex: ""
-    expect("includeRegex" in chains[0].relay).toBe(false);
   });
 
   it("缺 id 补兜底 id，重复 id 自动加后缀", () => {
@@ -108,34 +148,24 @@ describe("写回 proxyChains", () => {
     expect(writeChains({ template: "standard" }, [])).toEqual({ template: "standard" });
   });
 
-  it("默认值不落盘：启用、默认组类型、空正则与空测速地址都不写", () => {
+  it("默认值不落盘：启用、默认组类型、空测速地址都不写", () => {
     const next = writeChains({}, [chain({ id: "a", name: " 链 A " })]);
-    expect(next.proxyChains).toEqual([
-      {
-        id: "a",
-        name: "链 A",
-        relay: { sourceIds: [] },
-        landing: { sourceIds: [] },
-      },
-    ]);
+    expect(next.proxyChains).toEqual([{ id: "a", name: "链 A", relayNodes: [], landingNodes: [] }]);
   });
 
-  it("非默认值才落盘，其余配置字段原样保留", () => {
-    const next = writeChains(
-      { mixedPort: 7890, dialerProxyGroups: [{ id: "d", name: "旧中转" }] },
-      [
-        chain({
-          id: "a",
-          name: "链 A",
-          enabled: false,
-          relay: { sourceIds: ["s1"], includeRegex: " 香港 " },
-          landing: { sourceIds: [], excludeRegex: "过期" },
-          exitGroupType: "url-test",
-          relayGroupType: "select",
-          testUrl: " https://example.com/ping ",
-        }),
-      ]
-    );
+  it("非默认值才落盘，节点引用原样保存，其余配置字段保留", () => {
+    const next = writeChains({ mixedPort: 7890, dialerProxyGroups: [{ id: "d", name: "旧中转" }] }, [
+      chain({
+        id: "a",
+        name: "链 A",
+        enabled: false,
+        relayNodes: [ref("s1", "k1")],
+        landingNodes: [ref("s1", "k2"), ref("s2", "k3")],
+        exitGroupType: "url-test",
+        relayGroupType: "select",
+        testUrl: " https://example.com/ping ",
+      }),
+    ]);
 
     expect(next.mixedPort).toBe(7890);
     expect(next.dialerProxyGroups).toEqual([{ id: "d", name: "旧中转" }]);
@@ -144,8 +174,8 @@ describe("写回 proxyChains", () => {
         id: "a",
         name: "链 A",
         enabled: false,
-        relay: { sourceIds: ["s1"], includeRegex: "香港" },
-        landing: { sourceIds: [], excludeRegex: "过期" },
+        relayNodes: [ref("s1", "k1")],
+        landingNodes: [ref("s1", "k2"), ref("s2", "k3")],
         exitGroupType: "url-test",
         relayGroupType: "select",
         testUrl: "https://example.com/ping",
@@ -154,7 +184,7 @@ describe("写回 proxyChains", () => {
   });
 
   it("读写一个残缺配置后再也不会丢掉以外的字段", () => {
-    const config = { proxyChains: [{ id: "a", name: "A" }, { name: "", relay: {} }] };
+    const config = { proxyChains: [{ id: "a", name: "A" }, { name: "" }] };
     const roundTrip = readChains(writeChains(config, readChains(config)));
     expect(roundTrip.map((item) => item.id)).toEqual(["a", "chain-2"]);
   });
@@ -164,7 +194,6 @@ describe("新建链", () => {
   it("默认名取当前未占用的最小序号", () => {
     expect(nextChainName([])).toBe("链式代理 1");
     expect(nextChainName([chain({ id: "a", name: "链式代理 1" })])).toBe("链式代理 2");
-    // 2 被占了但 1 没有：仍然取最小的空位
     expect(nextChainName([chain({ id: "a", name: "链式代理 2" })])).toBe("链式代理 1");
     expect(
       nextChainName([chain({ id: "a", name: "链式代理 1" }), chain({ id: "b", name: "链式代理 3" })])
@@ -172,10 +201,7 @@ describe("新建链", () => {
   });
 
   it("id 不与已有链重复，且不依赖数组下标", () => {
-    const existing = [
-      chain({ id: "chain-1", name: "链式代理 1" }),
-      chain({ id: "chain-2", name: "链式代理 2" }),
-    ];
+    const existing = [chain({ id: "chain-1", name: "链式代理 1" }), chain({ id: "chain-2", name: "链式代理 2" })];
     const created = createChain(existing);
     expect(created.id.startsWith("chain-")).toBe(true);
     expect(existing.map((item) => item.id)).not.toContain(created.id);
@@ -186,13 +212,13 @@ describe("新建链", () => {
     expect(createChainId([used])).not.toBe(used);
   });
 
-  it("默认两个选择器都为空（= 全部已启用源），组类型用默认值", () => {
+  it("默认两侧都没有节点，组类型用默认值", () => {
     const created = createChain([chain({ id: "a", name: "链式代理 1" })]);
     expect(created).toMatchObject({
       name: "链式代理 2",
       enabled: true,
-      relay: { sourceIds: [] },
-      landing: { sourceIds: [] },
+      relayNodes: [],
+      landingNodes: [],
       exitGroupType: "select",
       relayGroupType: "url-test",
     });
@@ -208,11 +234,7 @@ describe("新建链", () => {
 });
 
 describe("列表操作", () => {
-  const list = [
-    chain({ id: "a", name: "A" }),
-    chain({ id: "b", name: "B" }),
-    chain({ id: "c", name: "C" }),
-  ];
+  const list = [chain({ id: "a", name: "A" }), chain({ id: "b", name: "B" }), chain({ id: "c", name: "C" })];
 
   it("上移下移只交换相邻两条，越界原样返回", () => {
     expect(moveChain(list, 1, -1).map((item) => item.id)).toEqual(["b", "a", "c"]);
@@ -240,28 +262,87 @@ describe("列表操作", () => {
     expect(removeChain(list, "missing")).toHaveLength(3);
   });
 
-  it("按字段和按选择器局部更新", () => {
+  it("按字段局部更新", () => {
     expect(patchChain(list, "a", { name: "改名" })[0].name).toBe("改名");
     expect(patchChain(list, "missing", { name: "改名" })).toEqual(list);
-    expect(patchChainSelector(list, "a", "landing", { includeRegex: "香港" })[0].landing).toEqual({
-      sourceIds: [],
-      includeRegex: "香港",
-    });
+  });
+});
+
+describe("节点选择", () => {
+  const list = [chain({ id: "a", name: "A" })];
+
+  it("切入选追加到末尾，再次切换移除", () => {
+    let next = toggleChainNode(list, "a", "relay", ref("s1", "k1"));
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k1")]);
+    next = toggleChainNode(next, "a", "relay", ref("s1", "k2"));
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k1"), ref("s1", "k2")]);
+    next = toggleChainNode(next, "a", "relay", ref("s1", "k1"));
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k2")]);
+    // 两侧互不影响
+    expect(chainNodesOf(next[0], "landing")).toEqual([]);
+    expect(toggleChainNode(list, "missing", "relay", ref("s1", "k1"))).toEqual(list);
   });
 
-  it("勾选源时把 sourceIds 当成集合处理", () => {
-    const selected = toggleChainSource(list, "a", "relay", "s1");
-    expect(selected[0].relay.sourceIds).toEqual(["s1"]);
-    expect(toggleChainSource(selected, "a", "relay", "s1")[0].relay.sourceIds).toEqual([]);
-    expect(toggleChainSource(list, "missing", "relay", "s1")).toEqual(list);
+  it("同一个源的两个节点可以分别进前置和落地", () => {
+    let next = toggleChainNode(list, "a", "relay", ref("s1", "k1"));
+    next = toggleChainNode(next, "a", "landing", ref("s1", "k2"));
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k1")]);
+    expect(chainNodesOf(next[0], "landing")).toEqual([ref("s1", "k2")]);
+  });
+
+  it("hasChainNode 认 (源, 指纹)", () => {
+    const selected = chain({ id: "a", name: "A", relayNodes: [ref("s1", "k1")] });
+    expect(hasChainNode(selected, "relay", ref("s1", "k1"))).toBe(true);
+    expect(hasChainNode(selected, "relay", ref("s2", "k1"))).toBe(false);
+  });
+
+  it("移除与调序", () => {
+    let next = toggleChainNode(list, "a", "relay", ref("s1", "k1"));
+    next = toggleChainNode(next, "a", "relay", ref("s1", "k2"));
+    next = moveChainNode(next, "a", "relay", 0, 1);
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k2"), ref("s1", "k1")]);
+    next = removeChainNode(next, "a", "relay", ref("s1", "k2"));
+    expect(chainNodesOf(next[0], "relay")).toEqual([ref("s1", "k1")]);
+  });
+
+  it("超出上限时不再追加", () => {
+    let next = list;
+    for (let index = 0; index < MAX_CHAIN_NODES; index += 1) {
+      next = toggleChainNode(next, "a", "relay", ref("s1", `k${index}`));
+    }
+    expect(chainNodesOf(next[0], "relay")).toHaveLength(MAX_CHAIN_NODES);
+    next = toggleChainNode(next, "a", "relay", ref("s1", "one-more"));
+    expect(chainNodesOf(next[0], "relay")).toHaveLength(MAX_CHAIN_NODES);
   });
 });
 
 describe("本地校验", () => {
   it("空名给出提示", () => {
     const result = validateChain(chain({ id: "a", name: "   " }));
-    expect(result.nameError).toContain("不能留空");
+    expect(result.nameError).toContain("请填写链名");
     expect(result.ok).toBe(false);
+  });
+
+  it("没选落地节点即判为不可生成", () => {
+    const result = validateChain(chain({ id: "a", name: "A" }));
+    expect(result.landingEmptyError).toContain("落地");
+    expect(result.ok).toBe(false);
+    const ok = validateChain(chain({ id: "a", name: "A", landingNodes: [ref("s1", "k1")] }));
+    expect(ok.landingEmptyError).toBeNull();
+    expect(ok.ok).toBe(true);
+  });
+
+  it("前置与落地重叠给出提示，但不拦保存", () => {
+    const result = validateChain(
+      chain({ id: "a", name: "A", relayNodes: [ref("s1", "k1")], landingNodes: [ref("s1", "k1")] })
+    );
+    expect(result.selfRelayWarning).toContain("落地优先");
+    expect(result.ok).toBe(true);
+    // 同源不同节点不算重叠
+    const fine = validateChain(
+      chain({ id: "a", name: "A", relayNodes: [ref("s1", "k1")], landingNodes: [ref("s1", "k2")] })
+    );
+    expect(fine.selfRelayWarning).toBeNull();
   });
 
   it("两条链同名判为重名", () => {
@@ -269,9 +350,7 @@ describe("本地校验", () => {
     const second = chain({ id: "b", name: "落地美国" });
     const result = validateChain(second, [first, second]);
     expect(result.nameConflictError).toContain("组名");
-    expect(result.ok).toBe(false);
     expect(validateChain(first, [first, second]).nameConflictError).not.toBeNull();
-    // 只有自己时不冲突
     expect(validateChain(first, [first]).nameConflictError).toBeNull();
   });
 
@@ -286,36 +365,9 @@ describe("本地校验", () => {
     const taken = validateChain(chain({ id: "a", name: "🚀 节点选择" }), [], reserved);
     expect(taken.nameTakenError).toContain("已被内置分组");
     expect(taken.ok).toBe(false);
-    // 前置组名撞上也算
     const relayTaken = validateChain(chain({ id: "a", name: "⚡ 自动选择 · 前置" }), [], reserved);
-    expect(taken.nameTakenError).not.toBeNull();
     expect(relayTaken.nameTakenError).toContain("已被内置分组");
-    // 不撞就通过
     expect(validateChain(chain({ id: "a", name: "🇺🇸 自检链" }), [], reserved).nameTakenError).toBeNull();
-  });
-
-  it("非法正则给出可读提示且不抛异常", () => {
-    const result = validateChain(
-      chain({
-        id: "a",
-        name: "链",
-        relay: { sourceIds: [], includeRegex: "香港(" },
-        landing: { sourceIds: [], excludeRegex: "[a-" },
-      })
-    );
-    expect(result.relayIncludeError).toBe("前置 · 匹配正则 不是有效的正则表达式");
-    expect(result.landingExcludeError).toBe("落地 · 排除正则 不是有效的正则表达式");
-    expect(result.ok).toBe(false);
-  });
-
-  it("合法的正则、空正则都通过", () => {
-    expect(compileChainRegex(undefined, "匹配正则 ")).toBeNull();
-    expect(compileChainRegex("   ", "匹配正则 ")).toBeNull();
-    expect(compileChainRegex("香港|HK", "匹配正则 ")).toBeNull();
-    const result = validateChain(
-      chain({ id: "a", name: "链", relay: { sourceIds: [], includeRegex: "香港" } })
-    );
-    expect(result.ok).toBe(true);
   });
 
   it("组名与生成器一致：出口组 = 链名，前置组 = 链名 + 后缀", () => {
@@ -331,10 +383,7 @@ describe("本地校验", () => {
 });
 
 describe("合并预览状态", () => {
-  const chains = [
-    chain({ id: "a", name: "A" }),
-    chain({ id: "b", name: "B" }),
-  ];
+  const chains = [chain({ id: "a", name: "A" }), chain({ id: "b", name: "B" })];
 
   it("按 id 贴回状态，预览里没有的视为未预览", () => {
     const merged = mergePreviewStatus(chains, [preview({ id: "a", relayCount: 3, landingCount: 2 })]);
@@ -345,19 +394,18 @@ describe("合并预览状态", () => {
   it("没有预览数据时全部是未预览，多余的条目被忽略", () => {
     expect(mergePreviewStatus(chains, undefined).map((item) => item.preview)).toEqual([null, null]);
     expect(mergePreviewStatus(chains, null).map((item) => item.preview)).toEqual([null, null]);
-    const merged = mergePreviewStatus(chains, [preview({ id: "ghost" })]);
-    expect(merged.map((item) => item.preview)).toEqual([null, null]);
+    expect(mergePreviewStatus(chains, [preview({ id: "ghost" })]).map((item) => item.preview)).toEqual([null, null]);
   });
 
   it("状态文案覆盖全部取值，未预览单独一条", () => {
     expect(Object.keys(CHAIN_STATUS_META).sort()).toEqual(
-      ["disabled", "empty-landing", "empty-relay", "invalid", "invalid-regex", "name-conflict", "ok"].sort()
+      ["disabled", "empty-landing", "empty-relay", "invalid", "missing-refs", "name-conflict", "ok"].sort()
     );
     expect(chainStatusMeta("empty-landing").label).toBe("落地无节点，不生成");
-    expect(chainStatusMeta("empty-relay").label).toBe("前置无节点，落地不可用");
+    expect(chainStatusMeta("empty-relay").label).toBe("前置无节点");
+    expect(chainStatusMeta("missing-refs").label).toBe("部分引用失效");
     expect(chainStatusMeta("disabled").label).toBe("已停用");
     expect(chainStatusMeta("name-conflict").label).toBe("组名冲突");
-    expect(chainStatusMeta("invalid-regex").label).toBe("正则无效");
     expect(chainStatusMeta("invalid").label).toBe("配置不完整");
     expect(chainStatusMeta("ok").label).toBe("正常");
     expect(chainStatusMeta(null)).toBe(UNPREVIEWED_STATUS_META);
@@ -379,15 +427,15 @@ describe("旧中转组只读视图", () => {
       ],
     });
     expect(groups).toEqual([
-      {
-        id: "d1",
-        name: "旧中转",
-        enabled: true,
-        type: "url-test",
-        relayCount: 1,
-        targetCount: 2,
-      },
+      { id: "d1", name: "旧中转", enabled: true, type: "url-test", relayCount: 1, targetCount: 2 },
       { id: "dialer-2", name: "停用的", enabled: false, type: "select", relayCount: 0, targetCount: 0 },
     ]);
+  });
+});
+
+describe("refKey", () => {
+  it("只有源与指纹都相同才算同一个引用", () => {
+    expect(refKey(ref("s1", "k1"))).toBe(refKey(ref("s1", "k1")));
+    expect(refKey(ref("s1", "k1"))).not.toBe(refKey(ref("s2", "k1")));
   });
 });

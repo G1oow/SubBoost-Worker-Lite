@@ -5,7 +5,8 @@ import {
   normalizeProxyChains,
 } from "./config-utils";
 import { generateClashConfig } from "@subboost/core/generator";
-import type { ParsedNode } from "@subboost/core/types/node";
+import type { ChainNodeRef, ClashConfig } from "@subboost/core/types/config";
+import { MAX_CHAIN_NODES } from "@subboost/core/types/config";
 
 function node(patch: Partial<ParsedNode> = {}): ParsedNode {
   return {
@@ -611,8 +612,8 @@ describe("normalizeProxyChains", () => {
         id: " chain-1 ",
         name: " 美国 ",
         enabled: false,
-        relay: { sourceIds: [" s1 ", 1, ""], includeRegex: " 中转 ", excludeRegex: "  " },
-        landing: "not-an-object",
+        relayNodes: [{ sourceId: " s1 ", nodeKey: " k1 " }, { sourceId: "s1", nodeKey: "k1" }, null, {}, 1],
+        landingNodes: "not-an-array",
         exitGroupType: "nope",
         relayGroupType: "fallback",
         testUrl: "  https://example.com/generate_204 ",
@@ -623,11 +624,28 @@ describe("normalizeProxyChains", () => {
       id: "chain-1",
       name: "美国",
       enabled: false,
-      relay: { sourceIds: ["s1"], includeRegex: "中转" },
-      landing: { sourceIds: [] },
+      relayNodes: [{ sourceId: "s1", nodeKey: "k1" }],
+      landingNodes: [],
       relayGroupType: "fallback",
       testUrl: "https://example.com/generate_204",
     });
+  });
+
+  it("节点引用每侧封顶", () => {
+    const many = Array.from({ length: MAX_CHAIN_NODES + 3 }, (_, index) => ({
+      sourceId: "s1",
+      nodeKey: `k${index}`,
+    }));
+    const [chain] = normalizeProxyChains([{ id: "a", name: "A", relayNodes: many, landingNodes: many }]);
+    expect(chain.relayNodes).toHaveLength(MAX_CHAIN_NODES);
+    expect(chain.landingNodes).toHaveLength(MAX_CHAIN_NODES);
+  });
+
+  it("旧配置残留的 relay/landing 选择器被忽略", () => {
+    const [chain] = normalizeProxyChains([
+      { id: "a", name: "A", relay: { sourceIds: ["s1"], includeRegex: "香港" }, landing: { sourceIds: [] } },
+    ]);
+    expect(chain).toEqual({ id: "a", name: "A", relayNodes: [], landingNodes: [] });
   });
 
   it("重复 id 按出现顺序补后缀，缺 id 按序号兜底", () => {

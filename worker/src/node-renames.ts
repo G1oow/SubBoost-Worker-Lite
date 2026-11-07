@@ -1,4 +1,3 @@
-import { buildNodeContentKey } from "@subboost/core/node-identity";
 import type { ParsedNode } from "@subboost/core/types/node";
 import {
   MAX_NODE_NAME_LENGTH,
@@ -7,43 +6,14 @@ import {
   type NodeRenames,
   type NodeSummary,
 } from "./types";
-const FNV_PRIME = 0x01000193;
-// 两个不同的 FNV offset basis，拼成 64 位强度，避免依赖 BigInt（target 是 ES2017）
-const FNV_SEED_A = 0x811c9dc5;
-const FNV_SEED_B = 0x2545f491;
-const RENAME_KEY_PATTERN = /^[0-9a-f]{16}$/;
 
-function fnv1a32(input: string, seed: number): number {
-  let hash = seed >>> 0;
-  for (let index = 0; index < input.length; index += 1) {
-    hash ^= input.charCodeAt(index);
-    hash = Math.imul(hash, FNV_PRIME) >>> 0;
-  }
-  return hash >>> 0;
-}
-
-/**
- * 节点内容指纹的短哈希（16 位十六进制）。
- * 用同步实现而不是 WebCrypto，方便在纯函数与测试里直接复用。
+/*
+ * 键的计算与链式代理共用：改名表的 key 就是链的节点引用键（`ChainNodeRef.nodeKey`），
+ * 两边必须同一套实现，否则「改名后链引用失效」。实现放在 core 的 node-rename-key。
  */
-export function hashNodeKey(input: string): string {
-  const high = fnv1a32(input, FNV_SEED_A).toString(16).padStart(8, "0");
-  const low = fnv1a32(input, FNV_SEED_B).toString(16).padStart(8, "0");
-  return `${high}${low}`;
-}
+export { hashNodeKey, isRenameKey, nodeRenameKey } from "@subboost/core/node-rename-key";
+import { isRenameKey, nodeRenameKey } from "@subboost/core/node-rename-key";
 
-export function isRenameKey(value: unknown): value is string {
-  return typeof value === "string" && RENAME_KEY_PATTERN.test(value);
-}
-
-/**
- * 节点重命名映射的 key：节点内容指纹（忽略名称）。
- * 名称改了 key 不变，因此重命名可以反复覆盖；
- * 服务器/端口/凭据等身份字段变化后 key 改变，旧映射自动失效。
- */
-export function nodeRenameKey(node: ParsedNode): string {
-  return hashNodeKey(buildNodeContentKey(node));
-}
 
 export function applyNodeRenames(node: ParsedNode, renames?: NodeRenames): ParsedNode {
   if (!renames) return node;

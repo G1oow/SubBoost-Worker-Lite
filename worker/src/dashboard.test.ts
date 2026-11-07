@@ -43,6 +43,7 @@ function subscription(overrides: Partial<SubscriptionDto> = {}): SubscriptionDto
     id: "sub1",
     name: "默认订阅",
     sourceIds: [],
+    chainIds: [],
     link: "https://worker.example.com/sub/token",
     createdAt: "2026-10-01T00:00:00.000Z",
     updatedAt: "2026-10-01T00:00:00.000Z",

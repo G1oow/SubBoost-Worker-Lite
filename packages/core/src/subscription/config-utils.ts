@@ -4,9 +4,10 @@ import type { DialerProxyGroup } from "@subboost/core/types/template-config";
 import type { ParsedNode } from "@subboost/core/types/node";
 import {
   DEFAULT_LOAD_BALANCE_STRATEGY,
+  MAX_CHAIN_NODES,
   isLoadBalanceStrategy,
   isProxyGroupGroupType,
-  type ChainSelector,
+  type ChainNodeRef,
   type CustomProxyGroup,
   type CustomRule,
   type GroupListenerBinding,
@@ -270,21 +271,29 @@ export function getEffectiveTestOptions(config: Record<string, unknown>): { test
 
   return { testUrl, testInterval };
 }
-function normalizeChainSelector(value: unknown): ChainSelector {
-  const record = isRecord(value) ? value : {};
-  const includeRegex = toTrimmedString(record.includeRegex);
-  const excludeRegex = toTrimmedString(record.excludeRegex);
-  return {
-    sourceIds: normalizeStringArray(record.sourceIds),
-    ...(includeRegex ? { includeRegex } : {}),
-    ...(excludeRegex ? { excludeRegex } : {}),
-  };
+/** 节点引用：`sourceId` + 内容指纹，两者都必须是字符串，重复项按顺序去重，每侧封顶 */
+function normalizeChainNodeRefs(value: unknown): ChainNodeRef[] {
+  if (!Array.isArray(value)) return [];
+  const out: ChainNodeRef[] = [];
+  const seen = new Set<string>();
+  for (const item of value) {
+    if (out.length >= MAX_CHAIN_NODES) break;
+    if (!isRecord(item)) continue;
+    const sourceId = toTrimmedString(item.sourceId);
+    const nodeKey = toTrimmedString(item.nodeKey);
+    if (!sourceId || !nodeKey) continue;
+    const key = `${sourceId}\u0000${nodeKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ sourceId, nodeKey });
+  }
+  return out;
 }
 
 /**
  * 链式代理配置的宽松规范化：只修剪字段、不校验语义。
  *
- * 「组名冲突 / 落地为空 / 正则写坏」都要在生成期带着原因暴露给界面，
+ * 「组名冲突 / 落地为空 / 引用失效」都要在生成期带着原因暴露给界面，
  * 所以这里不能提前把条目丢掉，否则用户看不到为什么这条链没生效。
  *
  * 唯独重复 id 必须在这里消掉：`chain:<id>` 既是规则目标的引用键，也是
@@ -307,8 +316,8 @@ export function normalizeProxyChains(value: unknown): ProxyChain[] {
       id,
       name,
       ...(item.enabled === false ? { enabled: false } : {}),
-      relay: normalizeChainSelector(item.relay),
-      landing: normalizeChainSelector(item.landing),
+      relayNodes: normalizeChainNodeRefs(item.relayNodes),
+      landingNodes: normalizeChainNodeRefs(item.landingNodes),
       ...(isProxyGroupGroupType(item.exitGroupType) ? { exitGroupType: item.exitGroupType } : {}),
       ...(isProxyGroupGroupType(item.relayGroupType) ? { relayGroupType: item.relayGroupType } : {}),
       ...(testUrl ? { testUrl } : {}),
@@ -323,6 +332,11 @@ export function buildGenerateOptionsFromConfig(
   opts: {
     nodes: ParsedNode[];
     proxyProviders?: Record<string, unknown>;
+    /**
+     * 覆盖配置里的 `proxyChains`。
+     * 订阅生成要按订阅勾选的链裁剪，不能把全局链全塞进每一条订阅。
+     */
+    proxyChains?: ProxyChain[];
   }
 ): GenerateOptions {
   const config = rawConfig;
@@ -388,7 +402,7 @@ export function buildGenerateOptionsFromConfig(
   };
 
   const dialerProxyGroups = normalizeDialerProxyGroups(config.dialerProxyGroups);
-  const proxyChains = normalizeProxyChains(config.proxyChains);
+  const proxyChains = opts.proxyChains ?? normalizeProxyChains(config.proxyChains);
   const proxyGroupOrder = normalizeProxyGroupOrder(config.proxyGroupOrder);
   const effectiveNodes = resolveNodeNameFilter(opts.nodes, config.nodeNameFilter).effectiveNodes;
   const groupListeners = normalizeGroupListeners(config.groupListeners);

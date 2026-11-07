@@ -1,12 +1,13 @@
-import type { ChainSelector, ProxyChain, ProxyGroupGroupType } from "../types/config";
+import { nodeRenameKey } from "../node-rename-key";
+import type { ChainNodeRef, ProxyChain, ProxyGroupGroupType } from "../types/config";
 import { isProxyGroupGroupType } from "../types/config";
 import type { ParsedNode } from "../types/node";
-import { getNodeSourceIds, resolveEffectiveSourceIds } from "./node-source-state";
+import { getNodeSourceIds } from "./node-source-state";
 
 /**
  * 链式代理的节点解析。
  *
- * 链是严格两跳：前置（中转）→ 落地。选择器先按源限定范围，再按节点名跑 include/exclude 正则；
+ * 链是严格两跳：前置（中转）→ 落地。节点按引用来（源 id + 内容指纹），不再靠正则猜；
  * 解析结果同时供生成器与管理端计数使用，两边看到的节点集合必须一致。
  */
 
@@ -17,10 +18,10 @@ export type ProxyChainStatus =
   | "empty-relay"
   /** 落地为空：整条链不生成 */
   | "empty-landing"
+  /** 有引用解析不到（源被删/停用，或节点已不存在） */
+  | "missing-refs"
   /** 链被停用 */
   | "disabled"
-  /** include/exclude 正则写坏 */
-  | "invalid-regex"
   /** 组名与既有分组或其他链重复 */
   | "name-conflict"
   /** 缺 name 等结构性错误 */
@@ -39,6 +40,8 @@ export type ResolvedProxyChain = {
   status: ProxyChainStatus;
   /** 是否真的会写进配置 */
   active: boolean;
+  /** 解析不到的引用数量 */
+  missingRefs: number;
   error?: string;
 };
 
@@ -48,77 +51,103 @@ export function chainRelayGroupName(name: string): string {
   return `${name.trim()}${CHAIN_RELAY_GROUP_SUFFIX}`;
 }
 
-/** 编译后的选择器：正则只编译一次，落地与前置两轮筛选共用 */
-type CompiledChainSelector = {
-  include: RegExp | null;
-  exclude: RegExp | null;
-  /** `null` = 不限源 */
-  sourceIds: Set<string> | null;
+type ChainNodeRefIssue = { ref: ChainNodeRef; reason: "missing-source" | "missing-node" };
+
+export type ChainNodeSelection = {
+  relay: string[];
+  landing: string[];
+  issues: ChainNodeRefIssue[];
+  /** 落在链自己落地集合里、因此被剔除的前置引用数 */
+  droppedSelfRelay: number;
 };
 
-type CompileResult =
-  | { ok: true; value: CompiledChainSelector }
-  | { ok: false; error: string };
-
-type RegexResult = { ok: true; value: RegExp | null } | { ok: false; error: string };
-
-function compileChainRegex(pattern: string | undefined, label: string): RegexResult {
-  const raw = typeof pattern === "string" ? pattern.trim() : "";
-  if (!raw) return { ok: true, value: null };
-  try {
-    // 与分流组高级筛选保持一致：忽略大小写
-    return { ok: true, value: new RegExp(raw, "i") };
-  } catch {
-    return { ok: false, error: `${label} 不是有效的正则表达式` };
+function normalizeRefs(list: unknown): ChainNodeRef[] {
+  if (!Array.isArray(list)) return [];
+  const out: ChainNodeRef[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    if (!item || typeof item !== "object") continue;
+    const record = item as Record<string, unknown>;
+    const sourceId = typeof record.sourceId === "string" ? record.sourceId.trim() : "";
+    const nodeKey = typeof record.nodeKey === "string" ? record.nodeKey.trim() : "";
+    if (!sourceId || !nodeKey) continue;
+    const key = `${sourceId}\u0000${nodeKey}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ sourceId, nodeKey });
   }
+  return out;
 }
-
-function compileChainSelector(
-  selector: ChainSelector | undefined,
-  nodes: ParsedNode[]
-): CompileResult {
-  const include = compileChainRegex(selector?.includeRegex, "匹配正则");
-  if (!include.ok) return include;
-  const exclude = compileChainRegex(selector?.excludeRegex, "排除正则");
-  if (!exclude.ok) return exclude;
-  return {
-    ok: true,
-    value: {
-      include: include.value,
-      exclude: exclude.value,
-      // 陈旧源 id 不参与限定：全部命中不到现存源时按「不限源」处理
-      sourceIds: resolveEffectiveSourceIds(selector?.sourceIds ?? [], nodes),
-    },
-  };
-}
-
-/** 按编译好的选择器挑节点，顺序沿用传入的节点顺序（即订阅里节点的真实顺序） */
-function filterChainNodes(nodes: ParsedNode[], selector: CompiledChainSelector): ParsedNode[] {
-  return nodes.filter((node) => {
-    const name = typeof node.name === "string" ? node.name : "";
-    if (selector.sourceIds && !getNodeSourceIds(node).some((id) => selector.sourceIds?.has(id))) {
-      return false;
-    }
-    if (selector.include && !selector.include.test(name)) return false;
-    if (selector.exclude && selector.exclude.test(name)) return false;
-    return true;
-  });
-}
-
-export type ChainNodeSelection = { nodes: ParsedNode[]; error?: string };
 
 /**
- * 按选择器挑节点。
+ * 按引用挑节点：节点必须来自引用里指定的源，且内容指纹一致。
  *
  * 顺序沿用传入的节点顺序（即订阅里节点的真实顺序），保证界面计数与生成结果一致。
  */
-export function selectChainNodes(
-  selector: ChainSelector | undefined,
+export function resolveChainNodes(
+  chain: Pick<ProxyChain, "relayNodes" | "landingNodes">,
   nodes: ParsedNode[]
 ): ChainNodeSelection {
-  const compiled = compileChainSelector(selector, nodes);
-  if (!compiled.ok) return { nodes: [], error: compiled.error };
-  return { nodes: filterChainNodes(nodes, compiled.value) };
+  const byRef = new Map<string, ParsedNode[]>();
+  for (const node of nodes) {
+    const name = typeof node.name === "string" ? node.name : "";
+    if (!name) continue;
+    // 先按 (源, 指纹) 建索引：同一内容在多源里各有一份，引用必须精确到源
+    let nodeKey: string;
+    try {
+      nodeKey = nodeRenameKey(node);
+    } catch {
+      continue;
+    }
+    for (const sourceId of getNodeSourceIds(node)) {
+      const indexKey = `${sourceId}\u0000${nodeKey}`;
+      const list = byRef.get(indexKey);
+      if (list) list.push(node);
+      else byRef.set(indexKey, [node]);
+    }
+  }
+
+  const availableSourceIds = new Set<string>();
+  for (const node of nodes) {
+    for (const sourceId of getNodeSourceIds(node)) availableSourceIds.add(sourceId);
+  }
+
+  const issues: ChainNodeRefIssue[] = [];
+  const picked: string[] = [];
+  const seenNames = new Set<string>();
+  const collect = (refs: ChainNodeRef[]): string[] => {
+    const out: string[] = [];
+    for (const ref of refs) {
+      const hit = byRef.get(`${ref.sourceId}\u0000${ref.nodeKey}`)?.[0];
+      if (!hit) {
+        issues.push({
+          ref,
+          reason: availableSourceIds.has(ref.sourceId) ? "missing-node" : "missing-source",
+        });
+        continue;
+      }
+      if (out.includes(hit.name)) continue;
+      out.push(hit.name);
+    }
+    return out;
+  };
+
+  const landing = collect(normalizeRefs(chain.landingNodes));
+  for (const name of landing) seenNames.add(name);
+
+  // 前置不能包含自己的落地（否则落地节点经自己中转，mihomo 直接加载失败）
+  let droppedSelfRelay = 0;
+  const relay: string[] = [];
+  for (const name of collect(normalizeRefs(chain.relayNodes))) {
+    if (seenNames.has(name)) {
+      droppedSelfRelay += 1;
+      continue;
+    }
+    relay.push(name);
+  }
+
+  void picked;
+  return { relay, landing, issues, droppedSelfRelay };
 }
 
 function normalizeGroupType(value: unknown, fallback: ProxyGroupGroupType): ProxyGroupGroupType {
@@ -135,7 +164,7 @@ export type ResolveProxyChainsOptions = {
 type ChainDraft = {
   resolved: ResolvedProxyChain;
   /** 落地没通过校验时为空；通过后用于第二轮筛前置 */
-  compiledRelay?: CompiledChainSelector;
+  relayRefs?: ChainNodeRef[];
 };
 
 /**
@@ -162,12 +191,13 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
   const claimedLanding = new Set<string>();
 
   const pushInactive = (
-    base: Omit<ResolvedProxyChain, "status" | "active">,
+    base: Omit<ResolvedProxyChain, "status" | "active" | "missingRefs">,
     status: ProxyChainStatus,
-    error?: string
+    error?: string,
+    missingRefs = 0
   ) => {
     drafts.push({
-      resolved: { ...base, status, active: false, ...(error ? { error } : {}) },
+      resolved: { ...base, status, active: false, missingRefs, ...(error ? { error } : {}) },
     });
   };
 
@@ -177,7 +207,7 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
     const name = typeof chain.name === "string" ? chain.name.trim() : "";
     const exitGroupName = name;
     const relayGroupName = chainRelayGroupName(name);
-    const base: Omit<ResolvedProxyChain, "status" | "active"> = {
+    const base = {
       id,
       name,
       exitGroupName,
@@ -202,26 +232,28 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
     }
 
     if (reserved.has(exitGroupName) || reserved.has(relayGroupName) || exitGroupName === relayGroupName) {
-      pushInactive(base, "name-conflict", `组名「${exitGroupName}」与现有分组重复，这条链不会生成`);
+      pushInactive(
+        base,
+        "name-conflict",
+        `组名「${exitGroupName}」与现有分组重复，这条链不会生成`
+      );
       continue;
     }
 
-    const landingSelector = compileChainSelector(chain.landing, nodes);
-    if (!landingSelector.ok) {
-      pushInactive(base, "invalid-regex", landingSelector.error);
+    // 两侧分开解析：一轮里同时解析前置与落地，issues 会混在一起，第二轮再算一次就重复计数
+    const landingSelection = resolveChainNodes({ relayNodes: [], landingNodes: chain.landingNodes }, nodes);
+    if (landingSelection.landing.length === 0) {
+      const reason =
+        landingSelection.issues.length > 0
+          ? "落地引用的节点（或它所在的源）已经不在了，请重新选择"
+          : "还没有选择落地节点，这条链不会生成";
+      pushInactive(base, "empty-landing", reason, landingSelection.issues.length);
       continue;
     }
-    const relaySelector = compileChainSelector(chain.relay, nodes);
-    if (!relaySelector.ok) {
-      pushInactive(base, "invalid-regex", relaySelector.error);
-      continue;
-    }
-
-    const landingNodes = filterChainNodes(nodes, landingSelector.value)
-      .map((node) => node.name)
-      .filter((nodeName) => typeof nodeName === "string" && nodeName && !claimedLanding.has(nodeName));
+    // 有落地但缺引用：可能只缺一部分，仍然可以生成，但要让用户看见
+    const landingNodes = landingSelection.landing.filter((nodeName) => !claimedLanding.has(nodeName));
     if (landingNodes.length === 0) {
-      pushInactive(base, "empty-landing", "没有节点匹配落地选择器，这条链不会生成");
+      pushInactive(base, "empty-landing", "落地节点都被前面的链占用，这条链不会生成");
       continue;
     }
 
@@ -230,24 +262,55 @@ export function resolveProxyChains(options: ResolveProxyChainsOptions): Resolved
     reserved.add(relayGroupName);
     for (const nodeName of landingNodes) claimedLanding.add(nodeName);
 
+    const missing = landingSelection.issues.length;
     drafts.push({
-      resolved: { ...base, landingNodes, status: "ok", active: true },
-      compiledRelay: relaySelector.value,
+      resolved: {
+        ...base,
+        landingNodes,
+        status: missing > 0 ? "missing-refs" : "ok",
+        active: true,
+        missingRefs: missing,
+        ...(missing > 0 ? { error: `${missing} 个落地引用已失效，已跳过` } : {}),
+      },
+      relayRefs: normalizeRefs(chain.relayNodes),
     });
   }
 
   // 第二轮才定前置：要先把所有链的落地收齐，前置才能避开任意链的落地（否则会转成自环）
   for (const draft of drafts) {
-    if (!draft.resolved.active || !draft.compiledRelay) continue;
-    const relayNodes = filterChainNodes(nodes, draft.compiledRelay)
-      .map((node) => node.name)
-      .filter((nodeName) => typeof nodeName === "string" && nodeName && !claimedLanding.has(nodeName));
+    if (!draft.resolved.active || !draft.relayRefs) continue;
+    const selection = resolveChainNodes(
+      { relayNodes: draft.relayRefs, landingNodes: [] },
+      nodes
+    );
+    const relayNodes = selection.relay.filter((nodeName) => !claimedLanding.has(nodeName));
+    const relayIssues = selection.issues.length;
+    const missingTotal = draft.resolved.missingRefs + relayIssues;
+    // 前置为空只有在落地没有失效时才单列：既有失效又没前置的情况留给 missing-refs，信息更完整
+    const status: ProxyChainStatus =
+      relayNodes.length === 0 && draft.resolved.missingRefs === 0
+        ? "empty-relay"
+        : missingTotal > 0
+          ? "missing-refs"
+          : "ok";
+
+    // 落地那侧的错误已经在第一轮写好，这里只补前置的
+    const errors: string[] = [...(draft.resolved.error ? [draft.resolved.error] : [])];
+    if (relayIssues > 0) {
+      errors.push(`${relayIssues} 个前置引用已失效，已跳过`);
+    }
+    if (relayNodes.length === 0) {
+      errors.push("前置没有可用节点，前置组只放 REJECT");
+    }
+
     draft.resolved = {
       ...draft.resolved,
       relayNodes,
-      status: relayNodes.length > 0 ? "ok" : "empty-relay",
-      ...(relayNodes.length === 0 ? { error: "前置没有可用节点，前置组只放 REJECT" } : {}),
+      missingRefs: missingTotal,
+      status,
+      ...(errors.length > 0 ? { error: errors.join("；") } : {}),
     };
+    if (errors.length === 0) delete draft.resolved.error;
   }
 
   return drafts.map((draft) => draft.resolved);
@@ -268,6 +331,26 @@ export function mapLandingNodesToExitGroups(activeChains: ResolvedProxyChain[]):
   for (const chain of activeChains) {
     for (const nodeName of chain.landingNodes) {
       if (!out.has(nodeName)) out.set(nodeName, chain.exitGroupName);
+    }
+  }
+  return out;
+}
+
+/**
+ * 一组链引用到的源 id（去重）。
+ *
+ * 订阅生成时用：链的节点所在的源必须一起进快照集合，否则节点不在 `proxies` 里、组引用悬空。
+ */
+export function collectChainSourceIds(chains: ProxyChain[] | undefined): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const chain of Array.isArray(chains) ? chains : []) {
+    if (!chain || typeof chain !== "object") continue;
+    if (chain.enabled === false) continue;
+    for (const ref of [...normalizeRefs(chain.relayNodes), ...normalizeRefs(chain.landingNodes)]) {
+      if (seen.has(ref.sourceId)) continue;
+      seen.add(ref.sourceId);
+      out.push(ref.sourceId);
     }
   }
   return out;

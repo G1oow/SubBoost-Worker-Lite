@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.14.1" },
+  app: { name: "SubBoost Lite", version: "0.15.0" },
   sources: [
     {
       id: "s1",
@@ -45,6 +45,7 @@ const STATE: AppState = {
       id: "sub1",
       name: "默认订阅",
       sourceIds: [],
+      chainIds: [],
       link: "https://worker.example.com/sub/tokenvalue",
       createdAt: "2026-10-01T00:00:00.000Z",
       updatedAt: "2026-10-01T00:00:00.000Z",
@@ -89,7 +90,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.14.1");
+    expect(html).toContain("v0.15.0");
     expect(html).toContain("content");
   });
 

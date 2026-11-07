@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDown, ArrowUp, Check, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Link2, Plus, Trash2 } from "lucide-react";
 import { Badge, type BadgeProps } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -15,31 +15,37 @@ import { Switch } from "@subboost/ui/components/ui/switch";
 import { cn } from "@subboost/ui/lib/utils";
 import { DisclosureChevron } from "@subboost/ui/motion/disclosure-chevron";
 import { MotionReveal } from "@subboost/ui/motion/motion-list";
-import type { ChainSelector, ProxyChain, ProxyGroupGroupType } from "@subboost/core/types/config";
+import type { ChainNodeRef, ProxyChain, ProxyGroupGroupType } from "@subboost/core/types/config";
+import { MAX_CHAIN_NODES } from "@subboost/core/types/config";
 import { collectReservedGroupNames } from "@subboost/core/generator/index";
 import { normalizeRuleModelFromConfig } from "@subboost/core/rules/rule-model";
 import { readNameOverrides } from "../lib/rule-editor";
 import {
   CHAIN_GROUP_TYPE_OPTIONS,
   chainGroupNames,
+  chainNodesOf,
   chainStatusMeta,
   createChain,
+  hasChainNode,
   mergePreviewStatus,
   moveChain,
+  moveChainNode,
   patchChain,
-  patchChainSelector,
   readChains,
   readLegacyDialerGroups,
+  refKey,
   removeChain,
+  removeChainNode,
   toggleChain,
-  toggleChainSource,
+  toggleChainNode,
   validateChain,
   writeChains,
-  type ChainSelectorSide,
+  type ChainNodeSide,
   type ChainStatusTone,
   type ConfigRecord,
 } from "../lib/chain-editor";
-import type { ConfigPreviewChain, SourceDto } from "../lib/types";
+import { ChainNodeChips, ChainNodePicker, type ChainNodeLoadState } from "./chain-node-picker";
+import type { ConfigPreviewChain, SourceDto, SourceNodesResponse } from "../lib/types";
 import { prefersReducedMotion } from "../lib/view-transition";
 
 export type ConfigChainsSectionProps = {
@@ -48,6 +54,8 @@ export type ConfigChainsSectionProps = {
   sources: SourceDto[];
   /** 服务端预览里每条链的状态；还没预览过就不传 */
   previewChains?: ConfigPreviewChain[];
+  /** 读取某个源的节点（链的节点就是从这里挑的） */
+  onLoadNodes?: (sourceId: string) => Promise<SourceNodesResponse>;
   onChange: (next: ConfigRecord) => void;
 };
 
@@ -58,8 +66,6 @@ const TONE_BADGE: Record<ChainStatusTone, BadgeProps["variant"]> = {
   muted: "secondary",
 };
 
-/** 一个源都不选时的语义提示：两句都带「全部已启用源」，避免用户以为会匹配不到节点 */
-const SELECTOR_ALL_SOURCES_HINT = "一个源都不选 = 全部已启用源";
 /** 与规则列表同一个时长：新建或挪动后高亮那一条，长列表里不至于找不到它去了哪 */
 const HIGHLIGHT_MS = 1600;
 
@@ -72,7 +78,24 @@ function chainDomId(id: string): string {
   return `chain-${id}`;
 }
 
-export function ConfigChainsSection({ config, sources, previewChains, onChange }: ConfigChainsSectionProps) {
+/** 一条链两侧各自「正在查看的源」：前置单选，落地可多选 */
+type SideSources = { relay: string | null; landing: string[] };
+
+function initialSideSources(chain: ProxyChain): SideSources {
+  const unique = (refs: ChainNodeRef[]) => [...new Set(refs.map((ref) => ref.sourceId))];
+  return {
+    relay: unique(chain.relayNodes)[0] ?? null,
+    landing: unique(chain.landingNodes),
+  };
+}
+
+export function ConfigChainsSection({
+  config,
+  sources,
+  previewChains,
+  onLoadNodes,
+  onChange,
+}: ConfigChainsSectionProps) {
   const chains = React.useMemo(() => readChains(config), [config]);
   const merged = React.useMemo(() => mergePreviewStatus(chains, previewChains), [chains, previewChains]);
   const legacyGroups = React.useMemo(() => readLegacyDialerGroups(config), [config]);
@@ -99,7 +122,7 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
   );
 
   /*
-   * 折叠状态：新建的链默认展开（刚建就要填），其余默认收起。
+   * 折叠状态：新建的链默认展开（刚建就要选节点），其余默认收起。
    * 只持有一个 expandedId，点开一条就收起别的，避免整页同时铺开三栏。
    */
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
@@ -107,6 +130,51 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
   const [highlightId, setHighlightId] = React.useState<string | null>(null);
   /** 挪动后把焦点放回同一张卡片的同一个按钮：React 重排时会把该节点摘下再插回，焦点掉到 body */
   const [focusTarget, setFocusTarget] = React.useState<{ id: string; label: string } | null>(null);
+
+  /*
+   * 节点列表缓存：按源缓存一次加载结果，切换链条目或来回改选源都不重复请求。
+   * 请求代次用 ref 计，避免快速切换时旧响应覆盖新状态。
+   */
+  const nodeCache = React.useRef(new Map<string, ChainNodeLoadState>());
+  const [, forceRender] = React.useReducer((tick: number) => tick + 1, 0);
+  const requestIds = React.useRef(new Map<string, number>());
+
+  const loadNodes = React.useCallback(
+    (sourceId: string, options: { force?: boolean } = {}) => {
+      if (!onLoadNodes) return;
+      if (!options.force) {
+        const cached = nodeCache.current.get(sourceId);
+        if (cached && cached.status !== "error") return;
+      }
+      const requestId = (requestIds.current.get(sourceId) ?? 0) + 1;
+      requestIds.current.set(sourceId, requestId);
+      nodeCache.current.set(sourceId, { status: "loading" });
+      forceRender();
+      void (async () => {
+        try {
+          const data = await onLoadNodes(sourceId);
+          if (requestIds.current.get(sourceId) !== requestId) return;
+          nodeCache.current.set(sourceId, { status: "ready", data });
+        } catch (err) {
+          if (requestIds.current.get(sourceId) !== requestId) return;
+          nodeCache.current.set(sourceId, {
+            status: "error",
+            message: err instanceof Error ? err.message : "加载节点失败",
+          });
+        }
+        forceRender();
+      })();
+    },
+    [onLoadNodes]
+  );
+
+  /** ref → 展示名：只在已加载的节点里找，找不到就是引用失效 */
+  const labelOfRef = React.useCallback((ref: ChainNodeRef): string | undefined => {
+    const state = nodeCache.current.get(ref.sourceId);
+    if (!state || state.status !== "ready") return undefined;
+    const node = state.data.nodes.find((item) => item.key === ref.nodeKey);
+    return node?.name;
+  }, []);
 
   React.useEffect(() => {
     if (!highlightId) return;
@@ -154,7 +222,7 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
     const confirmed = await confirmDialog({
       title: `删除「${name}」？`,
       description:
-        "这条链的出口组与前置组都会从生成结果里移除，指过来时规则会回退到兜底分组。此操作不可撤销，保存后生效。",
+        "这条链的出口组与前置组都会从生成结果里移除，勾选了它的订阅也不再生成它，指过来的规则会回退到兜底分组。此操作不可撤销，保存后生效。",
       confirmText: "删除",
       variant: "destructive",
     });
@@ -171,9 +239,8 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
             {/* 中文说明写成单个字符串：JSX 换行会在中文之间折出一个多余的空格 */}
             <p className="text-xs leading-relaxed text-fg-45">
               {[
-                "严格两跳：前置 → 落地。",
-                "每条启用的链生成出口组（链名，成员是落地节点）与前置组（链名 + 后缀，成员是前置节点），",
-                "落地节点只能经出口组到达。",
+                "每条链先选源、再挑具体节点当「前置 → 落地」，同一个源的不同节点也可以成链。",
+                "建好的链在订阅里就是一个源：勾选它的订阅才会生成，落地节点只能经出口组到达。",
               ].join("")}
             </p>
           </div>
@@ -195,14 +262,21 @@ export function ConfigChainsSection({ config, sources, previewChains, onChange }
                   total={merged.length}
                   validation={validateChain(chain, chains, reservedGroupNames)}
                   preview={preview}
+                  sources={sources}
                   enabledSources={enabledSources}
                   sourceNames={sourceNames}
                   expanded={expandedId === chain.id}
                   highlighted={highlightId === chain.id}
+                  nodeStateOf={(sourceId) => nodeCache.current.get(sourceId) ?? null}
+                  onLoadNodes={onLoadNodes ? (sourceId, force) => loadNodes(sourceId, { force }) : undefined}
+                  labelOfRef={labelOfRef}
                   onToggleExpanded={() => toggleExpanded(chain.id)}
                   onPatch={(patch) => applyChains(patchChain(chains, chain.id, patch))}
-                  onPatchSelector={(side, patch) => applyChains(patchChainSelector(chains, chain.id, side, patch))}
-                  onToggleSource={(side, sourceId) => applyChains(toggleChainSource(chains, chain.id, side, sourceId))}
+                  onToggleNode={(side, ref) => applyChains(toggleChainNode(chains, chain.id, side, ref))}
+                  onRemoveNode={(side, ref) => applyChains(removeChainNode(chains, chain.id, side, ref))}
+                  onMoveNode={(side, nodeIndex, delta) =>
+                    applyChains(moveChainNode(chains, chain.id, side, nodeIndex, delta))
+                  }
                   onToggleEnabled={(enabled) => applyChains(toggleChain(chains, chain.id, enabled))}
                   onMove={(delta) => handleMove(chain, index, delta)}
                   onDelete={() => void handleDelete(chain, index)}
@@ -252,28 +326,33 @@ type ChainCardProps = {
   total: number;
   validation: ReturnType<typeof validateChain>;
   preview: ConfigPreviewChain | null;
+  /** 全部源：已停用的也要能显示名字与「已停用」提示 */
+  sources: SourceDto[];
   enabledSources: SourceDto[];
-  /** 全部源的 id → 名字，用来给已失效的 sourceId 显示可读名称 */
+  /** 全部源的 id → 名字 */
   sourceNames: Map<string, string>;
   /** 卡片的折叠状态由父级持有：新建或点摘要行时只展开它，收起其余 */
   expanded: boolean;
   /** 刚新建或刚挪动过：短暂高亮描边 */
   highlighted: boolean;
+  nodeStateOf: (sourceId: string) => ChainNodeLoadState | null;
+  onLoadNodes?: (sourceId: string, force?: boolean) => void;
+  labelOfRef: (ref: ChainNodeRef) => string | undefined;
   onToggleExpanded: () => void;
   onPatch: (patch: Partial<ProxyChain>) => void;
-  onPatchSelector: (side: ChainSelectorSide, patch: Partial<ChainSelector>) => void;
-  onToggleSource: (side: ChainSelectorSide, sourceId: string) => void;
+  onToggleNode: (side: ChainNodeSide, ref: ChainNodeRef) => void;
+  onRemoveNode: (side: ChainNodeSide, ref: ChainNodeRef) => void;
+  onMoveNode: (side: ChainNodeSide, index: number, delta: -1 | 1) => void;
   onToggleEnabled: (enabled: boolean) => void;
   onMove: (delta: -1 | 1) => void;
   onDelete: () => void;
 };
 
 /**
- * 一条链 = 一个列表项，外观与规则行同一套（rounded-xl 描边、窄屏操作换到第二行贴右）。
+ * 一条链 = 一个列表项，外观按「一个节点」呈现（序号 + 链名 + 链路标记 + 计数）。
  *
  * 摘要行在展开与收起时保持同一个结构：链名输入框放进正文，而不是把摘要行替换成输入框，
- * 否则每次开合摘要行高度都会跳一下。正文由 MotionReveal 按需挂载并做高度 + 透明度过渡，
- * 与仪表板的源节点折叠是同一套动效。
+ * 否则每次开合摘要行高度都会跳一下。正文由 MotionReveal 按需挂载。
  */
 function ChainCard({
   chain,
@@ -281,14 +360,19 @@ function ChainCard({
   total,
   validation,
   preview,
+  sources,
   enabledSources,
   sourceNames,
   expanded,
   highlighted,
+  nodeStateOf,
+  onLoadNodes,
+  labelOfRef,
   onToggleExpanded,
   onPatch,
-  onPatchSelector,
-  onToggleSource,
+  onToggleNode,
+  onRemoveNode,
+  onMoveNode,
   onToggleEnabled,
   onMove,
   onDelete,
@@ -330,13 +414,20 @@ function ChainCard({
       <div className="flex flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-3">
         <div
           {...summaryProps}
-          className="-mx-1 flex min-w-0 flex-1 cursor-pointer items-center gap-3 rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+          className="-mx-1 flex min-w-0 flex-1 items-center gap-2.5 rounded-lg px-1 py-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
         >
           <span className="w-5 shrink-0 text-right font-mono text-xs tabular-nums text-fg-45" aria-hidden="true">
             {index + 1}
           </span>
+          {/* 链路标记：链在这里当节点看，图标只做类型区分 */}
+          <span className="shrink-0 text-fg-45" aria-hidden="true">
+            <Icon icon={Link2} size="sm" />
+          </span>
           <span className={cn("min-w-0 truncate text-sm font-medium", enabled ? "text-fg" : "text-fg-60")}>
             {name}
+          </span>
+          <span className="shrink-0 text-2xs tabular-nums text-fg-45">
+            {`前置 ${chain.relayNodes.length} → 落地 ${chain.landingNodes.length}`}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-1 self-end sm:self-auto">
@@ -376,7 +467,7 @@ function ChainCard({
       </div>
 
       {/* 状态行常驻：收起的卡片也要能看出这条链为什么不生成；桌面端左侧与链名对齐 */}
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-3 text-xs sm:pl-11" role="status">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pb-3 text-xs sm:pl-14" role="status">
         <Badge variant={TONE_BADGE[status.tone]}>{status.label}</Badge>
         {preview ? (
           <span className="tabular-nums text-fg-60">
@@ -389,10 +480,15 @@ function ChainCard({
             {preview.error}
           </InlineNote>
         ) : null}
-        {/* 链名错误展开时显示在输入框下面；收起后挪到这里，不至于藏起来 */}
+        {/* 链名/落地错误展开时显示在正文里；收起后挪到这里，不至于藏起来 */}
         {!expanded && validation.nameError ? (
           <InlineNote variant="plain" alert>
             {validation.nameError}
+          </InlineNote>
+        ) : null}
+        {!expanded && validation.landingEmptyError ? (
+          <InlineNote variant="plain" alert>
+            {validation.landingEmptyError}
           </InlineNote>
         ) : null}
         {validation.nameConflictError ? (
@@ -407,10 +503,10 @@ function ChainCard({
         ) : null}
       </div>
 
-      {/* 正文按需挂载：收起后 DOM 里不留三分栏与十几个输入框 */}
+      {/* 正文按需挂载：收起后 DOM 里不留两段选择器与十几个输入框 */}
       <MotionReveal open={expanded} id={bodyId}>
         <div aria-labelledby={headerId} className="space-y-3 border-t border-ink/10 p-3">
-          <FormField label="链名" className="sm:max-w-sm" error={validation.nameError}>
+          <FormField label="链名（也就是它在订阅里作为源的名字）" className="sm:max-w-sm" error={validation.nameError}>
             <Input
               value={chain.name}
               onChange={(event) => onPatch({ name: event.target.value })}
@@ -419,27 +515,39 @@ function ChainCard({
             />
           </FormField>
           <div className="grid gap-3 lg:grid-cols-3">
-            <SelectorPanel
+            <NodeSidePanel
               side="relay"
               title="① 前置（中转节点）"
-              selector={chain.relay}
+              hint="先选源，再挑该源里的节点；可以有多个，顺序即前置组成员顺序。"
+              chain={chain}
+              sources={sources}
               enabledSources={enabledSources}
               sourceNames={sourceNames}
-              includeError={validation.relayIncludeError}
-              excludeError={validation.relayExcludeError}
-              onToggleSource={(sourceId) => onToggleSource("relay", sourceId)}
-              onPatchSelector={(patch) => onPatchSelector("relay", patch)}
+              nodeStateOf={nodeStateOf}
+              onLoadNodes={onLoadNodes}
+              labelOfRef={labelOfRef}
+              error={null}
+              warning={validation.selfRelayWarning}
+              onToggleNode={(ref) => onToggleNode("relay", ref)}
+              onRemoveNode={(ref) => onRemoveNode("relay", ref)}
+              onMoveNode={(nodeIndex, delta) => onMoveNode("relay", nodeIndex, delta)}
             />
-            <SelectorPanel
+            <NodeSidePanel
               side="landing"
               title="② 落地（最终出口的节点）"
-              selector={chain.landing}
+              hint="可跨多个源、也可以同一源里的不同节点；这里是出口组的成员。"
+              chain={chain}
+              sources={sources}
               enabledSources={enabledSources}
               sourceNames={sourceNames}
-              includeError={validation.landingIncludeError}
-              excludeError={validation.landingExcludeError}
-              onToggleSource={(sourceId) => onToggleSource("landing", sourceId)}
-              onPatchSelector={(patch) => onPatchSelector("landing", patch)}
+              nodeStateOf={nodeStateOf}
+              onLoadNodes={onLoadNodes}
+              labelOfRef={labelOfRef}
+              error={validation.landingEmptyError}
+              warning={null}
+              onToggleNode={(ref) => onToggleNode("landing", ref)}
+              onRemoveNode={(ref) => onRemoveNode("landing", ref)}
+              onMoveNode={(nodeIndex, delta) => onMoveNode("landing", nodeIndex, delta)}
             />
             <GroupPanel
               chain={chain}
@@ -454,49 +562,114 @@ function ChainCard({
   );
 }
 
-type SelectorPanelProps = {
-  side: ChainSelectorSide;
+type NodeSidePanelProps = {
+  side: ChainNodeSide;
   title: string;
-  selector: ChainSelector;
+  hint: string;
+  chain: ProxyChain;
+  sources: SourceDto[];
   enabledSources: SourceDto[];
   sourceNames: Map<string, string>;
-  includeError: string | null;
-  excludeError: string | null;
-  onToggleSource: (sourceId: string) => void;
-  onPatchSelector: (patch: Partial<ChainSelector>) => void;
+  nodeStateOf: (sourceId: string) => ChainNodeLoadState | null;
+  onLoadNodes?: (sourceId: string, force?: boolean) => void;
+  labelOfRef: (ref: ChainNodeRef) => string | undefined;
+  error: string | null;
+  warning: string | null;
+  onToggleNode: (ref: ChainNodeRef) => void;
+  onRemoveNode: (ref: ChainNodeRef) => void;
+  onMoveNode: (index: number, delta: -1 | 1) => void;
 };
 
-function SelectorPanel({
+/**
+ * 一侧（前置或落地）的选择器：先选源，再挑该源里的节点。
+ *
+ * 前置是单选源（一次只挑一个源的节点），落地可多选源（跨源组合，也支持同源不同节点）。
+ * 两侧都允许先选停用的源：链可能引用停用源的节点，能否生成由预览的「引用失效」状态说明。
+ */
+function NodeSidePanel({
   side,
   title,
-  selector,
+  hint,
+  chain,
+  sources,
   enabledSources,
   sourceNames,
-  includeError,
-  excludeError,
-  onToggleSource,
-  onPatchSelector,
-}: SelectorPanelProps) {
-  // 已停用或已删除的源：勾选过就一定列出来，否则用户取消不掉，还会误以为范围正常
-  const staleIds = selector.sourceIds.filter(
-    (sourceId) => !enabledSources.some((source) => source.id === sourceId)
+  nodeStateOf,
+  onLoadNodes,
+  labelOfRef,
+  error,
+  warning,
+  onToggleNode,
+  onRemoveNode,
+  onMoveNode,
+}: NodeSidePanelProps) {
+  const selected = chainNodesOf(chain, side);
+  const [sideSources, setSideSources] = React.useState<SideSources>(() => initialSideSources(chain));
+  const activeSourceIds = React.useMemo(
+    () => (side === "relay" ? (sideSources.relay ? [sideSources.relay] : []) : sideSources.landing),
+    [side, sideSources]
   );
+
+  // 选中的源一出现就按需拉节点：用户不必再点一次「加载」
+  React.useEffect(() => {
+    if (!onLoadNodes) return;
+    for (const sourceId of activeSourceIds) onLoadNodes(sourceId);
+  }, [activeSourceIds, onLoadNodes]);
+
+  // 已选节点的源如果不在当前查看列表里（改过配置、或刚展开），补进来，否则看不到高亮
+  React.useEffect(() => {
+    const used = [...new Set(selected.map((ref) => ref.sourceId))];
+    if (used.length === 0) return;
+    setSideSources((current) => {
+      if (side === "relay") {
+        const next = current.relay ?? used[0];
+        return next === current.relay ? current : { ...current, relay: next };
+      }
+      const missing = used.filter((id) => !current.landing.includes(id));
+      return missing.length === 0 ? current : { ...current, landing: [...current.landing, ...missing] };
+    });
+  }, [selected, side]);
+
+  const staleCount = selected.filter((ref) => labelOfRef(ref) === undefined).length;
+  const atLimit = selected.length >= MAX_CHAIN_NODES;
+  // 已停用的源也要能选，所以列表用全部源；名字从 sourceNames 兜底（含已删除的源 id）
+  const visibleSources = sources;
   const scope = side === "relay" ? "前置" : "落地";
+
+  const toggleSource = (sourceId: string) => {
+    setSideSources((current) => {
+      if (side === "relay") return { ...current, relay: sourceId };
+      const has = current.landing.includes(sourceId);
+      if (!has) return { ...current, landing: [...current.landing, sourceId] };
+      // 收起正在查看的源时，只从查看列表里移除，已选节点保留
+      return { ...current, landing: current.landing.filter((id) => id !== sourceId) };
+    });
+  };
+
+  const removeSourceView = (sourceId: string) => {
+    setSideSources((current) => ({ ...current, landing: current.landing.filter((id) => id !== sourceId) }));
+  };
+
   return (
-    <section aria-label={title} className="space-y-3 rounded-xl border border-ink/10 bg-ink/5 p-3">
+    <section aria-label={title} className="space-y-2.5 rounded-xl border border-ink/10 bg-ink/5 p-3">
       <div className="space-y-1">
         <h4 className="text-sm font-medium text-fg-80">{title}</h4>
-        <p className="text-2xs leading-relaxed text-fg-45">
-          {`${SELECTOR_ALL_SOURCES_HINT}（当前 ${enabledSources.length} 个）。勾选的源只限定范围，再用正则筛节点名。`}
-        </p>
+        <p className="text-2xs leading-relaxed text-fg-45">{hint}</p>
       </div>
 
-      {enabledSources.length === 0 && staleIds.length === 0 ? (
-        <InlineNote variant="plain">还没有已启用的源，这个选择器会匹配不到任何节点。</InlineNote>
+      {error ? (
+        <InlineNote variant="plain" alert>
+          {error}
+        </InlineNote>
+      ) : null}
+      {warning ? <InlineNote variant="plain">{warning}</InlineNote> : null}
+
+      {visibleSources.length === 0 ? (
+        <InlineNote variant="plain">还没有任何源，先去「源管理」添加。</InlineNote>
       ) : (
         <div role="group" aria-label={`${scope}可选的源`} className="flex flex-wrap gap-1.5">
-          {enabledSources.map((source) => {
-            const checked = selector.sourceIds.includes(source.id);
+          {visibleSources.map((source) => {
+            const checked = activeSourceIds.includes(source.id);
             return (
               <Button
                 key={source.id}
@@ -504,50 +677,71 @@ function SelectorPanel({
                 size="sm"
                 variant={checked ? "default" : "secondary"}
                 aria-pressed={checked}
-                onClick={() => onToggleSource(source.id)}
+                onClick={() => toggleSource(source.id)}
+                title={source.enabled ? source.name : `${source.name}（已停用）`}
               >
-                {/* 勾选态不只靠颜色区分；对勾用 iconPop 弹入，与复制成功等瞬时反馈同一套 */}
-                {checked ? <Icon icon={Check} className="animate-icon-pop" /> : null}
                 <span className="break-all">{source.name}</span>
+                {source.enabled ? null : <span className="text-2xs opacity-70">停用</span>}
               </Button>
             );
           })}
-          {staleIds.map((sourceId) => (
-            <Button
-              key={sourceId}
-              type="button"
-              size="sm"
-              variant="outline"
-              aria-pressed
-              onClick={() => onToggleSource(sourceId)}
-              title="这个源已停用或被删除，取消勾选可去掉它"
-            >
-              <span className="break-all">{`${sourceNames.get(sourceId) ?? sourceId}（已失效）`}</span>
-            </Button>
-          ))}
         </div>
       )}
 
-      {staleIds.length > 0 && enabledSources.length > 0 ? (
-        <InlineNote variant="plain">勾选里有已失效的源，取消掉才按剩下这些源筛选。</InlineNote>
+      {/* 落地可多选源：已展开查看的源列成 chips，便于逐个收起 */}
+      {side === "landing" && sideSources.landing.length > 0 ? (
+        <ul aria-label="正在查看的源" className="flex flex-wrap gap-1.5">
+          {sideSources.landing.map((sourceId) => (
+            <li key={sourceId}>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => removeSourceView(sourceId)}
+                aria-label={`收起源 ${sourceNames.get(sourceId) ?? sourceId}`}
+              >
+                <span className="break-all">{sourceNames.get(sourceId) ?? sourceId}</span>
+              </Button>
+            </li>
+          ))}
+        </ul>
       ) : null}
 
-      <FormField label="匹配正则" description="留空表示不限制节点名" error={includeError}>
-        <Input
-          value={selector.includeRegex ?? ""}
-          onChange={(event) => onPatchSelector({ includeRegex: event.target.value })}
-          placeholder="例如 香港|HK"
-          aria-invalid={includeError !== null}
+      <div className="space-y-2">
+        {activeSourceIds.length === 0 ? (
+          <EmptyState className="px-3 py-5 text-xs">
+            {`先选${side === "relay" ? "一个" : "至少一个"}源，再从它的节点里挑。`}
+          </EmptyState>
+        ) : (
+          activeSourceIds.map((sourceId) => (
+            <ChainNodePicker
+              key={sourceId}
+              sourceId={sourceId}
+              sourceName={sourceNames.get(sourceId) ?? sourceId}
+              state={nodeStateOf(sourceId)}
+              selected={selected}
+              disabled={atLimit}
+              onToggle={onToggleNode}
+              onRetry={onLoadNodes ? () => onLoadNodes(sourceId, true) : undefined}
+            />
+          ))
+        )}
+      </div>
+
+      <div className="space-y-1.5 border-t border-ink/10 pt-2.5">
+        <p className="text-2xs text-fg-45">
+          {`已选 ${selected.length}${atLimit ? `（上限 ${MAX_CHAIN_NODES}）` : ""}`}
+          {staleCount > 0 ? ` · ${staleCount} 个引用已失效` : ""}
+        </p>
+        <ChainNodeChips
+          refs={selected}
+          labelOf={labelOfRef}
+          reorderable={side === "relay"}
+          onRemove={onRemoveNode}
+          onMove={onMoveNode}
+          emptyHint={side === "relay" ? "还没选前置节点（前置为空时前置组只放 REJECT）" : "还没选落地节点，这条链不会生成"}
         />
-      </FormField>
-      <FormField label="排除正则" description="命中就剔除，优先于匹配正则" error={excludeError}>
-        <Input
-          value={selector.excludeRegex ?? ""}
-          onChange={(event) => onPatchSelector({ excludeRegex: event.target.value })}
-          placeholder="例如 过期|剩余"
-          aria-invalid={excludeError !== null}
-        />
-      </FormField>
+      </div>
     </section>
   );
 }
@@ -619,3 +813,4 @@ function ChainSelect({ value, onValueChange, ...control }: ChainSelectProps) {
     </Select>
   );
 }
+

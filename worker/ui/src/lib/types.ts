@@ -21,11 +21,24 @@ export type SubscriptionDto = {
   id: string;
   name: string;
   sourceIds: string[];
+  /** 勾选的链：链在这条订阅里充当「一个源」 */
+  chainIds: string[];
   link: string;
   /** 已生成短链时才有值：`${origin}/s/${shortCode}`，与 link 输出同一份配置 */
   shortLink?: string;
   createdAt: string;
   updatedAt: string;
+};
+
+/**
+ * 订阅里可勾选的「链」选项。
+ *
+ * 链建好后就是一个源：名称即源名，只有勾选它的订阅才会生成。
+ */
+export type ChainOption = {
+  id: string;
+  name: string;
+  enabled: boolean;
 };
 
 export type SourceRefreshStatus = {
@@ -165,9 +178,18 @@ export type ConfigPreviewChain = {
   relayGroupName: string;
   relayCount: number;
   landingCount: number;
-  status: "ok" | "empty-relay" | "empty-landing" | "disabled" | "invalid-regex" | "name-conflict" | "invalid";
+  status:
+    | "ok"
+    | "empty-relay"
+    | "empty-landing"
+    | "missing-refs"
+    | "disabled"
+    | "name-conflict"
+    | "invalid";
   /** 是否真的会写进配置 */
   active: boolean;
+  /** 解析不到的节点引用数（源被删/停用或节点已不存在） */
+  missingRefs: number;
   error?: string;
 };
 

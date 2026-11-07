@@ -1,7 +1,7 @@
 import { handleRequest, type WorkerDeps } from "../../../src/index";
 import type { AppState } from "../lib/types";
 import { createDemoKv } from "./demo-kv";
-import { DEMO_CONFIG, DEMO_SOURCES, DEMO_SUBSCRIPTIONS } from "./demo-seed";
+import { buildDemoChain, DEMO_CHAINS, DEMO_SOURCE_TEXTS, DEMO_SOURCES, DEMO_SUBSCRIPTIONS } from "./demo-seed";
 
 /**
  * 纯静态预览站用的「假后端」。
@@ -74,26 +74,33 @@ export function createDemoBackend(options: { origin?: string } = {}): DemoBacken
       throw new Error(`演示数据初始化失败：写入源返回 ${savedResponse.status}`);
     }
     const saved = (await savedResponse.json()) as { sources: AppState["sources"] };
+    const sourceIds = saved.sources.map((source) => source.id);
 
-    for (const subscription of DEMO_SUBSCRIPTIONS) {
-      const sourceIds = subscription.sourceIndexes
-        .map((index) => saved.sources[index]?.id)
-        .filter((id): id is string => Boolean(id));
-      await send("/api/subscriptions", {
-        method: "POST",
-        body: JSON.stringify({ name: subscription.name, sourceIds }),
-      });
-    }
-
-
-    // 演示配置（两条链式代理）走真实保存接口，其余字段仍按默认值生成
+    // 演示配置走真实保存接口：链的引用用刚拿到的真实 sourceId 与节点指纹构造
     const configResponse = await send("/api/config", {
       method: "PUT",
-      body: JSON.stringify(DEMO_CONFIG),
+      body: JSON.stringify({
+        proxyChains: DEMO_CHAINS.map((chain) => buildDemoChain(chain, sourceIds, DEMO_SOURCE_TEXTS)),
+      }),
     });
     if (!configResponse.ok) {
       throw new Error(`演示数据初始化失败：写入配置返回 ${configResponse.status}`);
     }
+
+    for (const subscription of DEMO_SUBSCRIPTIONS) {
+      const boundSourceIds = subscription.sourceIndexes
+        .map((index) => saved.sources[index]?.id)
+        .filter((id): id is string => Boolean(id));
+      await send("/api/subscriptions", {
+        method: "POST",
+        body: JSON.stringify({
+          name: subscription.name,
+          sourceIds: boundSourceIds,
+          chainIds: subscription.chainKeys,
+        }),
+      });
+    }
+
     await send("/api/refresh", { method: "POST" });
   }
 

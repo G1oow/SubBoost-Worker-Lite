@@ -4,8 +4,13 @@
  * 草稿仍然是一份原始配置对象：这里的函数只读写顶层 `proxyChains`，其余字段
  * （包括旧的 `dialerProxyGroups`）原样透传，本页对它只读。
  *
- * 写回时按「默认值不落盘」处理：`enabled` 为真、组类型等于默认值、空正则与空测速
- * 地址都不写进 JSON。这样「关掉再打开」「改回默认类型」不会和已保存配置产生等价
+ * 链的节点是引用（`{ sourceId, nodeKey }`），不是正则：
+ * - `nodeKey` 是节点内容指纹，节点改名后引用仍然有效；
+ * - 带上 `sourceId`，所以同一个源里的两个节点可以分别当「前置」和「落地」，
+ *   跨源同名节点也不会撞在一起。
+ *
+ * 写回时按「默认值不落盘」处理：`enabled` 为真、组类型等于默认值、空测速地址
+ * 都不写进 JSON。这样「关掉再打开」「改回默认类型」不会和已保存配置产生等价
  * 但换写法的 diff。链条目内部的未知字段在本页编辑时会被规范化丢掉（core 的
  * `ProxyChain` schema 是固定的，真要写别的字段请用高级 JSON）。
  *
@@ -14,8 +19,10 @@
  */
 import { CHAIN_RELAY_GROUP_SUFFIX, chainRelayGroupName } from "@subboost/core/subscription/chain-nodes";
 import {
+  MAX_CHAIN_NODES,
+  isChainNodeRef,
   isProxyGroupGroupType,
-  type ChainSelector,
+  type ChainNodeRef,
   type ProxyChain,
   type ProxyGroupGroupType,
 } from "@subboost/core/types/config";
@@ -54,33 +61,29 @@ function readString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
-/** 去空白、去重，保持出现顺序 */
-function readStringList(value: unknown): string[] {
+/** 去空白、去重（按 sourceId + nodeKey）、丢非法项、每侧封顶，保持出现顺序 */
+export function readChainNodeRefs(value: unknown): ChainNodeRef[] {
   if (!Array.isArray(value)) return [];
-  const out: string[] = [];
+  const out: ChainNodeRef[] = [];
   const seen = new Set<string>();
   for (const item of value) {
-    const text = readString(item);
-    if (!text || seen.has(text)) continue;
-    seen.add(text);
-    out.push(text);
+    if (out.length >= MAX_CHAIN_NODES) break;
+    if (!isChainNodeRef(item)) continue;
+    const ref = { sourceId: item.sourceId.trim(), nodeKey: item.nodeKey.trim() };
+    const key = refKey(ref);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(ref);
   }
   return out;
 }
 
-function normalizeGroupType(value: unknown, fallback: ProxyGroupGroupType): ProxyGroupGroupType {
-  return isProxyGroupGroupType(value) ? value : fallback;
+export function refKey(ref: ChainNodeRef): string {
+  return `${ref.sourceId}\u0000${ref.nodeKey}`;
 }
 
-/** 选择器：`sourceIds` 永远存在，空正则不落字段 */
-export function readChainSelector(value: unknown): ChainSelector {
-  const record = isRecord(value) ? value : {};
-  const selector: ChainSelector = { sourceIds: readStringList(record.sourceIds) };
-  const include = readString(record.includeRegex);
-  if (include) selector.includeRegex = include;
-  const exclude = readString(record.excludeRegex);
-  if (exclude) selector.excludeRegex = exclude;
-  return selector;
+function normalizeGroupType(value: unknown, fallback: ProxyGroupGroupType): ProxyGroupGroupType {
+  return isProxyGroupGroupType(value) ? value : fallback;
 }
 
 /** 缺 id / id 重复时补一个稳定的兜底 id，界面拿它当 key 与预览状态的对照键 */
@@ -98,8 +101,8 @@ function readChain(item: unknown, index: number, usedIds: Set<string>): ProxyCha
     id,
     name: readString(item.name),
     enabled: item.enabled !== false,
-    relay: readChainSelector(item.relay),
-    landing: readChainSelector(item.landing),
+    relayNodes: readChainNodeRefs(item.relayNodes),
+    landingNodes: readChainNodeRefs(item.landingNodes),
     exitGroupType: normalizeGroupType(item.exitGroupType, DEFAULT_EXIT_GROUP_TYPE),
     relayGroupType: normalizeGroupType(item.relayGroupType, DEFAULT_RELAY_GROUP_TYPE),
   };
@@ -125,21 +128,12 @@ export function readChains(config: ConfigRecord): ProxyChain[] {
 // 写回：默认值不落盘，没有链就删掉字段
 // ---------------------------------------------------------------------------
 
-function writeChainSelector(selector: ChainSelector | undefined): ChainSelector {
-  const next: ChainSelector = { sourceIds: readStringList(selector?.sourceIds) };
-  const include = readString(selector?.includeRegex);
-  if (include) next.includeRegex = include;
-  const exclude = readString(selector?.excludeRegex);
-  if (exclude) next.excludeRegex = exclude;
-  return next;
-}
-
 function writeChain(chain: ProxyChain): ProxyChain {
   const next: ProxyChain = {
     id: chain.id,
     name: chain.name.trim(),
-    relay: writeChainSelector(chain.relay),
-    landing: writeChainSelector(chain.landing),
+    relayNodes: readChainNodeRefs(chain.relayNodes),
+    landingNodes: readChainNodeRefs(chain.landingNodes),
   };
   if (chain.enabled === false) next.enabled = false;
   const exitGroupType = normalizeGroupType(chain.exitGroupType, DEFAULT_EXIT_GROUP_TYPE);
@@ -185,14 +179,14 @@ export function nextChainName(existing: readonly ProxyChain[] = []): string {
   return `${DEFAULT_CHAIN_NAME_PREFIX} ${used.size + 1}`;
 }
 
-/** 新建一条链：默认名、两个空选择器（= 全部已启用源）、默认组类型 */
+/** 新建一条链：默认名、两个空的节点引用列表（= 还没选节点）、默认组类型 */
 export function createChain(existing: readonly ProxyChain[] = []): ProxyChain {
   return {
     id: createChainId(existing.map((chain) => chain.id)),
     name: nextChainName(existing),
     enabled: true,
-    relay: { sourceIds: [] },
-    landing: { sourceIds: [] },
+    relayNodes: [],
+    landingNodes: [],
     exitGroupType: DEFAULT_EXIT_GROUP_TYPE,
     relayGroupType: DEFAULT_RELAY_GROUP_TYPE,
   };
@@ -225,36 +219,95 @@ export function patchChain<T extends ProxyChain>(list: readonly T[], id: string,
   return list.map((chain) => (chain.id === id ? { ...chain, ...patch } : chain));
 }
 
-export type ChainSelectorSide = "relay" | "landing";
+/** 链的两端：`relay` = 前置（中转），`landing` = 落地（最终出口） */
+export type ChainNodeSide = "relay" | "landing";
 
-/** 只改某一个选择器：`sourceIds`、`includeRegex`、`excludeRegex` 都可以单独改 */
-export function patchChainSelector<T extends ProxyChain>(
+/** 该侧对应的配置字段 */
+export function chainNodesField(side: ChainNodeSide): "relayNodes" | "landingNodes" {
+  return side === "relay" ? "relayNodes" : "landingNodes";
+}
+
+export function chainNodesOf(chain: ProxyChain, side: ChainNodeSide): ChainNodeRef[] {
+  return side === "relay" ? chain.relayNodes : chain.landingNodes;
+}
+
+/** 节点是否已在该侧选里 */
+export function hasChainNode(chain: ProxyChain, side: ChainNodeSide, ref: ChainNodeRef): boolean {
+  const key = refKey(ref);
+  return chainNodesOf(chain, side).some((item) => refKey(item) === key);
+}
+
+/**
+ * 切换某个节点在某侧的选中状态。
+ *
+ * 先选的先出（组成员顺序就是数组顺序）：追加到末尾，取消则原地删除。
+ * 超出每侧上限时不再追加，返回原数组。
+ */
+export function toggleChainNode<T extends ProxyChain>(
   list: readonly T[],
   id: string,
-  side: ChainSelectorSide,
-  patch: Partial<ChainSelector>
+  side: ChainNodeSide,
+  ref: ChainNodeRef
 ): T[] {
+  const key = refKey(ref);
+  return list.map((chain) => {
+    if (chain.id !== id) return chain;
+    const current = chainNodesOf(chain, side);
+    const exists = current.some((item) => refKey(item) === key);
+    const next = exists
+      ? current.filter((item) => refKey(item) !== key)
+      : current.length >= MAX_CHAIN_NODES
+        ? current
+        : [...current, { sourceId: ref.sourceId, nodeKey: ref.nodeKey }];
+    return { ...chain, [chainNodesField(side)]: next };
+  });
+}
+
+/** 移除某个已选节点（chips 上的删除按钮） */
+export function removeChainNode<T extends ProxyChain>(
+  list: readonly T[],
+  id: string,
+  side: ChainNodeSide,
+  ref: ChainNodeRef
+): T[] {
+  const key = refKey(ref);
   return list.map((chain) =>
-    chain.id === id ? { ...chain, [side]: { ...chain[side], ...patch } } : chain
+    chain.id === id
+      ? { ...chain, [chainNodesField(side)]: chainNodesOf(chain, side).filter((item) => refKey(item) !== key) }
+      : chain
   );
 }
 
-/** 切换某个选择器里的一条源（`sourceIds` 为空表示全部已启用源） */
-export function toggleChainSource<T extends ProxyChain>(
+/** 在已选列表里挪动一个节点（顺序即组成员顺序） */
+export function moveChainNode<T extends ProxyChain>(
   list: readonly T[],
   id: string,
-  side: ChainSelectorSide,
-  sourceId: string
+  side: ChainNodeSide,
+  index: number,
+  delta: number
 ): T[] {
   return list.map((chain) => {
     if (chain.id !== id) return chain;
-    const current = chain[side];
-    const has = current.sourceIds.includes(sourceId);
-    const sourceIds = has
-      ? current.sourceIds.filter((item) => item !== sourceId)
-      : [...current.sourceIds, sourceId];
-    return { ...chain, [side]: { ...current, sourceIds } };
+    const current = chainNodesOf(chain, side);
+    const target = index + delta;
+    if (target < 0 || target >= current.length) return chain;
+    const next = [...current];
+    const [moved] = next.splice(index, 1);
+    next.splice(target, 0, moved);
+    return { ...chain, [chainNodesField(side)]: next };
   });
+}
+
+/** 一次替换某一侧的全部节点（「全选本页」之类的批量操作） */
+export function setChainNodes<T extends ProxyChain>(
+  list: readonly T[],
+  id: string,
+  side: ChainNodeSide,
+  refs: readonly ChainNodeRef[]
+): T[] {
+  return list.map((chain) =>
+    chain.id === id ? { ...chain, [chainNodesField(side)]: readChainNodeRefs([...refs]) } : chain
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -268,24 +321,12 @@ export type ChainValidation = {
   nameConflictError: string | null;
   /** 出口组/前置组撞上内置分组名，或者其他链已占用的组名 */
   nameTakenError: string | null;
-  relayIncludeError: string | null;
-  relayExcludeError: string | null;
-  landingIncludeError: string | null;
-  landingExcludeError: string | null;
+  /** 还没选落地节点：整条链不会生成 */
+  landingEmptyError: string | null;
+  /** 前置和落地选了同一个节点（生成时该前置会被剔除） */
+  selfRelayWarning: string | null;
   ok: boolean;
 };
-
-/** 编译正则；空值与非法值都返回 null / 可读错误，绝不抛异常 */
-export function compileChainRegex(pattern: string | undefined, label: string): string | null {
-  const raw = typeof pattern === "string" ? pattern.trim() : "";
-  if (!raw) return null;
-  try {
-    new RegExp(raw, "i");
-    return null;
-  } catch {
-    return `${label}不是有效的正则表达式`;
-  }
-}
 
 /** 出口组名与前置组名：与生成器同一套规则 */
 export function chainGroupNames(chain: Pick<ProxyChain, "name">): { exitGroupName: string; relayGroupName: string } {
@@ -308,10 +349,6 @@ export function validateChain(
   reservedGroupNames: ReadonlySet<string> = new Set()
 ): ChainValidation {
   const name = chain.name.trim();
-  const relayIncludeError = compileChainRegex(chain.relay?.includeRegex, "前置 · 匹配正则 ");
-  const relayExcludeError = compileChainRegex(chain.relay?.excludeRegex, "前置 · 排除正则 ");
-  const landingIncludeError = compileChainRegex(chain.landing?.includeRegex, "落地 · 匹配正则 ");
-  const landingExcludeError = compileChainRegex(chain.landing?.excludeRegex, "落地 · 排除正则 ");
 
   const takenByChains = new Set<string>();
   for (const other of all) {
@@ -333,24 +370,25 @@ export function validateChain(
     name !== "" && takenByExisting.length > 0
       ? `组名「${takenByExisting[0]}」已被内置分组或其他分组占用，生成时这条链会被跳过，请换个链名`
       : null;
-  const nameError = name === "" ? "请填写链名：它就是出口组名，不能留空" : null;
+  const nameError = name === "" ? "请填写链名：它既是出口组名，也是这条链在订阅里作为源出现的名字" : null;
+
+  const landingEmptyError =
+    chain.landingNodes.length === 0 ? "还没有选择落地节点，这条链不会生成" : null;
+
+  const landingKeys = new Set(chain.landingNodes.map(refKey));
+  const overlapCount = chain.relayNodes.filter((ref) => landingKeys.has(refKey(ref))).length;
+  const selfRelayWarning =
+    overlapCount > 0
+      ? `${overlapCount} 个节点同时出现在前置与落地里，生成时会按落地优先从前提剔除`
+      : null;
 
   return {
     nameError,
     nameConflictError,
     nameTakenError,
-    relayIncludeError,
-    relayExcludeError,
-    landingIncludeError,
-    landingExcludeError,
-    ok:
-      nameError === null &&
-      nameConflictError === null &&
-      nameTakenError === null &&
-      relayIncludeError === null &&
-      relayExcludeError === null &&
-      landingIncludeError === null &&
-      landingExcludeError === null,
+    landingEmptyError,
+    selfRelayWarning,
+    ok: nameError === null && nameConflictError === null && nameTakenError === null && landingEmptyError === null,
   };
 }
 
@@ -388,24 +426,24 @@ export const CHAIN_STATUS_META: Record<ConfigPreviewChain["status"], ChainStatus
     tone: "ok",
   },
   "empty-relay": {
-    label: "前置无节点，落地不可用",
+    label: "前置无节点",
     description: "前置组只放 REJECT，这条链的落地节点暂时选不了。",
     tone: "warning",
   },
   "empty-landing": {
     label: "落地无节点，不生成",
-    description: "落地选择器没匹配到任何节点，整条链不会写进配置。",
+    description: "还没选落地节点，或落地引用的节点已经不在了。",
     tone: "danger",
+  },
+  "missing-refs": {
+    label: "部分引用失效",
+    description: "有节点引用解析不到（源被删除/停用或节点已不存在），失效部分已跳过。",
+    tone: "warning",
   },
   disabled: {
     label: "已停用",
     description: "这条链不会生成。",
     tone: "muted",
-  },
-  "invalid-regex": {
-    label: "正则无效",
-    description: "include/exclude 正则编译失败，这条链不会生成。",
-    tone: "danger",
   },
   "name-conflict": {
     label: "组名冲突",
@@ -449,13 +487,15 @@ export function readLegacyDialerGroups(config: ConfigRecord): LegacyDialerGroup[
   return raw
     .map((item, index): LegacyDialerGroup | null => {
       if (!isRecord(item)) return null;
+      const relayNodes = Array.isArray(item.relayNodes) ? item.relayNodes : [];
+      const targetNodes = Array.isArray(item.targetNodes) ? item.targetNodes : [];
       return {
         id: readString(item.id) || `dialer-${index + 1}`,
         name: readString(item.name),
         enabled: item.enabled !== false,
         type: readString(item.type) || "select",
-        relayCount: readStringList(item.relayNodes).length,
-        targetCount: readStringList(item.targetNodes).length,
+        relayCount: relayNodes.length,
+        targetCount: targetNodes.length,
       };
     })
     .filter((item): item is LegacyDialerGroup => Boolean(item));

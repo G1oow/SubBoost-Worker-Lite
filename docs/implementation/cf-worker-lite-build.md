@@ -596,7 +596,7 @@ export function createStore(env: Env): {
   listStoredSources(): Promise<StoredSource[]>;
   saveSources(inputs: SourceInput[]): Promise<SourceDto[]>; // 校验在 router 完成；此处只负责加密与持久化、删除孤儿快照
   listSubscriptions(origin: string): Promise<SubscriptionDto[]>; // link = `${origin}/sub/${decrypt(tokenEnc)}`
-  createSubscription(input: { name: string; sourceIds: string[] }): Promise<{ dto: SubscriptionDto; token: string }>;
+  createSubscription(input: { name: string; sourceIds: string[]; chainIds?: string[] }): Promise<{ dto: SubscriptionDto; token: string }>;
   deleteSubscription(id: string): Promise<boolean>;
   rotateSubscriptionToken(id: string, origin: string): Promise<SubscriptionDto | null>;
   findSubscriptionByToken(token: string): Promise<StoredSubscription | null>;
@@ -670,13 +670,14 @@ putStatus({...}); releaseLock(owner)
 
 `generateSubscription` 规则：
 
-1. 目标源 = `sub.sourceIds` 为空时所有 `enabled` 源，否则按 `sourceIds` 顺序过滤出存在且 `enabled` 的源。
-2. 逐源读快照；`onDemand` 为 true 且快照缺失时调用 `refreshSource` 并写快照。
-3. 合并节点，`buildNodeContentKey(node)` 去重保留首次。
-4. 节点为空返回 `no-nodes`。
-5. `options = buildGenerateOptionsFromConfig(config, { nodes })`；`yaml = generateClashYaml(options)`；异常向上抛，由调用方决定是否回退旧缓存。
-6. `info`：所有 remote 目标源的 `userInfo` 都含 `upload`、`download`、`total` 时求和，`expire` 取最小；否则 `null`。
-7. 写 `cache:<subId>`，`configHash = computeConfigHash(config)`。
+1. 读配置，取 `sub.chainIds` 对应的启用链（`selectSubscriptionChains`）。
+2. 目标源 = `sub.sourceIds` 为空时所有 `enabled` 源，否则按 `sourceIds` 顺序过滤出存在且 `enabled` 的源；再追加链引用节点所在的源（订阅没勾也要进，否则组引用悬空）。
+3. 逐源读快照；`onDemand` 为 true 且快照缺失时调用 `refreshSource` 并写快照。
+4. 合并节点，`buildNodeContentKey(node)` 去重保留首次；同内容在多源出现时把后续源 id 并进 `_sourceIds`（链按「源 + 指纹」引用）。
+5. 节点为空返回 `no-nodes`。
+6. `options = buildGenerateOptionsFromConfig(config, { nodes, proxyChains: chains })`；`yaml = generateClashYaml(options)`；异常向上抛，由调用方决定是否回退旧缓存。
+7. `info`：所有 remote 目标源的 `userInfo` 都含 `upload`、`download`、`total` 时求和，`expire` 取最小；否则 `null`。
+8. 写 `cache:<subId>`，`configHash = computeConfigHash(config)`。
 
 `getOrGenerateSubscription`：`findSubscriptionByToken` 未命中返回 `not-found`；读缓存且 `configHash` 等于当前哈希则命中；否则调用 `generateSubscription(..., { onDemand: true })`；生成抛错且存在旧缓存时返回旧缓存并把错误写入状态。
 
@@ -697,9 +698,9 @@ export async function requireAdmin(request: Request, env: Env): Promise<void>;
 | PUT | `/api/sources` | 是 | `{ sources: SourceInput[] }`，上限 1 MiB | `200 { sources }` |
 | PUT | `/api/config` | 是 | JSON 对象，上限 1 MiB | `200 { config, configIsDefault: false }` |
 | DELETE | `/api/config` | 是 | 无 | `200 { config, configIsDefault: true }` |
-| POST | `/api/config/preview` | 是 | `{ config }`，上限 1 MiB | `200 { sourceCount, snapshotCount, nodeCount, proxyGroupCount, ruleProviderCount, rules, chains }`；`chains` 是每条链式代理的前置/落地匹配数与状态，只读：用已启用源的现有快照试生成，不抓上游、不写快照/缓存/状态；生成失败 `400 VALIDATION_ERROR` |
-| POST | `/api/subscriptions` | 是 | `{ name, sourceIds? }`，上限 64 KiB | `201 { subscription }` |
-| PATCH | `/api/subscriptions/:id` | 是 | `{ name?, sourceIds? }`，上限 64 KiB；`sourceIds` 必须引用现存源 | `200 { subscription }`；源不存在 `400 VALIDATION_ERROR`；清空该订阅的 YAML 缓存 |
+| POST | `/api/config/preview` | 是 | `{ config }`，上限 1 MiB | `200 { sourceCount, snapshotCount, nodeCount, proxyGroupCount, ruleProviderCount, rules, chains }`；`chains` 是每条链式代理的前置/落地匹配数、`missingRefs` 与状态，只读：用已启用源加上草稿里链引用源的现有快照试生成，不抓上游、不写快照/缓存/状态；预览口径是全部启用链（下发时按订阅 `chainIds` 裁剪）；生成失败 `400 VALIDATION_ERROR` |
+| POST | `/api/subscriptions` | 是 | `{ name, sourceIds?, chainIds? }`，上限 64 KiB；`chainIds` 必须引用配置里现存的链 | `201 { subscription }`；链不存在 `400 VALIDATION_ERROR` |
+| PATCH | `/api/subscriptions/:id` | 是 | `{ name?, sourceIds?, chainIds? }`，上限 64 KiB；`sourceIds` / `chainIds` 必须引用现存源与链 | `200 { subscription }`；源/链不存在 `400 VALIDATION_ERROR`；清空该订阅的 YAML 缓存 |
 | DELETE | `/api/subscriptions/:id` | 是 | 无 | `204` |
 | POST | `/api/subscriptions/:id/rotate` | 是 | 无 | `200 { subscription }` |
 | POST | `/api/subscriptions/:id/short-link` | 是 | 无 | `200 { subscription }`（`shortLink` = `<origin>/s/<8 位 base64url>`）；已有短链时幂等返回同一条；订阅不存在 `404 NOT_FOUND` |

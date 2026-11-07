@@ -26,7 +26,8 @@ import { collectNodeSummaries, countRenamedNodes, sanitizeNodeRenames } from "./
 import { fetchText } from "./safe-fetch";
 import { resolveDefaultUserAgent } from "./sources";
 import { validatePublicHttpUrl } from "./ssrf";
-import { createStore } from "./store";
+import { createStore, type Store } from "./store";
+import { normalizeProxyChains } from "@subboost/core/subscription/config-utils";
 import {
   MAX_MANUAL_TEXT_BYTES,
   MAX_PARSE_ERRORS,
@@ -70,6 +71,31 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 function stringField(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+/**
+ * 校验并去重订阅勾选的链。
+ *
+ * 链存在配置里，`chain:<id>` 又是规则目标的引用键，所以未知 id 必须显式拒绝：
+ * 静默忽略会让用户以为勾上了，实际什么都没生成。
+ */
+async function validateChainIds(store: Store, input: unknown): Promise<string[]> {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) {
+    throw new ApiError(400, "VALIDATION_ERROR", "chainIds 必须是数组");
+  }
+  const chainIds = [...new Set(input.filter((value): value is string => typeof value === "string"))];
+  if (chainIds.length === 0) return chainIds;
+  const { config } = await store.getConfig();
+  const known = new Set(normalizeProxyChains(config.proxyChains).map((chain) => chain.id));
+  const unknown = chainIds.filter((chainId) => !known.has(chainId));
+  if (unknown.length > 0) {
+    throw new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      `链不存在：${unknown.slice(0, 3).join("、")}（链可能已被删除，请刷新页面后重新选择）`
+    );
+  }
+  return chainIds;
 }
 
 async function validateSources(input: unknown): Promise<SourceInput[]> {
@@ -330,13 +356,14 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
     const sourceIds = Array.isArray(rawSourceIds)
       ? rawSourceIds.filter((value): value is string => typeof value === "string")
       : [];
+    const chainIds = await validateChainIds(store, body.chainIds);
 
     const existing = await store.listStoredSubscriptions();
     if (existing.length >= MAX_SUBSCRIPTIONS) {
       throw new ApiError(400, "VALIDATION_ERROR", `最多允许 ${MAX_SUBSCRIPTIONS} 条订阅`);
     }
 
-    const { dto, token } = await store.createSubscription({ name, sourceIds });
+    const { dto, token } = await store.createSubscription({ name, sourceIds, chainIds });
     // 用本次创建的 token 组装链接，避免多订阅时误取列表首项
     return json({ subscription: { ...dto, link: `${url.origin}/sub/${token}` } }, 201);
   }
@@ -369,7 +396,7 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
   if (subscriptionIdMatch && method === "PATCH") {
     const id = decodeURIComponent(subscriptionIdMatch[1]);
     const body = requireObjectBody(await readJsonBody(request, BODY_LIMITS.small));
-    const patch: { name?: string; sourceIds?: string[] } = {};
+    const patch: { name?: string; sourceIds?: string[]; chainIds?: string[] } = {};
 
     if (body.name !== undefined) {
       const name = stringField(body.name).trim();
@@ -398,6 +425,10 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
         );
       }
       patch.sourceIds = sourceIds;
+    }
+
+    if (body.chainIds !== undefined) {
+      patch.chainIds = await validateChainIds(store, body.chainIds);
     }
 
     const subscription = await store.updateSubscription(id, patch, url.origin);

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDefaultUserConfig } from "@subboost/core/config/defaults";
 import { generateClashConfig } from "@subboost/core/generator";
+import { nodeRenameKey } from "@subboost/core/node-rename-key";
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
 import { ALL_RULES } from "@subboost/core/rules-database";
 import {
@@ -82,8 +83,13 @@ describe("rule editor view", () => {
     const config = {
       ...defaultConfig(),
       proxyChains: [
-        { id: "c1", name: "🇺🇸 演示链", landing: { includeRegex: "落地" }, relay: { includeRegex: "香港" } },
-        { id: "c2", name: "停用链", enabled: false, landing: {}, relay: {} },
+        {
+          id: "c1",
+          name: "🇺🇸 演示链",
+          landingNodes: [{ sourceId: "s1", nodeKey: "landing-key" }],
+          relayNodes: [{ sourceId: "s1", nodeKey: "relay-key" }],
+        },
+        { id: "c2", name: "停用链", enabled: false, landingNodes: [], relayNodes: [] },
       ],
       customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.com", target: { kind: "chain", id: "c1" } }],
     };
@@ -104,16 +110,30 @@ describe("rule editor view", () => {
       "r1"
     ).config;
     expect((saved.customRules as { target: unknown }[])[0].target).toEqual({ kind: "chain", id: "c1" });
-    // 生成侧与界面一致：目标就是出口组名，不回退
-    // 链没有可用节点时出口组不生成、目标按回退处理；这里验证有节点时目标就是出口组名
+    // 链没有可用节点时出口组不生成、目标按回退处理
     expect(generateClashConfig(buildGenerateOptionsFromConfig(saved, { nodes: [] })).rules).toContain(
       "DOMAIN,example.com,🚀 节点选择"
     );
+
+    // 有节点时目标就是出口组名，与界面一致。节点与链引用必须同源同指纹，name 不参与指纹
+    const relayNode = { name: "香港 01", type: "ss", server: "192.0.2.10", port: 8388, cipher: "aes-256-gcm", password: "pass" };
+    const landingNode = { name: "落地 01", type: "ss", server: "192.0.2.11", port: 8388, cipher: "aes-256-gcm", password: "pass" };
+    const withRefs = {
+      ...saved,
+      proxyChains: [
+        {
+          id: "c1",
+          name: "🇺🇸 演示链",
+          relayNodes: [{ sourceId: "s1", nodeKey: nodeRenameKey(relayNode as never) }],
+          landingNodes: [{ sourceId: "s1", nodeKey: nodeRenameKey(landingNode as never) }],
+        },
+      ],
+    };
     const withNodes = generateClashConfig(
-      buildGenerateOptionsFromConfig(saved, {
+      buildGenerateOptionsFromConfig(withRefs, {
         nodes: [
-          { name: "香港 01", type: "ss", server: "192.0.2.10", port: 8388, cipher: "aes-256-gcm", password: "pass" },
-          { name: "落地 01", type: "ss", server: "192.0.2.11", port: 8388, cipher: "aes-256-gcm", password: "pass" },
+          { ...relayNode, _sourceIds: ["s1"] },
+          { ...landingNode, _sourceIds: ["s1"] },
         ] as never,
       })
     );
