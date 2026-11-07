@@ -42,7 +42,14 @@ function buildRenames(manualText: string): Record<string, string> | undefined {
   return node ? { [nodeRenameKey(node)]: RENAME_TARGET } : undefined;
 }
 
+/** 节点在源里的内容指纹，用于构造链的节点引用 */
+function nodeKeyOf(manualText: string, name: string): string | undefined {
+  const node = parseSubscription(manualText).nodes.find((item) => item.name === name);
+  return node ? nodeRenameKey(node) : undefined;
+}
+
 const PRIMARY_TEXT = PRIMARY_NODES.join("\n");
+const BACKUP_TEXT = BACKUP_NODES.join("\n");
 const PRIMARY_RENAMES = buildRenames(PRIMARY_TEXT);
 
 export const DEMO_SOURCES: SourceInput[] = [
@@ -56,7 +63,7 @@ export const DEMO_SOURCES: SourceInput[] = [
   {
     name: "演示备用线路（手动节点）",
     kind: "manual",
-    manualText: BACKUP_NODES.join("\n"),
+    manualText: BACKUP_TEXT,
     enabled: true,
   },
   {
@@ -68,36 +75,80 @@ export const DEMO_SOURCES: SourceInput[] = [
 ];
 
 /**
- * 订阅种子。sourceIndexes 指向 DEMO_SOURCES 的下标，留空表示「包含全部已启用源」，
- * 与真实 Worker 的语义一致（下标在落库拿到真实 id 之后再解析）。
+ * 订阅种子。sourceIndexes 指向 DEMO_SOURCES 的下标，留空表示「包含全部已启用源」；
+ * chainIds 在落库拿到真实链 id 之后再解析，用来展示「链只在勾选它的订阅里生成」。
  */
-export const DEMO_SUBSCRIPTIONS: Array<{ name: string; sourceIndexes: number[] }> = [
-  { name: "演示订阅 · 全部线路", sourceIndexes: [] },
-  { name: "演示订阅 · 仅主线路", sourceIndexes: [0] },
+export const DEMO_SUBSCRIPTIONS: Array<{
+  name: string;
+  sourceIndexes: number[];
+  chainKeys: string[];
+}> = [
+  // 第一条订阅挂上演示链：能看到链路生效
+  { name: "演示订阅 · 全部线路", sourceIndexes: [], chainKeys: ["demo-local-chain", "demo-unused-chain"] },
+  // 第二条只选主线路、不挂链：同样的链不会出现在它的配置里
+  { name: "演示订阅 · 仅主线路", sourceIndexes: [0], chainKeys: [] },
 ];
 
 /** 改名后的展示名，测试与文档复用同一处定义 */
 export const DEMO_RENAMED_NODE = RENAME_TARGET;
 
 /**
- * 演示用的配置种子：只放两条链式代理，其余字段走默认值。
+ * 演示用的链式代理草稿。
  *
- * 「演示链」的落地正则能匹配到真实的演示节点，界面上能看到计数与出口组；
- * 「演示空链」的落地正则故意匹配不到节点，用来展示「落地为空，不生成」的提示。
+ * 引用是 (源下标, 节点名)，真正的 `sourceId` 与 `nodeKey` 在 bootstrap 里换成真实值：
+ * - 「本地两跳链」用同一个源里的两个节点（东京 → 大阪），展示同源不同节点的链；
+ * - 「跨源链」用主线路节点当前置、备用线路节点当落地；
+ * - 「失效链」引用不存在的节点，用来看「引用失效」提示。
  */
-export const DEMO_CONFIG = {
-  proxyChains: [
-    {
-      id: "demo-chain-us",
-      name: "🇺🇸 演示链",
-      relay: { sourceIds: [], includeRegex: "东京 · 演示" },
-      landing: { sourceIds: [], includeRegex: "洛杉矶 · 备用" },
-    },
-    {
-      id: "demo-chain-empty",
-      name: "🇩🇪 演示空链",
-      relay: { sourceIds: [], includeRegex: "东京 · 演示" },
-      landing: { sourceIds: [], includeRegex: "不存在的落地" },
-    },
-  ],
-};
+export const DEMO_CHAINS: Array<{
+  id: string;
+  name: string;
+  enabled?: boolean;
+  relay: Array<{ sourceIndex: number; nodeName: string }>;
+  landing: Array<{ sourceIndex: number; nodeName: string }>;
+}> = [
+  {
+    id: "demo-local-chain",
+    name: "⛓ 演示本地两跳链",
+    relay: [{ sourceIndex: 0, nodeName: "东京 · 演示 01" }],
+    landing: [{ sourceIndex: 0, nodeName: "大阪 · 演示 03" }],
+  },
+  {
+    id: "demo-unused-chain",
+    name: "🇺🇸 演示跨源链",
+    relay: [{ sourceIndex: 0, nodeName: "新加坡 · 演示 04" }],
+    landing: [{ sourceIndex: 1, nodeName: "洛杉矶 · 备用 01" }],
+  },
+  {
+    id: "demo-broken-chain",
+    name: "🇩🇪 演示失效链",
+    relay: [{ sourceIndex: 0, nodeName: "东京 · 演示 01" }],
+    landing: [{ sourceIndex: 0, nodeName: "不存在的落地" }],
+  },
+];
+
+/** 把「源下标 + 节点名」换成真实的 `{ sourceId, nodeKey }`；解析不到的节点保留假的 key */
+export function buildDemoChain(
+  chain: (typeof DEMO_CHAINS)[number],
+  sourceIds: string[],
+  manualTextsByIndex: string[]
+): Record<string, unknown> {
+  const toRef = (item: { sourceIndex: number; nodeName: string }) => {
+    const sourceId = sourceIds[item.sourceIndex];
+    if (!sourceId) return null;
+    const nodeKey = nodeKeyOf(manualTextsByIndex[item.sourceIndex] ?? "", item.nodeName) ?? `missing-${item.nodeName}`;
+    return { sourceId, nodeKey };
+  };
+  const relayNodes = chain.relay.map(toRef).filter(Boolean);
+  const landingNodes = chain.landing.map(toRef).filter(Boolean);
+  return {
+    id: chain.id,
+    name: chain.name,
+    ...(chain.enabled === false ? { enabled: false } : {}),
+    relayNodes,
+    landingNodes,
+  };
+}
+
+/** 演示源的手动文本，按 DEMO_SOURCES 下标对齐，供构造节点指纹使用 */
+export const DEMO_SOURCE_TEXTS = [PRIMARY_TEXT, BACKUP_TEXT, DISABLED_NODES.join("\n")];
