@@ -1,9 +1,14 @@
-import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
+import { buildGenerateOptionsFromConfig, normalizeProxyChains } from "@subboost/core/subscription/config-utils";
 import { configToYaml, generateClashConfig, generateClashYaml } from "@subboost/core/generator";
 import { buildNodeContentKey, stableJsonStringify } from "@subboost/core/node-identity";
-import type { ProxyChainStatus, ResolvedProxyChain } from "@subboost/core/subscription/chain-nodes";
-import { withNodeSourceId } from "@subboost/core/subscription/node-source-state";
+import {
+  collectChainSourceIds,
+  type ProxyChainStatus,
+  type ResolvedProxyChain,
+} from "@subboost/core/subscription/chain-nodes";
+import { getNodeSourceIds, SOURCE_IDS_KEY, withNodeSourceId } from "@subboost/core/subscription/node-source-state";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
+import type { ProxyChain } from "@subboost/core/types/config";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { sha256Hex } from "./crypto";
 import { refreshSource, sanitizeErrorMessage, type RefreshSourceResult } from "./sources";
@@ -87,27 +92,66 @@ async function runWithConcurrency<T, R>(
   return results;
 }
 
-function targetSources<T extends { id: string; enabled: boolean }>(
-  sub: StoredSubscription,
-  sources: T[]
+/**
+ * 该订阅实际要生成哪些链。
+ *
+ * 链在订阅里就是一个「源」：只有 `chainIds` 里点名的链才会进这条订阅的配置，
+ * 全局链不会漏进每一条订阅。停用的链保留在结果里，由解析层给出 `disabled` 状态。
+ */
+export function selectSubscriptionChains(
+  config: Record<string, unknown>,
+  sub: Pick<StoredSubscription, "chainIds">
+): ProxyChain[] {
+  const ids = Array.isArray(sub.chainIds) ? sub.chainIds : [];
+  if (ids.length === 0) return [];
+  const wanted = new Set(ids);
+  return normalizeProxyChains(config.proxyChains).filter((chain) => wanted.has(chain.id));
+}
+
+type SourceLike = { id: string; enabled: boolean; nodeRenames?: NodeRenames };
+
+/**
+ * 订阅实际用到的源：订阅勾选的源（留空 = 全部已启用源）；
+ * `extraIds` 是链引用节点所在的源，订阅没勾也要一起进快照，否则链的组引用会悬空。
+ */
+function targetSources<T extends SourceLike>(
+  sub: Pick<StoredSubscription, "sourceIds">,
+  sources: T[],
+  extraIds: string[]
 ): T[] {
   const enabled = sources.filter((source) => source.enabled);
-  if (sub.sourceIds.length === 0) return enabled;
   const byId = new Map(enabled.map((source) => [source.id, source]));
-  return sub.sourceIds
-    .map((id) => byId.get(id))
-    .filter((source): source is T => Boolean(source));
+  const picked =
+    sub.sourceIds.length === 0
+      ? enabled
+      : sub.sourceIds
+          .map((id) => byId.get(id))
+          .filter((source): source is T => Boolean(source));
+
+  const used = new Set(picked.map((source) => source.id));
+  const out = [...picked];
+  for (const id of extraIds) {
+    if (used.has(id)) continue;
+    const source = byId.get(id);
+    if (!source) continue;
+    used.add(id);
+    out.push(source);
+  }
+  return out;
 }
 
 /**
  * 按源顺序合并快照里的节点：内容指纹相同的只保留首次出现，再套用该源的节点改名。
  * 订阅生成与配置预览共用，保证两边看到的节点集合一致。
+ *
+ * 同一内容出现在多个源时，除了保留首个节点，还要把后出现的源 id 并进 `_sourceIds`：
+ * 链的节点引用是 (源, 指纹)，只在首个源里记名会让「引用第二个源」永远解析不到。
  */
 function mergeSnapshotNodes(
   targets: ReadonlyArray<{ id: string; nodeRenames?: NodeRenames }>,
   snapshots: ReadonlyArray<SnapshotRecord | null>
 ): ParsedNode[] {
-  const seen = new Set<string>();
+  const seen = new Map<string, ParsedNode>();
   const nodes: ParsedNode[] = [];
   for (let index = 0; index < snapshots.length; index += 1) {
     const snapshot = snapshots[index];
@@ -116,10 +160,19 @@ function mergeSnapshotNodes(
     const renames = targets[index]?.nodeRenames;
     for (const node of snapshot.nodes) {
       const key = buildNodeContentKey(node);
-      if (seen.has(key)) continue;
-      seen.add(key);
+      const existing = seen.get(key);
+      if (existing) {
+        const sourceIds = getNodeSourceIds(existing);
+        const nextId = targets[index].id;
+        if (!sourceIds.includes(nextId)) {
+          existing[SOURCE_IDS_KEY] = [...sourceIds, nextId];
+        }
+        continue;
+      }
       // 先记源再改名：_originName 记的是源里的原始名，展示名随改名走
-      nodes.push(applyNodeRenames(withNodeSourceId(node, targets[index].id), renames));
+      const merged = applyNodeRenames(withNodeSourceId(node, targets[index].id), renames);
+      seen.set(key, merged);
+      nodes.push(merged);
     }
   }
   return nodes;
@@ -178,8 +231,11 @@ export async function generateSubscription(
   }
 ): Promise<GenerateSubscriptionResult> {
   const { store } = deps;
+  // 配置要先读：链是订阅级选择，得先知道这个订阅挂了哪些链，才能把它们的源并进目标集合
+  const config = opts.config ?? (await store.getConfig()).config;
+  const chains = selectSubscriptionChains(config, sub);
   const sources = await store.listSources();
-  const targets = targetSources(sub, sources);
+  const targets = targetSources(sub, sources, collectChainSourceIds(chains));
   const deadline = opts.onDemand
     ? deps.now().getTime() + ON_DEMAND_SOFT_DEADLINE_MS
     : Number.POSITIVE_INFINITY;
@@ -217,8 +273,10 @@ export async function generateSubscription(
 
   if (nodes.length === 0) return { kind: "no-nodes" };
 
-  const config = opts.config ?? (await store.getConfig()).config;
-  const options = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes });
+  const options = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), {
+    nodes,
+    proxyChains: chains,
+  });
   const yaml = generateClashYaml(options);
   const info = aggregateUserInfo(targets, snapshots);
 
@@ -251,6 +309,8 @@ export type ConfigPreview = {
     landingCount: number;
     status: ProxyChainStatus;
     active: boolean;
+    /** 解析不到（源被删/停用或节点已不存在）的引用数 */
+    missingRefs: number;
     error?: string;
   }>;
   /** 最终 rules 段，与订阅输出逐行一致 */
@@ -264,19 +324,27 @@ export type ConfigPreviewResult =
 /**
  * 用一份草稿配置试生成，供管理端保存前校验与展示最终规则。
  *
- * 只读：节点取自全部已启用源的现有快照，不抓上游、不写快照/缓存/状态。
+ * 只读：节点取自全部已启用源的现有快照（加上草稿里链所引用的源），不抓上游、不写快照/缓存/状态。
  * 生成失败（例如基础 YAML 写错）作为结果返回；KV 读失败等基础设施错误照常向上抛。
+ *
+ * 预览口径是「全部启用链」：草稿阶段要看得到每条链的状态，
+ * 而实际下发时只生成订阅 `chainIds` 里点名的那几条。
  */
 export async function previewConfig(
   deps: PipelineDeps,
   config: Record<string, unknown>
 ): Promise<ConfigPreviewResult> {
+  const draftChains = normalizeProxyChains(config.proxyChains);
+  // 链引用的源即使被停用也要读快照：链的节点可能恰好来自这些源
   const summaries = await deps.store.listSourceSummaries();
-  const targets = summaries.filter((source) => source.enabled);
+  const targets = targetSources({ sourceIds: [] }, summaries, collectChainSourceIds(draftChains));
   const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
   const nodes = mergeSnapshotNodes(targets, snapshots);
 
-  const generateOptions = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), { nodes });
+  const generateOptions = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), {
+    nodes,
+    proxyChains: draftChains,
+  });
 
   try {
     // 链解析放在生成流程里：必须与生成看同一批节点（已过滤、协议白名单、名字唯一化），
@@ -303,6 +371,7 @@ export async function previewConfig(
           relayCount: chain.relayNodes.length,
           landingCount: chain.landingNodes.length,
           status: chain.status,
+          missingRefs: chain.missingRefs,
           active: chain.active,
           ...(chain.error ? { error: chain.error } : {}),
         })),
@@ -377,7 +446,7 @@ async function resolveCachedInfo(
   sub: StoredSubscription
 ): Promise<SubscriptionResponseInfo | null> {
   const summaries = await deps.store.listSourceSummaries();
-  const targets = targetSources(sub, summaries);
+  const targets = targetSources(sub, summaries, []);
   if (targets.every((source) => source.kind !== "remote")) return null;
   const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
   return aggregateUserInfo(targets, snapshots);

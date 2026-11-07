@@ -98,6 +98,8 @@ export type StoredSubscription = {
   tokenHash: string;
   tokenEnc: string;
   sourceIds: string[];
+  /** 勾选的链（链在这条订阅里充当「一个源」）：只有点名的链才会生成 */
+  chainIds: string[];
   createdAt: string;
   updatedAt: string;
   // 已生成的短链码（不加密：随机生成的公开定位符，不是秘密材料）
@@ -108,6 +110,7 @@ export type SubscriptionDto = {
   id: string;
   name: string;
   sourceIds: string[];
+  chainIds: string[];
   link: string;
   // 已生成短链时才有值：`${origin}/s/${shortCode}`
   shortLink?: string;
