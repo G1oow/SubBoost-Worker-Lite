@@ -32,7 +32,7 @@ import { MotionItem, MotionList } from "@subboost/ui/motion/motion-list";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { cn } from "@subboost/ui/lib/utils";
-import type { AppState, SubscriptionDto } from "../lib/types";
+import type { AppState, ChainOption, SubscriptionDto } from "../lib/types";
 import { SubscriptionAgeDialog } from "./subscription-age-dialog";
 import { SubscriptionImportDialog } from "./subscription-import-dialog";
 import { SubscriptionShareDialog } from "./subscription-share-dialog";
@@ -40,14 +40,17 @@ import { SubscriptionShareDialog } from "./subscription-share-dialog";
 export type SubscriptionUpdatePatch = {
   name?: string;
   sourceIds?: string[];
+  chainIds?: string[];
 };
 
 export type SubscriptionsPanelProps = {
   state: AppState;
-  onCreate: (input: { name: string; sourceIds: string[] }) => Promise<void>;
+  /** 可勾选的链：链在订阅里就是一个源 */
+  chains?: ChainOption[];
+  onCreate: (input: { name: string; sourceIds: string[]; chainIds: string[] }) => Promise<void>;
   onRotate: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
-  /** 修改已创建订阅的名称与所含源（链接不变） */
+  /** 修改已创建订阅的名称与所含源/链（链接不变） */
   onUpdate?: (id: string, patch: SubscriptionUpdatePatch) => Promise<void>;
   /** 为订阅生成短链（已有短链时幂等返回同一条） */
   onCreateShortLink?: (id: string) => Promise<void>;
@@ -72,9 +75,9 @@ function splitBoundSourceIds(
   }
   return { selected, danglingCount };
 }
-
 export function SubscriptionsPanel({
   state,
+  chains,
   onCreate,
   onRotate,
   onDelete,
@@ -87,6 +90,7 @@ export function SubscriptionsPanel({
   const [editingId, setEditingId] = React.useState<string | null>(null);
   const [name, setName] = React.useState("");
   const [selected, setSelected] = React.useState<string[]>([]);
+  const [selectedChains, setSelectedChains] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
   const [error, setError] = React.useState("");
   /** 该订阅引用但已被删除的源数量：只用于弹窗提示，不参与提交 */
@@ -111,6 +115,15 @@ export function SubscriptionsPanel({
     [state.subscriptions, ageId]
   );
 
+  /** 现存链的 id 集合：与源一样，用来过滤掉已被删除的引用 */
+  const knownChainIds = React.useMemo(
+    () => new Set((chains ?? []).map((chain) => chain.id)),
+    [chains]
+  );
+  const chainNameById = React.useMemo(
+    () => new Map((chains ?? []).map((chain) => [chain.id, chain.name])),
+    [chains]
+  );
   const sourceNameById = React.useMemo(
     () => new Map(state.sources.map((source) => [source.id, source.name])),
     [state.sources]
@@ -124,6 +137,7 @@ export function SubscriptionsPanel({
     setEditingId(null);
     setName("");
     setSelected([]);
+    setSelectedChains([]);
     setDanglingCount(0);
     setError("");
     setOpen(true);
@@ -138,9 +152,17 @@ export function SubscriptionsPanel({
     setName(subscription.name);
     // 已删除的源不能进勾选态，否则保存时会把看不见的 id 一起提交
     setSelected(bound);
+    // 已删除的链同理：后端会以「链不存在」400
+    setSelectedChains(subscription.chainIds.filter((chainId) => knownChainIds.has(chainId)));
     setDanglingCount(dangling);
     setError("");
     setOpen(true);
+  };
+
+  const toggleChain = (id: string) => {
+    setSelectedChains((current) =>
+      current.includes(id) ? current.filter((item) => item !== id) : [...current, id]
+    );
   };
 
   const toggleSource = (id: string) => {
@@ -157,18 +179,19 @@ export function SubscriptionsPanel({
       return;
     }
     setSaving(true);
-    // 兜底：只提交现存源，残留的已删除源 id 会让后端 400「源不存在」
+    // 兜底：只提交现存源/链，残留的已删除 id 会让后端 400
     const sourceIds = selected.filter((id) => knownSourceIds.has(id));
+    const chainIds = selectedChains.filter((id) => knownChainIds.has(id));
     try {
       if (editingId) {
         if (!onUpdate) {
           setError("当前版本不支持修改订阅。");
           return;
         }
-        await onUpdate(editingId, { name: name.trim(), sourceIds });
-        toast({ variant: "success", title: "已更新订阅", description: "链接保持不变，下次访问即按新源生成。" });
+        await onUpdate(editingId, { name: name.trim(), sourceIds, chainIds });
+        toast({ variant: "success", title: "已更新订阅", description: "链接保持不变，下次访问即按新源与链生成。" });
       } else {
-        await onCreate({ name: name.trim(), sourceIds });
+        await onCreate({ name: name.trim(), sourceIds, chainIds });
         toast({ variant: "success", title: "已创建订阅" });
       }
       setOpen(false);
@@ -294,6 +317,29 @@ export function SubscriptionsPanel({
     );
   };
 
+  /** 勾进订阅的链：链在这里就是一个源，带链路图标与「链」标记区别于真实源 */
+  const renderBoundChains = (subscription: SubscriptionDto) => {
+    if (subscription.chainIds.length === 0) return null;
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {subscription.chainIds.slice(0, 2).map((id) => {
+          const label = chainNameById.get(id) ?? "已删除的链";
+          return (
+            <Badge key={id} variant="outline" title={`链式代理 · ${label}`} className="min-w-0 max-w-[min(100%,11rem)]">
+              <Icon icon={Link2} size="xs" className="shrink-0 text-fg-45" />
+              <span className="min-w-0 truncate">{label}</span>
+            </Badge>
+          );
+        })}
+        {subscription.chainIds.length > 2 ? (
+          <Badge variant="secondary" className="shrink-0">
+            +{subscription.chainIds.length - 2}
+          </Badge>
+        ) : null}
+      </div>
+    );
+  };
+
   return (
     <Card>
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
@@ -335,6 +381,7 @@ export function SubscriptionsPanel({
                         {subscription.name}
                       </span>
                       {renderBoundSources(subscription)}
+                      {renderBoundChains(subscription)}
                     </div>
                     {/* 链接单占一行：表格里被压成一列，前缀都读不全 */}
                     <p className="truncate font-mono text-2xs text-fg-45" title={subscription.link}>
@@ -536,6 +583,54 @@ export function SubscriptionsPanel({
                   );
                 })}
               </MotionList>
+            </div>
+
+            {/* 链式代理：建好的链在这里就是一个源，只有勾选它的订阅才生成 */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium text-fg-80">链式代理（节点）</p>
+              <p className="text-xs text-fg-45">
+                链在配置里就是一个节点，勾选后整条链会生成到这条订阅里；没勾的链不会出现。
+              </p>
+              {(chains ?? []).length === 0 ? (
+                <p className="text-xs text-fg-45">还没有链式代理，去「生成配置 → 链式代理」创建。</p>
+              ) : (
+                <div className="grid gap-2">
+                  {(chains ?? []).map((chain) => {
+                    const checked = selectedChains.includes(chain.id);
+                    return (
+                      <button
+                        key={chain.id}
+                        type="button"
+                        onClick={() => toggleChain(chain.id)}
+                        aria-pressed={checked}
+                        className={cn(
+                          "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-[border-color,background-color,color] duration-200",
+                          checked
+                            ? "border-primary-500/50 bg-primary-500/20 text-fg"
+                            : "border-ink/10 bg-ink/5 text-fg-70 hover:border-ink/20 hover:bg-ink/10"
+                        )}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
+                              checked ? "border-primary-500 bg-primary-500/70" : "border-ink/25"
+                            )}
+                          >
+                            {checked ? <Icon icon={Check} size="xs" className="text-fg" /> : null}
+                          </span>
+                          <Icon icon={Link2} size="xs" className="shrink-0 text-fg-45" />
+                          <span className="min-w-0 truncate">{chain.name || "（未命名链）"}</span>
+                        </span>
+                        <span className="shrink-0 text-xs text-fg-45">
+                          {chain.enabled ? "链式代理" : "链式代理 · 已停用"}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
             {error ? (

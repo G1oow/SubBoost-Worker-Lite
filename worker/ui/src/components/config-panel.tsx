@@ -11,7 +11,7 @@ import { SegmentedControl } from "@subboost/ui/motion/segmented-control";
 import { readChains } from "../lib/chain-editor";
 import { isConfigChanged, reconcileWithBaseline, type ConfigRecord } from "../lib/rule-editor";
 import type { ConfigSection } from "../lib/routes";
-import type { AppState, ConfigPreview } from "../lib/types";
+import type { AppState, ConfigPreview, SourceNodesResponse } from "../lib/types";
 import { ConfigChainsSection } from "./config-chains-section";
 import { ConfigRulesSection } from "./config-rules-section";
 
@@ -25,6 +25,8 @@ export type ConfigPanelProps = {
   onPreview?: (config: Record<string, unknown>) => Promise<ConfigPreview>;
   /** 有未保存的修改（含 JSON 语法错误）时通知上层，用于离开页面前确认 */
   onDirtyChange?: (dirty: boolean) => void;
+  /** 读取某个源的节点：链式代理里「先选源、再挑节点」要用 */
+  onLoadNodes?: (sourceId: string) => Promise<SourceNodesResponse>;
 };
 
 const SECTION_OPTIONS: Array<{ id: ConfigSection; label: string }> = [
@@ -77,6 +79,7 @@ export function ConfigPanel({
   onReset,
   onPreview,
   onDirtyChange,
+  onLoadNodes,
 }: ConfigPanelProps) {
   const { toast } = useToast();
   const baseline = state.config;
@@ -260,7 +263,7 @@ export function ConfigPanel({
   // 预览里的逐条链状态：还没跑完第一次校验、或校验直接失败时没有这层数据
   const previewChains =
     preview.status === "idle" || preview.status === "error" ? undefined : preview.data?.chains;
-  // 分段控件上的数量徽标：不点进去也能看出有几条链
+
   const chainCount = React.useMemo(() => readChains(draft).length, [draft]);
   const sectionOptions = SECTION_OPTIONS.map((option) =>
     option.id === "chains" && chainCount > 0 ? { ...option, badge: chainCount } : option
@@ -328,6 +331,7 @@ export function ConfigPanel({
             config={draft}
             sources={state.sources}
             previewChains={previewChains}
+            onLoadNodes={onLoadNodes}
             onChange={applyVisual}
           />
         ) : null}

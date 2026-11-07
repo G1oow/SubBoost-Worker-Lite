@@ -23,6 +23,7 @@ import {
 } from "./lib/routes";
 import type {
   AppState,
+  ChainOption,
   ConfigPreview,
   DashboardStats,
   ParseNodesResponse,
@@ -257,13 +258,16 @@ export function App() {
     [client]
   );
 
-  const handleCreateSubscription = async (input: { name: string; sourceIds: string[] }) => {
+  const handleCreateSubscription = async (input: {
+    name: string;
+    sourceIds: string[];
+    chainIds: string[];
+  }) => {
     const result = await client.send<SubscriptionResponse>("POST", "/api/subscriptions", input);
     setState((current) =>
       current ? { ...current, subscriptions: [...current.subscriptions, result.subscription] } : current
     );
   };
-
   const handleUpdateSubscription = async (id: string, patch: SubscriptionUpdatePatch) => {
     const result = await client.send<SubscriptionResponse>(
       "PATCH",
@@ -376,6 +380,20 @@ export function App() {
 
   if (!token) return <TokenGate onAuthenticated={handleAuthenticated} />;
 
+  /* 可勾进订阅的链：链建好后就是一个源，这里把配置里的链投影成选项（不用 useMemo：本行在早返回之后） */
+  const chainOptions: ChainOption[] = (() => {
+    const raw = state?.config?.proxyChains;
+    if (!Array.isArray(raw)) return [];
+    return raw
+      .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+      .map((item) => ({
+        id: typeof item.id === "string" ? item.id.trim() : "",
+        name: typeof item.name === "string" ? item.name.trim() : "",
+        enabled: item.enabled !== false,
+      }))
+      .filter((item) => item.id);
+  })();
+
   const navItems = NAV_ITEMS.map((item) =>
     item.id === "sources" && state
       ? { ...item, badge: state.sources.length }
@@ -434,6 +452,7 @@ export function App() {
             {page === "subscriptions" ? (
               <SubscriptionsPanel
                 state={state}
+                chains={chainOptions}
                 onCreate={handleCreateSubscription}
                 onUpdate={handleUpdateSubscription}
                 onRotate={handleRotateSubscription}
@@ -454,6 +473,7 @@ export function App() {
                 onReset={handleResetConfig}
                 onPreview={handlePreviewConfig}
                 onDirtyChange={handleConfigDirtyChange}
+                onLoadNodes={handleLoadNodes}
               />
             ) : null}
           </>
