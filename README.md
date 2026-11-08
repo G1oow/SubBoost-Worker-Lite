@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-4B5563?style=flat-square" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.15.0-F59E0B?style=flat-square" alt="Version 0.15.0">
+  <img src="https://img.shields.io/badge/version-0.15.1-F59E0B?style=flat-square" alt="Version 0.15.1">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-22C55E?style=flat-square" alt="License: AGPL-3.0-only"></a>
   <img src="https://img.shields.io/badge/Node-%3E%3D22.23.4-3776AB?style=flat-square" alt="Node 版本要求">
 </p>

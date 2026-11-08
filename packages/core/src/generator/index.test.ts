@@ -628,7 +628,9 @@ describe("generateClashConfig", () => {
     expect(config.proxies?.find((proxy) => proxy.name === "Target")).toMatchObject({
       "dialer-proxy": "Messy Chain",
     });
-    expect(config.proxies?.find((proxy) => proxy.name === "Blank Target")).toHaveProperty("dialer-proxy", " ");
+    // 空白的 dialer-proxy 会被 mihomo 当成一个名字去查找（`not found` → 整份配置校验失败），
+    // 所以空白值一律当没写，节点退回单跳
+    expect(config.proxies?.find((proxy) => proxy.name === "Blank Target")).not.toHaveProperty("dialer-proxy");
     expect(config.proxies?.find((proxy) => proxy.name === "TLS VMess")).toMatchObject({
       "client-fingerprint": "chrome",
     });

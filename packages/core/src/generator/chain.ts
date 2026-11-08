@@ -87,6 +87,38 @@ export function applyDialerProxy(
 }
 
 /**
+ * 输出前的最后一道闸：`dialer-proxy` 只能指向配置里真实存在的名字。
+ *
+ * mihomo 在加载期做引用校验（`proxy [X] dialer-proxy [Y] not found`），悬空的
+ * `dialer-proxy` 会让整份配置校验失败，客户端连内核都应用不上。上游任何一环漏掉
+ * 前置组（组被过滤、链被跳过、重名覆盖）都会留下这种引用，所以统一在这里兜底：
+ * 认不出来的名字就当没链过，节点退回单跳，至少整份订阅还能用。
+ */
+export function stripDanglingDialerProxy(
+  nodes: ParsedNode[],
+  availableNames: Iterable<string>
+): ParsedNode[] {
+  const allowed = new Set<string>();
+  for (const name of availableNames) {
+    if (typeof name === "string" && name) allowed.add(name);
+  }
+
+  let changed = false;
+  const out = nodes.map((node) => {
+    const record = node as unknown as Record<string, unknown>;
+    const raw = record["dialer-proxy"];
+    if (typeof raw !== "string") return node;
+    const dialer = raw.trim();
+    if (dialer && allowed.has(dialer)) return node;
+    changed = true;
+    const { ["dialer-proxy"]: _dropped, ...rest } = record;
+    return rest as unknown as ParsedNode;
+  });
+
+  return changed ? out : nodes;
+}
+
+/**
  * 获取所有使用中转的节点名称
  */
 export function getDialerTargetNodes(groups: DialerProxyGroup[]): Set<string> {
