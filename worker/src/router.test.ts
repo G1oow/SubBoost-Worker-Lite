@@ -7,7 +7,7 @@ import { x25519PublicKeyFromSecret } from "@subboost/server-core/crypto/x25519";
 import { route } from "./router";
 import { createStore } from "./store";
 import { MemoryKV } from "./test-utils/memory-kv";
-import type { PipelineDeps } from "./pipeline";
+import { refreshAll, type PipelineDeps } from "./pipeline";
 import { resolveDefaultUserAgent } from "./sources";
 
 const ADMIN_TOKEN = "test-admin-token";
@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.15.1" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.15.2" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -470,6 +470,57 @@ describe("router /sub", () => {
       h.deps
     );
     expect(second.status).toBe(200);
+    expect(second.headers.get("etag")).not.toBe(firstEtag);
+  });
+  /**
+   * 回归：源节点内容更新后（节点数与 YAML 长度都没变），客户端带旧 ETag 重新拉取时
+   * 必须拿到 200 + 新节点。旧实现只按「configHash + 节点数 + YAML 长度」算 ETag，
+   * 这里会错误地返回 304，让客户端一直沿用旧配置（用户侧表现为「要重新绑定源才更新」）。
+   */
+  it("源节点内容变化后同一 ETag 不再命中 304", async () => {
+    const h = createHarness();
+    const upstreamText = (host: string) =>
+      Buffer.from(
+        [
+          `ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@${host}:8388#NodeA`,
+          `ss://YWVzLTI1Ni1nY206cGFzc3dvcmQ@${host}:8389#NodeB`,
+        ].join("\n")
+      ).toString("base64");
+    const mockUpstream = (host: string) =>
+      (async (url: string) => ({
+        status: 200,
+        headers: {},
+        text: upstreamText(host),
+        finalUrl: url,
+      })) as unknown as PipelineDeps["fetchText"];
+
+    h.deps.pipeline.fetchText = mockUpstream("a1.example.com");
+    await h.store.saveSources([{ name: "up", kind: "remote", url: "https://up.example.com/sub" }]);
+    const { token } = await h.store.createSubscription({ name: "up-sub", sourceIds: [] });
+
+    const first = await route(new Request(`https://worker.example.com/sub/${token}`), h.env, h.deps);
+    expect(first.status).toBe(200);
+    const firstEtag = first.headers.get("etag") as string;
+    const firstBody = await first.text();
+    expect(firstBody).toContain("a1.example.com");
+
+    // 上游换内容：节点数与 YAML 字节长度都不变，只有节点内容不同
+    h.deps.pipeline.fetchText = mockUpstream("b1.example.com");
+    const refreshed = await refreshAll(h.deps.pipeline, { trigger: "manual" });
+    expect("status" in refreshed).toBe(true);
+
+    const second = await route(
+      new Request(`https://worker.example.com/sub/${token}`, {
+        headers: { "if-none-match": firstEtag },
+      }),
+      h.env,
+      h.deps
+    );
+    expect(second.status).toBe(200);
+    const secondBody = await second.text();
+    expect(secondBody).toContain("b1.example.com");
+    // 前提守护：长度相同，旧实现正因如此给出同一个 ETag 并回 304
+    expect(secondBody.length).toBe(firstBody.length);
     expect(second.headers.get("etag")).not.toBe(firstEtag);
   });
   it("emits subscription-userinfo only when every remote source provides the fields", async () => {

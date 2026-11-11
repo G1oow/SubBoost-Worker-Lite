@@ -97,6 +97,7 @@ git stash list
 | 2026-10-12 | 验收复核：Windows 上重建时 `dist` 残留旧 `assets/*`（有进程持有文件句柄时 Node/Vite 的删除被推迟，`emptyOutDir` 看似未生效；Git Bash 的 `rm` 可正常删除） | 部署可能带上无引用的旧产物 | 本地环境现象，无代码改动；`worker/README.md` 登记处理方式（先停相关进程并手动清理 `dist` 再构建） |
 | 2026-10-12 | 二次复核：本机 Git for Windows 安装在自定义路径 `D:\Git`，`test/setup-runtime.ts` 的 `findGitBashBin` 只检查 Program Files / LOCALAPPDATA / scoop 默认位置，找不到时直接抛错（PR 未解决问题「本机全量单测基线失败」在本环境的实际根因之一，此前表现为该文件超时/报「Git for Windows Bash is required」） | Windows 本机 shell 脚本套件无法运行 | `findGitBashBin` 追加兜底：用 `where.exe git` 定位 `git.exe` 并向上最多 3 级推导 `<git-root>\bin\bash.exe`；兜底仅在 win32 且默认位置未命中时生效，CI（Linux）不受影响 |
 | 2026-10-12 | 二次复核：Git Bash 检测修复后，全量套件满载并行时该文件 rollback 用例仍超 vitest 默认 5s 单测超时（`spawnSync` 的 30s 尚未到期，测试先被 vitest 终止；单文件运行 7.4s 全过，仅并行满载下触发） | Windows 本机全量单测 1842/1844（2 个 rollback 用例超时） | `local/scripts/selfhost-lifecycle-shell.test.ts` 中三个 spawn bash 的用例加显式 `{ timeout: 60_000 }`（覆盖 `spawnSync` 30s 上限）；修复后全量 260 文件 / 1844 用例全绿（复核时 `wrangler dev` 保持运行，维持满载条件） |
+| 2026-11-11 | 验收复核：订阅 ETag 由 `configHash` 前 16 位 + 节点数 + YAML 字节长度拼成，并不是内容身份。源刷新后节点内容变了、但节点数与 YAML 长度恰好相同（例如只换了等长的服务器名或密码）时算出的 ETag 一模一样，客户端带 `If-None-Match` 得到 `304` 并继续沿用旧配置（用户侧表现为「源节点更新后订阅链接不自动更新，要重新绑定绑定源才生效」） | 源节点更新对客户端不可见，只有改配置或重新绑定源才会重新拉取 | `worker/src/types.ts` 的 `CacheRecord` 新增 `contentHash`（YAML 的 sha256）；`worker/src/pipeline.ts` 生成时写入该摘要，`buildCacheETag` 改为异步并以内容摘要作首段（旧记录缺字段时按需补算，不留假命中）；`worker/src/router.ts` 跟随异步签名。保留「内容没变 → 304」的省流量语义；新增 `pipeline.test.ts` 2 条与 `router.test.ts` 1 条回归，改前复现 `expected 304 to be 200` |
 
 ---
 
@@ -709,7 +710,7 @@ export async function requireAdmin(request: Request, env: Env): Promise<void>;
 | POST | `/api/nodes/parse` | 是 | `{ text, renames? }`，上限 1 MiB | `200 { nodes, totalParsed, totalFailed, errors }`；空文本返回空列表 |
 | GET | `/api/dashboard` | 是 | 无 | `200 DashboardStats`（源/订阅计数、节点总数、协议分布、逐源健康、最近刷新摘要、提醒） |
 | POST | `/api/refresh` | 是 | 无 | `200 { status }`；持锁 `409 REFRESH_IN_PROGRESS` |
-| GET、HEAD | `/sub/:token` | 否 | 无 | `200` YAML；`404` `Not found`；`503` `No nodes available` + `Retry-After: 600` |
+| GET、HEAD | `/sub/:token` | 否 | 无 | `200` YAML（`etag` 首段是 YAML 内容摘要，内容变了 ETag 必变）；`404` `Not found`；`503` `No nodes available` + `Retry-After: 600` |
 | GET、HEAD | `/s/:code` | 否 | 无 | 与 `/sub/:token` 完全一致（同一份缓存、同一 ETag）；短码不合 `^[A-Za-z0-9_-]{8}$` 时直接 `404` `Not found`，不查 KV |
 | 其他 `/api/*` | | | | `404 NOT_FOUND` JSON |
 | 其他路径 | | | | `env.ASSETS.fetch(request)` |

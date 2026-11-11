@@ -1,6 +1,7 @@
 import yaml from "js-yaml";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  buildCacheETag,
   computeConfigHash,
   computeSubscriptionCacheHash,
   generateSubscription,
@@ -521,6 +522,96 @@ describe("getOrGenerateSubscription", () => {
     expect(second.cache.generatedAt).toBe(cached?.generatedAt);
   });
 
+  /**
+   * 回归：源节点内容更新后（节点数与 YAML 字节长度都没变），ETag 必须跟着内容变。
+   * 否则客户端带 If-None-Match 会一直拿到 304、继续沿用旧节点，直到用户重新绑定源。
+   */
+  it("节点数相同但节点内容变化时 ETag 必须变化", async () => {
+    const [source] = await h.store.saveSources([{ name: "m", kind: "manual", manualText: ssNode("seed", 8388) }]);
+    const { token, dto } = await h.store.createSubscription({ name: "s", sourceIds: [source.id] });
+
+    const nodesOn = (server: string) =>
+      [
+        { name: "n1", type: "ss", server, port: 8388, cipher: "aes-256-gcm", password: "x" },
+        { name: "n2", type: "ss", server, port: 8389, cipher: "aes-256-gcm", password: "x" },
+      ] as unknown as ParsedNode[];
+
+    await h.store.putSnapshot({
+      sourceId: source.id,
+      nodes: nodesOn("a1.example.com"),
+      nodeCount: 2,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+    const first = await getOrGenerateSubscription(h.deps, token);
+    expect(first.kind).toBe("ok");
+    if (first.kind !== "ok") return;
+    const firstEtag = await buildCacheETag(first.cache);
+
+    // 模拟源被刷新后的重新生成：节点数与 YAML 长度都一样，只有节点内容不同
+    await h.store.putSnapshot({
+      sourceId: source.id,
+      nodes: nodesOn("b1.example.com"),
+      nodeCount: 2,
+      fetchedAt: "2026-10-02T00:00:00.000Z",
+      parseErrors: [],
+    });
+    await h.store.deleteCache(dto.id);
+    const second = await getOrGenerateSubscription(h.deps, token);
+    expect(second.kind).toBe("ok");
+    if (second.kind !== "ok") return;
+
+    expect(second.cache.yaml).not.toBe(first.cache.yaml);
+    // 前提守护：长度与节点数都相同 —— 只按「节点数 + 长度」算 ETag 的旧实现必然给出同一个值
+    expect(second.cache.yaml.length).toBe(first.cache.yaml.length);
+    expect(second.cache.nodeCount).toBe(first.cache.nodeCount);
+    expect(await buildCacheETag(second.cache)).not.toBe(firstEtag);
+  });
+
+  it("重新生成内容完全相同的 YAML 时 ETag 保持不变", async () => {
+    const [source] = await h.store.saveSources([{ name: "m", kind: "manual", manualText: ssNode("seed", 8388) }]);
+    const { token, dto } = await h.store.createSubscription({ name: "s", sourceIds: [source.id] });
+    await h.store.putSnapshot({
+      sourceId: source.id,
+      nodes: [
+        { name: "n1", type: "ss", server: "a1.example.com", port: 8388, cipher: "aes-256-gcm", password: "x" },
+      ] as unknown as ParsedNode[],
+      nodeCount: 1,
+      fetchedAt: "2026-10-01T00:00:00.000Z",
+      parseErrors: [],
+    });
+
+    const first = await getOrGenerateSubscription(h.deps, token);
+    expect(first.kind).toBe("ok");
+    if (first.kind !== "ok") return;
+
+    await h.store.deleteCache(dto.id);
+    const again = await getOrGenerateSubscription(h.deps, token);
+    expect(again.kind).toBe("ok");
+    if (again.kind !== "ok") return;
+
+    // 内容没变时 ETag 必须稳定，否则客户端每次都要重新下载整份 YAML
+    expect(again.cache.yaml).toBe(first.cache.yaml);
+    expect(await buildCacheETag(again.cache)).toBe(await buildCacheETag(first.cache));
+  });
+  it("升级前没有 contentHash 的旧缓存记录也按内容摘要算 ETag", async () => {
+    const [source] = await h.store.saveSources([{ name: "m", kind: "manual", manualText: ssNode("m", 8388) }]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [source.id] });
+    const first = await getOrGenerateSubscription(h.deps, token);
+    expect(first.kind).toBe("ok");
+    if (first.kind !== "ok") return;
+
+    // 模拟升级前写入的缓存记录：没有 contentHash（KV 序列化也会丢掉 undefined）
+    const legacy = { ...first.cache, contentHash: undefined };
+    await h.store.putCache(legacy);
+
+    const etag = await buildCacheETag(legacy);
+    expect(etag).toBe(await buildCacheETag(first.cache));
+    // 不能退回旧口径（配置哈希 + 节点数 + 长度），否则又会出现假命中
+    expect(etag).not.toBe(
+      `"${first.cache.configHash.slice(0, 16)}-${first.cache.nodeCount}-${first.cache.yaml.length}"`
+    );
+  });
   it("returns no-nodes when every source is empty", async () => {
     await h.store.saveSources([{ name: "m", kind: "manual", manualText: "ss://x" }]);
     const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
@@ -648,6 +739,8 @@ describe("refreshAll", () => {
     const stored = await h.store.findSubscriptionByToken(token);
     expect(result.cache.configHash).toBe(await computeSubscriptionCacheHash(config, stored!));
     expect(h.kv.has(snapshotKey((await h.store.listSources())[0].id))).toBe(true);
+    // 缓存记录带上 YAML 内容摘要：ETag 由它派生，内容变了才会变
+    expect(result.cache.contentHash).toBe(await sha256Hex(result.cache.yaml));
   });
 
   it("勾选链后即使配置没变也会重新生成，前置组随之出现", async () => {
