@@ -575,7 +575,7 @@ async function handleSubscription(request: Request, entry: SubscriptionEntry): P
     );
   }
 
-  const etag = buildCacheETag(result.cache);
+  const etag = await buildCacheETag(result.cache);
   const headers = buildSubscriptionResponseHeaders(result.sub.name, result.info ?? {}, {
     // 允许客户端/中间层存副本，但每次使用前必须回源校验（配合 ETag 走 304）
     cacheControl: "private, no-cache",

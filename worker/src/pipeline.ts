@@ -312,6 +312,7 @@ export async function generateSubscription(
   const cache: CacheRecord = {
     subscriptionId: sub.id,
     yaml,
+    contentHash: await sha256Hex(yaml),
     nodeCount: nodes.length,
     generatedAt: deps.now().toISOString(),
     configHash: await computeSubscriptionCacheHash(config, sub),
@@ -595,10 +596,16 @@ export async function refreshAll(
 }
 
 /**
- * 缓存内容的 ETag。
- * 只由「输出内容」决定：配置哈希 + 节点数 + YAML 长度，
- * 因此快照重抓但节点没变时 ETag 不变，客户端继续命中 304。
+ * 缓存内容的 ETag。首段是 YAML 内容的 sha256 摘要，只有内容真的变了 ETag 才变。
+ *
+ * 不要退回「配置哈希 + 节点数 + YAML 长度」：那不是内容身份。源刷新后节点内容变了、
+ * 但节点数与 YAML 字节长度恰好相同（例如只换了等长的服务器名/密码）时它算出的 ETag 一模一样，
+ * 客户端带 If-None-Match 会拿到 304 并继续沿用旧配置，表现为「订阅链接不自动更新，要重新绑定源」。
+ * 内容摘要还保留了原有的省流量收益：快照重抓但节点没变时 YAML 字节相同 → 摘要相同 → 仍然 304。
+ *
+ * 升级前写入的旧缓存记录没有 contentHash，这里按需补算一次，避免留下假命中。
  */
-export function buildCacheETag(cache: CacheRecord): string {
-  return `"${cache.configHash.slice(0, 16)}-${cache.nodeCount}-${cache.yaml.length}"`;
+export async function buildCacheETag(cache: CacheRecord): Promise<string> {
+  const digest = cache.contentHash ?? (await sha256Hex(cache.yaml));
+  return `"${digest.slice(0, 16)}-${cache.nodeCount}-${cache.yaml.length}"`;
 }

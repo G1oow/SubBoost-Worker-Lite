@@ -130,6 +130,12 @@ export type SnapshotRecord = {
 export type CacheRecord = {
   subscriptionId: string;
   yaml: string;
+  /**
+   * YAML 内容的 sha256 摘要（hex）。订阅响应的 ETag 由它派生：
+   * 只有内容真的变了 ETag 才变，「节点数与字节长度恰好相同」的不同内容也不会被误判成未更新。
+   * 升级前写入的旧记录没有这个字段，读取侧按需补算。
+   */
+  contentHash?: string;
   nodeCount: number;
   generatedAt: string;
   configHash: string;
