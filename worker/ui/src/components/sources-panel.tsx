@@ -17,8 +17,8 @@ import { FormField } from "@subboost/ui/components/ui/form-field";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
-import { MotionItem, MotionList } from "@subboost/ui/motion/motion-list";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@subboost/ui/components/ui/select";
+import { SortableHandle, SortableItem, SortableList } from "@subboost/ui/components/ui/sortable-list";
 import { SwitchField } from "@subboost/ui/components/ui/switch-field";
 import { Textarea } from "@subboost/ui/components/ui/textarea";
 import { useToast } from "@subboost/ui/components/ui/toaster";
@@ -37,6 +37,7 @@ import type {
 export type SourcesPanelProps = {
   state: AppState;
   onSave: (sources: SourceInput[]) => Promise<void>;
+  onReorder?: (ids: string[]) => Promise<void>;
   /** 解析手动节点文本，返回节点名称与协议（用于导入时预览/改名） */
   onParseNodes?: (text: string) => Promise<ParseNodesResponse>;
   /** 读取某个源当前解析出的节点，用于单独改名 */
@@ -103,7 +104,7 @@ function toInput(source: SourceDto): SourceInput {
   };
 }
 
-export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: SourcesPanelProps) {
+export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNodes }: SourcesPanelProps) {
   const { toast } = useToast();
   const [open, setOpen] = React.useState(false);
   const [draft, setDraft] = React.useState<Draft>(emptyDraft());
@@ -288,6 +289,26 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
     }
   };
 
+  const [reordering, setReordering] = React.useState(false);
+  const [orderedIds, setOrderedIds] = React.useState<string[] | null>(null);
+  const sourceIds = state.sources.map((source) => source.id);
+  const visibleIds = orderedIds && orderedIds.length === sourceIds.length &&
+    orderedIds.every((id) => sourceIds.includes(id)) ? orderedIds : sourceIds;
+  const visibleSources = visibleIds.map((id) => state.sources.find((source) => source.id === id)!);
+  const reorder = async (ids: string[]) => {
+    if (!onReorder || reordering) return;
+    setOrderedIds(ids);
+    setReordering(true);
+    try {
+      await onReorder(ids);
+    } catch (err) {
+      setOrderedIds(null);
+      toast({ variant: "destructive", title: "排序保存失败", description: err instanceof Error ? err.message : "请重试" });
+    } finally {
+      setReordering(false);
+    }
+  };
+
   const dialogNodes = parse.nodes;
   const renamedCount = Object.keys(draft.nodeRenames).length;
 
@@ -315,14 +336,15 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
            * 源数量多时操作区被拉得很开、视线难以横向读完。改成卡片列表后
            * 每行自带边框与圆角，行间用 space-y 分隔，边界清楚。
            */
-          <MotionList as="ul" className="space-y-2.5" animateOnMount>
-            {state.sources.map((source) => {
+          <SortableList ids={visibleIds} onReorder={(ids) => void reorder(ids)} labelOf={(id) => state.sources.find((source) => source.id === id)?.name ?? id} disabled={reordering || !onReorder} className="space-y-2.5">
+            {visibleSources.map((source) => {
               const status = statusBySource.get(source.id);
               const renamed = Object.keys(source.nodeRenames ?? {}).length;
               return (
-                <MotionItem as="li" key={source.id} itemKey={source.id}>
+                <SortableItem key={source.id} id={source.id} label={source.name} disabled={reordering || !onReorder}>
                   {/* 窄屏改成上下两段：文本一行、操作一行贴右，避免长源名把三个图标挤出屏幕 */}
-                  <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:px-4">
+                  <div className="group flex flex-col gap-2 rounded-xl border border-card-border bg-surface py-3 pl-9 pr-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:pr-4">
+                    <SortableHandle />
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="truncate text-sm font-medium text-fg">{source.name}</span>
@@ -366,10 +388,10 @@ export function SourcesPanel({ state, onSave, onParseNodes, onLoadNodes }: Sourc
                       </IconButton>
                     </div>
                   </div>
-                </MotionItem>
+                </SortableItem>
               );
             })}
-          </MotionList>
+          </SortableList>
         )}
       </CardContent>
 

@@ -40,7 +40,8 @@ packages/ui/src/        可复用能力：业务无关
 - `worker/ui/src` 不直接 `import "@radix-ui/react-*"`，一律用 `packages/ui/src/components/ui/` 的包装组件。
   校验：`npm run check:ui-consistency`。
 - `packages/ui` 不反向依赖 `worker/`。共享包保持业务无关。
-- 不引入新的运行时依赖。当前允许的运行时依赖只有 React、`lucide-react`、`qrcode.react`、`@subboost/*`；
+- 不引入新的运行时依赖。当前允许的运行时依赖只有 React、`lucide-react`、`qrcode.react`、
+  `@dnd-kit/*`（拖拽排序，见下文「可拖拽排序列表」）与 `@subboost/*`；
   真要加必须在 PR 里写明理由与体积影响。
 
 ---
@@ -192,6 +193,31 @@ packages/ui/src/        可复用能力：业务无关
   `ChevronDown` + `rotate-180` + 各自的时长：它的时长与曲线和 `MotionReveal` 对齐。
   切换按钮用 `IconButton` + 轮换 `label`（`展开 X` / `收起 X`）。
 - 守护：`worker/ui/src/components/mobile-layout.test.ts`「disclosure motion」。
+
+### 可拖拽排序列表
+
+「源管理」「订阅链接」「刷新状态」的条目卡片支持拖拽排序，统一走
+`@subboost/ui/components/ui/sortable-list`（`SortableList` + `SortableItem`），不要自己接 `@dnd-kit`：
+
+- **手柄在卡片内部，不要卡片外另起一列**：卡片左侧自己留出 36px 内边距（`py-3 pl-9 pr-3`）
+  并加 `group`，`<SortableHandle />` 绝对定位贴在这段内边距里，视觉上属于卡片本身。
+- **视觉本体小、命中区大**：外层 `<button>` 占满卡片高度（≥44px）、32px 宽；内层 28px 圆角方块
+  才是可见部分（`h-7 w-7`）。常态 12px 抓握图标 + `text-fg-35`、无底色。
+- **两级悬停反馈**：指针落在**卡片**上时图标提到 `text-fg-60`，落到**手柄**上再浮出
+  `bg-ink/5` 与 `text-fg-70`；键盘聚焦走 `group-focus-visible/handle` 的焦点环。
+  命名组（`group/handle`）与卡片组同优先级，靠源码顺序决胜——改这里要核对编译后 CSS 的先后。
+- **对齐靠内边距，不靠位移**：窄屏卡片竖排时 `pt-2` 让图标落在标题行中线上（实测与标题同高），
+  `sm` 起卡片横排、内容垂直居中，图标随之居中。全程不引入 transform，避免卡片内容被提升为合成层。
+- **触摸长按 220ms 才激活**，短按滚动列表不会被拖拽劫持；鼠标位移 5px 才激活，避免误触点击。
+- **键盘可用**：聚焦手柄后空格拾起、上下方向键移动、空格放下、`Escape` 取消。
+- **播报要中文且用条目名**：`SortableList` 已内置 `announcements`，调用方必须传 `labelOf`，
+  否则读屏会念内部 id。
+- **顺序落库走专用端点**（`PUT /api/sources/order`、`PUT /api/subscriptions/order`），只重写数组顺序，
+  不要复用 `PUT /api/sources` 全量保存：那会重新加密 payload 并清空所有订阅缓存。服务端会校验
+  id 集合与当前集合完全一致，不一致返回 409，前端回滚本地顺序并 toast。
+- **「刷新状态」是只读快照**：页面按当前源/订阅顺序展示，已删除的旧条目保持原相对顺序置后；
+  拖拽只写实体顺序，不改最近一次刷新记录。
+- 与 `MotionList` 的 FLIP 不要叠在同一个元素上：dnd-kit 与 Motion 都要写 `transform`，会互相覆盖。
 
 
 ### 容器

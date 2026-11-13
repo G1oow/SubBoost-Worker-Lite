@@ -29,6 +29,7 @@ import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { useToast } from "@subboost/ui/components/ui/toaster";
 import { MotionItem, MotionList } from "@subboost/ui/motion/motion-list";
+import { SortableHandle, SortableItem, SortableList } from "@subboost/ui/components/ui/sortable-list";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { cn } from "@subboost/ui/lib/utils";
@@ -48,6 +49,7 @@ export type SubscriptionsPanelProps = {
   /** 可勾选的链：链在订阅里就是一个源 */
   chains?: ChainOption[];
   onCreate: (input: { name: string; sourceIds: string[]; chainIds: string[] }) => Promise<void>;
+  onReorder?: (ids: string[]) => Promise<void>;
   onRotate: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
   /** 修改已创建订阅的名称与所含源/链（链接不变） */
@@ -79,6 +81,7 @@ export function SubscriptionsPanel({
   state,
   chains,
   onCreate,
+  onReorder,
   onRotate,
   onDelete,
   onUpdate,
@@ -101,6 +104,25 @@ export function SubscriptionsPanel({
   const [ageId, setAgeId] = React.useState<string | null>(null);
   const [shortBusyId, setShortBusyId] = React.useState<string | null>(null);
   const [shortCopiedId, setShortCopiedId] = React.useState<string | null>(null);
+  const [reordering, setReordering] = React.useState(false);
+  const [orderedIds, setOrderedIds] = React.useState<string[] | null>(null);
+  const subscriptionIds = state.subscriptions.map((sub) => sub.id);
+  const visibleIds = orderedIds && orderedIds.length === subscriptionIds.length &&
+    orderedIds.every((id) => subscriptionIds.includes(id)) ? orderedIds : subscriptionIds;
+  const visibleSubscriptions = visibleIds.map((id) => state.subscriptions.find((sub) => sub.id === id)!);
+  const reorder = async (ids: string[]) => {
+    if (!onReorder || reordering) return;
+    setOrderedIds(ids);
+    setReordering(true);
+    try {
+      await onReorder(ids);
+    } catch (err) {
+      setOrderedIds(null);
+      toast({ variant: "destructive", title: "排序保存失败", description: err instanceof Error ? err.message : "请重试" });
+    } finally {
+      setReordering(false);
+    }
+  };
   // 由 id 派生而非保存快照，轮换/改名后弹窗自动跟着更新
   const sharing = React.useMemo(
     () => state.subscriptions.find((item) => item.id === sharingId) ?? null,
@@ -369,11 +391,12 @@ export function SubscriptionsPanel({
            * 表格的列宽由算法强制对齐，链接这种长度不定的内容会把「操作」列
            * 推得很远；卡片里链接单独占一行，能完整读到前缀，操作也贴在固定位置。
            */
-          <MotionList as="ul" className="space-y-2.5" animateOnMount>
-            {state.subscriptions.map((subscription) => (
-              <MotionItem as="li" key={subscription.id} itemKey={subscription.id}>
+          <SortableList ids={visibleIds} onReorder={(ids) => void reorder(ids)} labelOf={(id) => state.subscriptions.find((sub) => sub.id === id)?.name ?? id} disabled={reordering || !onReorder} className="space-y-2.5">
+            {visibleSubscriptions.map((subscription) => (
+              <SortableItem key={subscription.id} id={subscription.id} label={subscription.name} disabled={reordering || !onReorder}>
                 {/* 窄屏把五个操作收到第二行并贴右：一行放不下名称 + 链接 + 五个图标 */}
-                <div className="flex flex-col gap-2 rounded-xl border border-card-border bg-surface px-3 py-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:px-4">
+                <div className="group flex flex-col gap-2 rounded-xl border border-card-border bg-surface py-3 pl-9 pr-3 transition-[border-color,background-color] duration-200 hover:border-card-border-hover hover:bg-ink/[0.03] sm:flex-row sm:items-center sm:gap-3 sm:pr-4">
+                  <SortableHandle />
                   <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex min-w-0 flex-wrap items-center gap-2">
                       {/* 名称自己可收缩：长名称先让位，而不是把源名胶囊挤出可视区 */}
@@ -491,9 +514,9 @@ export function SubscriptionsPanel({
                     </IconButton>
                   </div>
                 </div>
-              </MotionItem>
+              </SortableItem>
             ))}
-          </MotionList>
+          </SortableList>
         )}
       </CardContent>
 
