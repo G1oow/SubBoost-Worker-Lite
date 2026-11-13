@@ -13,7 +13,6 @@ import {
   type DragEndEvent,
 } from "@dnd-kit/core";
 import {
-  arrayMove,
   SortableContext,
   sortableKeyboardCoordinates,
   useSortable,
@@ -22,13 +21,12 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { Icon } from "@subboost/ui/components/ui/icon";
 import { cn } from "@subboost/ui/lib/utils";
-
-export { arrayMove };
+import { defaultItemLabel, resolveReorder, sortableAnnouncements } from "@subboost/ui/lib/sortable-order";
 
 export type SortableListProps = {
   ids: string[];
   onReorder: (ids: string[]) => void;
-  /** 读屏播报用的展示名：默认回退到 id，但 id 对用户没有意义，调用方应传入 */
+  /** 读屏播报与手柄可访问名用的展示名：默认回退到 id，但 id 对用户没有意义，调用方应传入 */
   labelOf?: (id: string) => string;
   disabled?: boolean;
   className?: string;
@@ -39,7 +37,7 @@ export type SortableListProps = {
 export function SortableList({
   ids,
   onReorder,
-  labelOf = (id) => id,
+  labelOf = defaultItemLabel,
   disabled = false,
   className,
   children,
@@ -51,12 +49,12 @@ export function SortableList({
   );
 
   const onDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id || disabled) return;
-    const from = ids.indexOf(String(active.id));
-    const to = ids.indexOf(String(over.id));
-    if (from < 0 || to < 0) return;
-    onReorder(arrayMove(ids, from, to));
+    const next = resolveReorder(ids, active, over, disabled);
+    if (next) onReorder(next);
   };
+
+  // 播报文案是纯函数，交给 lib 里的 sortableAnnouncements，组件只负责接线
+  const announcements = React.useMemo(() => sortableAnnouncements(labelOf), [labelOf]);
 
   return (
     <DndContext
@@ -67,15 +65,7 @@ export function SortableList({
         screenReaderInstructions: {
           draggable: "按空格键拾起卡片，使用上下方向键移动，再按空格键放下；按 Escape 取消。",
         },
-        // 默认播报是英文且直接念内部 id，这里统一换成条目名称
-        announcements: {
-          onDragStart: ({ active }) => `已拾起「${labelOf(String(active.id))}」`,
-          onDragOver: ({ active, over }) =>
-            over ? `「${labelOf(String(active.id))}」移动到「${labelOf(String(over.id))}」的位置` : "",
-          onDragEnd: ({ active, over }) =>
-            over ? `「${labelOf(String(active.id))}」已放在「${labelOf(String(over.id))}」的位置` : "",
-          onDragCancel: ({ active }) => `已取消排序，「${labelOf(String(active.id))}」回到原位`,
-        },
+        announcements,
       }}
     >
       <SortableContext items={ids} strategy={verticalListSortingStrategy} disabled={disabled}>

@@ -14,7 +14,7 @@ function render(disabled = false) {
         { id: "a", label: "条目甲", disabled },
         React.createElement(
           "div",
-          { className: "relative border pl-10 pr-3" },
+          { className: "relative border pl-9 pr-3" },
           React.createElement(SortableHandle),
           React.createElement("span", null, "卡片正文")
         )
@@ -29,7 +29,7 @@ describe("sortable card list", () => {
     expect(html).toContain("<ul");
     expect(html).toContain("<li");
     // 手柄在卡片内部：卡片本身不是拖拽节点，手柄才是
-    expect(html).toContain('class="relative border pl-10 pr-3"');
+    expect(html).toContain('class="relative border pl-9 pr-3"');
     expect(html).toContain('aria-label="拖动排序 条目甲"');
     expect(html).toContain('aria-roledescription="sortable"');
     expect(html).toContain("卡片正文");
@@ -49,9 +49,17 @@ describe("sortable card list", () => {
     // 命中区占满卡片高度
     expect(html).toContain("inset-y-0");
   });
+
   it("disables the handle instead of leaving a dead drag target", () => {
     const html = render(true);
     expect(html).toContain("disabled");
     expect(html).toContain('aria-disabled="true"');
+  });
+
+  it("refuses to render a handle outside a sortable item", () => {
+    // 手柄靠 SortableItem 提供的 context 接线：脱离父级时必须是显式错误而不是静默失效
+    expect(() => renderToStaticMarkup(React.createElement(SortableHandle))).toThrow(
+      "SortableHandle 必须渲染在 SortableItem 内部"
+    );
   });
 });
