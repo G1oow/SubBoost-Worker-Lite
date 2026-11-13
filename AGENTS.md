@@ -211,7 +211,7 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 - 保留用户已有的未提交改动，不覆盖、不回退非本任务产生的修改。
 - 新增逻辑尽量放在 `packages/` 的纯函数里并配单元测试；`worker/src` 负责 IO 与路由编排。
 - 不要引入新的运行时依赖，除非确有必要并在说明中给出理由。当前运行时只依赖
-  React、lucide-react、qrcode.react 与 `@subboost/*`。
+  React、lucide-react、qrcode.react、`@dnd-kit/*`（卡片拖拽排序）与 `@subboost/*`。
 
 ### 颜色与主题（有强校验）
 

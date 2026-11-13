@@ -247,6 +247,18 @@ export function App() {
     await loadState();
   };
 
+  const handleReorderSources = async (ids: string[]) => {
+    const result = await client.send<SourcesResponse>("PUT", "/api/sources/order", { ids });
+    setState((current) => (current ? { ...current, sources: result.sources } : current));
+  };
+
+  const handleReorderSubscriptions = async (ids: string[]) => {
+    const result = await client.send<{ subscriptions: AppState["subscriptions"] }>(
+      "PUT", "/api/subscriptions/order", { ids }
+    );
+    setState((current) => (current ? { ...current, subscriptions: result.subscriptions } : current));
+  };
+
   const handleParseNodes = React.useCallback(
     async (text: string) => client.send<ParseNodesResponse>("POST", "/api/nodes/parse", { text }),
     [client]
@@ -445,6 +457,7 @@ export function App() {
               <SourcesPanel
                 state={state}
                 onSave={handleSaveSources}
+                onReorder={handleReorderSources}
                 onParseNodes={handleParseNodes}
                 onLoadNodes={handleLoadNodes}
               />
@@ -454,6 +467,7 @@ export function App() {
                 state={state}
                 chains={chainOptions}
                 onCreate={handleCreateSubscription}
+                onReorder={handleReorderSubscriptions}
                 onUpdate={handleUpdateSubscription}
                 onRotate={handleRotateSubscription}
                 onCreateShortLink={handleCreateShortLink}
@@ -462,7 +476,7 @@ export function App() {
               />
             ) : null}
             {page === "status" ? (
-              <StatusPanel state={state} onRefresh={handleRefresh} refreshing={refreshing} />
+              <StatusPanel state={state} onRefresh={handleRefresh} refreshing={refreshing} onReorderSources={handleReorderSources} onReorderSubscriptions={handleReorderSubscriptions} />
             ) : null}
             {page === "config" ? (
               <ConfigPanel

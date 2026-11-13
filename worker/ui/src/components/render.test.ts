@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.15.2" },
+  app: { name: "SubBoost Lite", version: "0.16.0" },
   sources: [
     {
       id: "s1",
@@ -90,7 +90,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.15.2");
+    expect(html).toContain("v0.16.0");
     expect(html).toContain("content");
   });
 
@@ -166,6 +166,35 @@ describe("admin UI rendering", () => {
     expect(html).toContain("远程");
     expect(html).toContain("手动");
   });
+  it("exposes a labelled drag handle on every card across the three lists", () => {
+    const sources = renderToStaticMarkup(
+      React.createElement(SourcesPanel, { state: STATE, onSave: noopAsync, onReorder: noopAsync })
+    );
+    expect(sources).toContain("拖动排序 机场 A");
+    expect(sources).toContain("拖动排序 手动节点");
+    const subscriptions = renderToStaticMarkup(
+      React.createElement(SubscriptionsPanel, {
+        state: STATE,
+        onCreate: noopAsync,
+        onReorder: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+      })
+    );
+    expect(subscriptions).toContain("拖动排序 默认订阅");
+    const status = renderToStaticMarkup(
+      React.createElement(StatusPanel, {
+        state: STATE,
+        onRefresh: noopAsync,
+        refreshing: false,
+        onReorderSources: noopAsync,
+        onReorderSubscriptions: noopAsync,
+      })
+    );
+    expect(status).toContain("拖动排序 机场 A");
+    expect(status).toContain("拖动排序 默认订阅");
+  });
+
 
   it("renders the subscriptions panel with the truncated link", () => {
     const html = renderToStaticMarkup(

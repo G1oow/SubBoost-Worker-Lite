@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.15.2" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.16.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -157,6 +157,33 @@ describe("router sources", () => {
       h.deps
     );
     expect(response.status).toBe(400);
+  });
+});
+
+describe("router card order", () => {
+  it("authenticates, validates and persists source and subscription order", async () => {
+    const h = createHarness();
+    const sources = await h.store.saveSources([
+      { name: "first", kind: "manual", manualText: SS },
+      { name: "second", kind: "manual", manualText: SS },
+    ]);
+    const subs = [
+      await h.store.createSubscription({ name: "first", sourceIds: [] }),
+      await h.store.createSubscription({ name: "second", sourceIds: [] }),
+    ];
+    const send = (path: string, body: unknown, token: string | null = ADMIN_TOKEN) => route(
+      apiRequest(path, { method: "PUT", body: JSON.stringify(body) }, token), h.env, h.deps
+    );
+    expect((await send("/api/sources/order", { ids: sources.map((source) => source.id).reverse() }, null)).status).toBe(401);
+    expect((await send("/api/sources/order", { ids: [1, 2] })).status).toBe(400);
+    expect((await send("/api/subscriptions/order", { ids: [subs[0].dto.id, subs[0].dto.id] })).status).toBe(409);
+    expect((await send("/api/sources/order", { ids: sources.map((source) => source.id).reverse() })).status).toBe(200);
+    expect((await send("/api/subscriptions/order", { ids: subs.map((sub) => sub.dto.id).reverse() })).status).toBe(200);
+    const state = (await (await route(apiRequest("/api/state"), h.env, h.deps)).json()) as {
+      sources: Array<{ id: string }>; subscriptions: Array<{ id: string }>;
+    };
+    expect(state.sources.map((source) => source.id)).toEqual(sources.map((source) => source.id).reverse());
+    expect(state.subscriptions.map((sub) => sub.id)).toEqual(subs.map((sub) => sub.dto.id).reverse());
   });
 });
 

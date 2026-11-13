@@ -66,6 +66,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/** 只允许当前集合的精确排列；不让过期页面覆盖新增或删除的条目。 */
+export function reorderByIds<T extends { id: string }>(items: T[], ids: string[]): T[] {
+  const byId = new Map(items.map((item) => [item.id, item]));
+  if (ids.length !== items.length || new Set(ids).size !== ids.length || ids.some((id) => !byId.has(id))) {
+    throw new ApiError(409, "VALIDATION_ERROR", "列表已变化，请刷新后重试排序");
+  }
+  return ids.map((id) => byId.get(id)!);
+}
+
 export function createStore(env: Env) {
   const kv = env.SUBBOOST_KV;
 
@@ -179,6 +188,14 @@ export function createStore(env: Env) {
     return Promise.all(stored.map((item) => toSourceDto(item)));
   }
 
+  /** 仅调整存储顺序，不改密文、更新时间、节点快照或订阅缓存。 */
+  async function reorderSources(ids: string[]): Promise<SourceDto[]> {
+    requireEncryptionKey(env);
+    const stored = reorderByIds(await listStoredSources(), ids);
+    await kv.put(KEY_SOURCES, JSON.stringify(stored));
+    return Promise.all(stored.map(toSourceDto));
+  }
+
   async function listStoredSubscriptions(): Promise<StoredSubscription[]> {
     return readJsonArray<StoredSubscription>(kv, KEY_SUBS);
   }
@@ -214,6 +231,14 @@ export function createStore(env: Env) {
   async function listSubscriptions(origin: string): Promise<SubscriptionDto[]> {
     requireEncryptionKey(env);
     const stored = await listStoredSubscriptions();
+    return Promise.all(stored.map((item) => toSubscriptionDto(item, origin)));
+  }
+
+  /** 仅调整订阅数组顺序，不改 token、更新时间与缓存。 */
+  async function reorderSubscriptions(ids: string[], origin: string): Promise<SubscriptionDto[]> {
+    requireEncryptionKey(env);
+    const stored = reorderByIds(await listStoredSubscriptions(), ids);
+    await writeSubscriptions(stored);
     return Promise.all(stored.map((item) => toSubscriptionDto(item, origin)));
   }
 
@@ -497,7 +522,9 @@ export function createStore(env: Env) {
     listStoredSources,
     listStoredSubscriptions,
     saveSources,
+    reorderSources,
     listSubscriptions,
+    reorderSubscriptions,
     createSubscription,
     deleteSubscription,
     updateSubscription,

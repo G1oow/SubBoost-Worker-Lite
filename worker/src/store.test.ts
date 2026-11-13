@@ -82,6 +82,24 @@ describe("createStore sources", () => {
     expect(updated.createdAt).toBe(first.createdAt);
   });
 
+  it("reorders sources without changing ciphertext, timestamps, snapshot or subscription cache", async () => {
+    const [first, second] = await store.saveSources([
+      { name: "a", kind: "manual", manualText: "ss://a" },
+      { name: "b", kind: "manual", manualText: "ss://b" },
+    ]);
+    const { dto } = await store.createSubscription({ name: "sample", sourceIds: [first.id] });
+    await store.putCache({ subscriptionId: dto.id, yaml: "proxies: []", nodeCount: 0, generatedAt: first.createdAt, configHash: "test" });
+    await store.putSnapshot({ sourceId: first.id, nodes: [], nodeCount: 0, fetchedAt: first.createdAt, parseErrors: [] });
+    const original = JSON.parse(kv.raw(KEY_SOURCES) as string) as Array<{ id: string }>;
+    expect((await store.reorderSources([second.id, first.id])).map((item) => item.id)).toEqual([second.id, first.id]);
+    expect(JSON.parse(kv.raw(KEY_SOURCES) as string)).toEqual([...original].reverse());
+    expect(kv.has(snapshotKey(first.id))).toBe(true);
+    expect(await store.getCache(dto.id)).toMatchObject({ yaml: "proxies: []" });
+    for (const ids of [[first.id], [first.id, first.id], [first.id, "missing"]]) {
+      await expect(store.reorderSources(ids)).rejects.toMatchObject({ status: 409 });
+    }
+  });
+
   it("throws CONFIGURATION_ERROR when ENCRYPTION_KEY is missing", async () => {
     const kvOnly = new MemoryKV();
     const storeWithoutKey = createStore({ SUBBOOST_KV: kvOnly as unknown as KVNamespace } as unknown as Env);
@@ -114,6 +132,20 @@ describe("createStore subscriptions", () => {
 
     const found = await store.findSubscriptionByToken(token);
     expect(found?.id).toBe(dto.id);
+  });
+
+  it("reorders subscriptions without rotating credentials or invalidating cache", async () => {
+    const first = await store.createSubscription({ name: "a", sourceIds: [] });
+    const second = await store.createSubscription({ name: "b", sourceIds: [] });
+    await store.putCache({ subscriptionId: first.dto.id, yaml: "proxies: []", nodeCount: 0, generatedAt: first.dto.createdAt, configHash: "test" });
+    const raw = JSON.parse(kv.raw("meta:subs") as string) as Array<{ id: string }>;
+    expect((await store.reorderSubscriptions([second.dto.id, first.dto.id], "https://example.com")).map((item) => item.id))
+      .toEqual([second.dto.id, first.dto.id]);
+    expect(JSON.parse(kv.raw("meta:subs") as string)).toEqual([...raw].reverse());
+    expect(await store.findSubscriptionByToken(first.token)).toMatchObject({ id: first.dto.id });
+    expect(await store.getCache(first.dto.id)).toMatchObject({ yaml: "proxies: []" });
+    await expect(store.reorderSubscriptions([first.dto.id, first.dto.id], "https://example.com"))
+      .rejects.toMatchObject({ status: 409 });
   });
 
   it("rotates the token so the old token stops resolving", async () => {

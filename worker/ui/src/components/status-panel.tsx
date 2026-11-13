@@ -5,9 +5,10 @@ import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { GrowBar } from "@subboost/ui/motion/grow-bar";
-import { MotionItem, MotionList } from "@subboost/ui/motion/motion-list";
 import { cn } from "@subboost/ui/lib/utils";
 import { useToast } from "@subboost/ui/components/ui/toaster";
+import { SortableHandle, SortableItem, SortableList } from "@subboost/ui/components/ui/sortable-list";
+import { mergeReorder, orderRefreshEntries } from "../lib/order-entries";
 import { formatDateTime, formatDuration, formatRelativeTime } from "../lib/format";
 import { buildRefreshBoard, type RefreshEntry, type RefreshTone } from "../lib/refresh-board";
 import type { AppState } from "../lib/types";
@@ -16,6 +17,8 @@ export type StatusPanelProps = {
   state: AppState;
   onRefresh: () => Promise<void>;
   refreshing: boolean;
+  onReorderSources?: (ids: string[]) => Promise<void>;
+  onReorderSubscriptions?: (ids: string[]) => Promise<void>;
 };
 
 /** 结论条的外观：颜色全部来自主题令牌，明暗两套都成立 */
@@ -56,15 +59,16 @@ function Metric({ label, value, hint }: { label: string; value: string; hint?: s
  * 条上不再骑节点数：占比已经在行右侧，节点总数在顶部指标格里，
  * 条只需要表达"这一项占多少"，数字贴上去反而让条与文字互相挤压。
  */
-function EntryRow({ entry }: { entry: RefreshEntry }) {
+function EntryRow({ entry, disabled = false }: { entry: RefreshEntry; disabled?: boolean }) {
   return (
-    <MotionItem as="li" itemKey={`${entry.kind}-${entry.id}`}>
+    <SortableItem id={entry.id} label={entry.name} disabled={disabled}>
       <div
         className={cn(
-          "rounded-xl border px-3 pb-2.5 pt-2.5 transition-[border-color,background-color] duration-200",
+          "group rounded-xl border py-2.5 pl-9 pr-3 transition-[border-color,background-color] duration-200",
           entry.ok ? "border-ink/10 bg-ink/[0.03]" : "border-danger-note-border bg-danger-note-bg"
         )}
       >
+        <SortableHandle />
         <div className="flex items-center gap-2.5">
           <span
             aria-hidden="true"
@@ -85,10 +89,30 @@ function EntryRow({ entry }: { entry: RefreshEntry }) {
           <p className="mt-2 break-words text-2xs leading-relaxed text-danger-note-fg">{entry.error}</p>
         ) : null}
       </div>
-    </MotionItem>
+    </SortableItem>
   );
 }
-function EntryGroup({ title, entries }: { title: string; entries: RefreshEntry[] }) {
+function EntryGroup({ title, entries, onReorder }: { title: string; entries: RefreshEntry[]; onReorder?: (ids: string[]) => Promise<void> }) {
+  const { toast } = useToast();
+  const [saving, setSaving] = React.useState(false);
+  const [orderedIds, setOrderedIds] = React.useState<string[] | null>(null);
+  const entryIds = entries.map((entry) => entry.id);
+  const visibleIds = orderedIds && orderedIds.length === entryIds.length && orderedIds.every((id) => entryIds.includes(id))
+    ? orderedIds : entryIds;
+  const visibleEntries = visibleIds.map((id) => entries.find((entry) => entry.id === id)!);
+  const reorder = async (ids: string[]) => {
+    if (!onReorder || saving) return;
+    setOrderedIds(ids);
+    setSaving(true);
+    try {
+      await onReorder(ids);
+    } catch (err) {
+      setOrderedIds(null);
+      toast({ variant: "destructive", title: "排序保存失败", description: err instanceof Error ? err.message : "请重试" });
+    } finally {
+      setSaving(false);
+    }
+  };
   if (entries.length === 0) return null;
   return (
     <div className="space-y-2">
@@ -96,17 +120,17 @@ function EntryGroup({ title, entries }: { title: string; entries: RefreshEntry[]
         <p className="text-xs font-medium text-fg-60">{title}</p>
         <span className="text-2xs tabular-nums text-fg-45">{entries.length} 项</span>
       </div>
-      <MotionList as="ul" className="space-y-2" animateOnMount>
-        {entries.map((entry) => (
-          <EntryRow key={`${entry.kind}-${entry.id}`} entry={entry} />
+      <SortableList ids={visibleIds} onReorder={(ids) => void reorder(ids)} labelOf={(id) => entries.find((entry) => entry.id === id)?.name ?? id} disabled={saving || !onReorder} className="space-y-2">
+        {visibleEntries.map((entry) => (
+          <EntryRow key={`${entry.kind}-${entry.id}`} entry={entry} disabled={saving || !onReorder || !entries.some((item) => item.id === entry.id)} />
         ))}
-      </MotionList>
+      </SortableList>
     </div>
   );
 }
 
 
-export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) {
+export function StatusPanel({ state, onRefresh, refreshing, onReorderSources, onReorderSubscriptions }: StatusPanelProps) {
   const { toast } = useToast();
   const status = state.status;
 
@@ -118,7 +142,8 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
       subscription: (id) => subscriptionNames.get(id),
     });
   }, [status, state.sources, state.subscriptions]);
-
+  const orderedSources = board ? orderRefreshEntries(board.sources, state.sources.map((source) => source.id)) : [];
+  const orderedSubscriptions = board ? orderRefreshEntries(board.subscriptions, state.subscriptions.map((sub) => sub.id)) : [];
   const handleRefresh = async () => {
     try {
       await onRefresh();
@@ -199,9 +224,17 @@ export function StatusPanel({ state, onRefresh, refreshing }: StatusPanelProps) 
                 hint={`${board.okCount} 成功 / ${board.failedCount} 失败`}
               />
             </div>
-
-            <EntryGroup title="源" entries={board.sources} />
-            <EntryGroup title="订阅" entries={board.subscriptions} />
+            {/* 刷新记录里可能留着已删除对象：提交前用 mergeReorder 剔除并把现存 id 补全 */}
+            <EntryGroup
+              title="源"
+              entries={orderedSources}
+              onReorder={onReorderSources ? (ids) => onReorderSources(mergeReorder(ids, state.sources.map((source) => source.id))) : undefined}
+            />
+            <EntryGroup
+              title="订阅"
+              entries={orderedSubscriptions}
+              onReorder={onReorderSubscriptions ? (ids) => onReorderSubscriptions(mergeReorder(ids, state.subscriptions.map((sub) => sub.id))) : undefined}
+            />
           </>
         )}
       </CardContent>

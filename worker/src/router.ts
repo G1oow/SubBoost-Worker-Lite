@@ -72,6 +72,13 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function stringField(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
+function readOrderIds(body: unknown): string[] {
+  if (!isPlainObject(body) || !Array.isArray(body.ids) || !body.ids.every((id) => typeof id === "string")) {
+    throw new ApiError(400, "VALIDATION_ERROR", "请求体必须包含字符串 ids 数组");
+  }
+  return body.ids as string[];
+}
+
 /**
  * 校验并去重订阅勾选的链。
  *
@@ -225,6 +232,11 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
     });
   }
 
+  if (path === "/api/sources/order" && method === "PUT") {
+    const ids = readOrderIds(await readJsonBody(request, BODY_LIMITS.small));
+    return json({ sources: await store.reorderSources(ids) });
+  }
+
   if (path === "/api/sources" && method === "PUT") {
     const body = await readJsonBody(request, BODY_LIMITS.large);
     const inputs = await validateSources(body);
@@ -341,6 +353,11 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
     await store.resetConfig();
     const { config } = await store.getConfig();
     return json({ config, configIsDefault: true });
+  }
+
+  if (path === "/api/subscriptions/order" && method === "PUT") {
+    const ids = readOrderIds(await readJsonBody(request, BODY_LIMITS.small));
+    return json({ subscriptions: await store.reorderSubscriptions(ids, url.origin) });
   }
 
   if (path === "/api/subscriptions" && method === "POST") {
