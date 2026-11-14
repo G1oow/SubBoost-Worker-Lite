@@ -150,3 +150,53 @@ describe("sortable list keyboard dragging", () => {
     expect(liveText()).toBe("");
   });
 });
+
+/**
+ * 整卡拖拽（`activator="card"`）：网格画布不需要手柄，按住卡片就能拖。
+ * 这里验证接线真的落在卡片上、手柄不再渲染，键盘同样能用。
+ */
+function renderCardList(options: { onReorder: (ids: string[]) => void }) {
+  const items = IDS.map((id) =>
+    React.createElement(
+      SortableItem,
+      { key: id, id, label: id, activator: "card" as const },
+      React.createElement("div", { className: "card" }, id)
+    )
+  );
+  return render(
+    React.createElement(
+      SortableList,
+      { ids: IDS, onReorder: options.onReorder, labelOf: (id: string) => `条目 ${id}` },
+      items
+    )
+  );
+}
+
+describe("sortable card activator", () => {
+  it("把监听挂在卡片上，并且不再渲染手柄", async () => {
+    renderCardList({ onReorder: vi.fn() });
+
+    expect(screen.queryByRole("button", { name: /拖动排序/ })).toBeNull();
+    const card = screen.getByRole("button", { name: "a" });
+    expect(card.getAttribute("aria-roledescription")).toBe("sortable");
+    expect(card.getAttribute("tabindex")).toBe("0");
+    // 列表语义保留：卡片外层仍是 listitem
+    expect(screen.getAllByRole("listitem")).toHaveLength(IDS.length);
+  });
+
+  it("键盘仍然可以拾起、移动与放下", async () => {
+    const onReorder = vi.fn();
+    renderCardList({ onReorder });
+    stubGeometry();
+
+    const card = screen.getByRole("button", { name: "a" });
+    card.focus();
+    fireEvent.keyDown(card, { code: "Space" });
+    await waitFor(() => expect(liveText()).not.toBe(""));
+    fireEvent.keyDown(card, { code: "ArrowDown" });
+    fireEvent.keyDown(card, { code: "Space" });
+
+    expect(onReorder).toHaveBeenCalledWith(["b", "a", "c"]);
+    await waitFor(() => expect(liveText()).toBe("「条目 a」已放在「条目 b」的位置"));
+  });
+});

@@ -94,6 +94,21 @@ function matchesRegion(nodeName: string, regions: NodeRegion[]): boolean {
   return false;
 }
 
+/**
+ * 按名称猜节点地区：命中第一个预设的关键词就归它，全部没命中归 `other`。
+ *
+ * 与 `matchesRegion` 用同一份 `REGION_PRESETS`，所以「分组筛选」与「按地区自动排序」
+ * 对同一个节点名的判断一致——两处口径不同会让用户觉得排序把节点分错了组。
+ */
+export function detectNodeRegion(name: string): NodeRegion {
+  const normalized = (typeof name === "string" ? name : "").toLowerCase();
+  for (const preset of REGION_PRESETS) {
+    if (preset.id === "other") continue;
+    if (preset.keywords.some((keyword) => normalized.includes(keyword.toLowerCase()))) return preset.id;
+  }
+  return "other";
+}
+
 function normalizeStringList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];

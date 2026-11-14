@@ -6,16 +6,18 @@ import {
   type ProxyChainStatus,
   type ResolvedProxyChain,
 } from "@subboost/core/subscription/chain-nodes";
+import { applyNodeOrder, normalizeNodeOrder } from "@subboost/core/subscription/node-order";
 import { getNodeSourceIds, SOURCE_IDS_KEY, withNodeSourceId } from "@subboost/core/subscription/node-source-state";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 import type { ProxyChain } from "@subboost/core/types/config";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { sha256Hex } from "./crypto";
 import { refreshSource, sanitizeErrorMessage, type RefreshSourceResult } from "./sources";
-import { applyNodeRenames } from "./node-renames";
+import { applyNodeRenames, toCanvasNodeSummary } from "./node-renames";
 import type { fetchText } from "./safe-fetch";
 import type { Store } from "./store";
 import {
+  MAX_CANVAS_NODES,
   ON_DEMAND_CONCURRENCY,
   ON_DEMAND_SOFT_DEADLINE_MS,
   REFRESH_CONCURRENCY,
@@ -27,6 +29,7 @@ import {
   type SourceRefreshStatus,
   type StatusRecord,
   type StoredSubscription,
+  type SubscriptionCanvasNodes,
   type SubscriptionRefreshStatus,
 } from "./types";
 
@@ -207,6 +210,16 @@ function mergeSnapshotNodes(
   return nodes;
 }
 
+/**
+ * 应用配置里的「节点排序」（`config.nodeOrder`）。
+ *
+ * 语义见 `@subboost/core/subscription/node-order`：已排好的节点在前，其余按源顺序追加在末尾。
+ * 输出顺序同时决定 `proxies:` 段与各组内节点的先后——这正是客户端「排序=默认」看到的东西。
+ */
+function orderNodes(config: Record<string, unknown>, nodes: ParsedNode[]): ParsedNode[] {
+  return applyNodeOrder(nodes, normalizeNodeOrder(config.nodeOrder));
+}
+
 function aggregateUserInfo(
   targets: ReadonlyArray<{ kind: string }>,
   snapshots: Array<SnapshotRecord | null>
@@ -298,7 +311,7 @@ export async function generateSubscription(
     }
   );
 
-  const nodes = mergeSnapshotNodes(targets, snapshots);
+  const nodes = orderNodes(config, mergeSnapshotNodes(targets, snapshots));
 
   if (nodes.length === 0) return { kind: "no-nodes" };
 
@@ -319,6 +332,64 @@ export async function generateSubscription(
   };
   await store.putCache(cache);
   return { kind: "ok", cache, info };
+}
+
+
+/**
+ * 「节点排序」画布的数据源：这条订阅实际会生成的节点，按配置里已保存的顺序排好。
+ *
+ * 与订阅生成走同一条合并链路（`targetSources` + `mergeSnapshotNodes`），所以画布上的序号
+ * 就是输出 YAML 里的先后；两处口径一旦分叉，用户排完保存后会看到「界面没变、配置变了」。
+ *
+ * 只读：不抓上游、不写快照/缓存，缺快照的源在 `sources[].missingSnapshot` 里标出来。
+ * 节点过多时按 `MAX_CANVAS_NODES` 截断（画布全量渲染，虚拟化与跨行拖拽不兼容）。
+ */
+export async function loadSubscriptionNodes(
+  deps: PipelineDeps,
+  sub: StoredSubscription,
+  options: { order?: "saved" | "source" } = {}
+): Promise<SubscriptionCanvasNodes> {
+  const { store } = deps;
+  const { config } = await store.getConfig();
+  const chains = selectSubscriptionChains(config, sub);
+  const sources = await store.listSources();
+  const targets = targetSources(sub, sources, collectChainSourceIds(chains));
+  const snapshots = await store.getSnapshots(targets.map((source) => source.id));
+
+  // order=source：画布要「重置为源顺序」时用，跳过自定义顺序，等价于清空 nodeOrder 之后的输出
+  const merged = mergeSnapshotNodes(targets, snapshots);
+  const ordered = options.order === "source" ? merged : orderNodes(config, merged);
+  const capped = ordered.slice(0, MAX_CANVAS_NODES);
+
+  const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
+  const perSourceCount = new Map<string, number>();
+  for (const node of ordered) {
+    const sourceId = getNodeSourceIds(node)[0];
+    if (!sourceId) continue;
+    perSourceCount.set(sourceId, (perSourceCount.get(sourceId) ?? 0) + 1);
+  }
+
+  // 链落地节点在组里已被出口组顶替，画布上仍然要能看到它们（输出里它们确实存在于 proxies 段）
+  const chainLandingKeys = new Set<string>();
+  for (const chain of chains) {
+    for (const ref of chain.landingNodes ?? []) {
+      const key = (ref as { nodeKey?: unknown } | null)?.nodeKey;
+      if (typeof key === "string" && key) chainLandingKeys.add(key);
+    }
+  }
+
+  return {
+    subscription: { id: sub.id, name: sub.name },
+    nodeCount: ordered.length,
+    truncated: ordered.length > capped.length,
+    sources: targets.map((source, index) => ({
+      id: source.id,
+      name: source.name,
+      nodeCount: perSourceCount.get(source.id) ?? 0,
+      missingSnapshot: !snapshots[index],
+    })),
+    nodes: capped.map((node) => toCanvasNodeSummary(node, { sourceNames, chainLandingKeys })),
+  };
 }
 
 export type ConfigPreview = {
@@ -369,7 +440,7 @@ export async function previewConfig(
   const summaries = await deps.store.listSourceSummaries();
   const targets = targetSources({ sourceIds: [] }, summaries, collectChainSourceIds(draftChains));
   const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
-  const nodes = mergeSnapshotNodes(targets, snapshots);
+  const nodes = orderNodes(config, mergeSnapshotNodes(targets, snapshots));
 
   const generateOptions = buildGenerateOptionsFromConfig(normalizeConfigForGeneration(config), {
     nodes,

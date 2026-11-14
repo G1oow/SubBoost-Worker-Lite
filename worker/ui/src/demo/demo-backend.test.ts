@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { parseSubscription } from "@subboost/core/parser";
 import type { AppState, ConfigPreview, DashboardStats } from "../lib/types";
 import { createDemoBackend } from "./demo-backend";
-import { DEMO_RENAMED_NODE } from "./demo-seed";
+import { DEMO_RENAMED_NODE, DEMO_SOURCE_TEXTS } from "./demo-seed";
+
+/** 两个启用的手动源合计的节点数：从种子文本算，改种子时不用回来改断言 */
+const ENABLED_NODE_COUNT =
+  parseSubscription(DEMO_SOURCE_TEXTS[0]).nodes.length + parseSubscription(DEMO_SOURCE_TEXTS[1]).nodes.length;
 
 /**
  * 预览站的演示后端回归测试。
@@ -51,10 +56,10 @@ describe("演示模式后端", () => {
   it("仪表板统计与订阅出站内容都来自真实路由", async () => {
     const backend = createBackend();
     const stats = await readJson<DashboardStats>(await backend.dispatch("/api/dashboard"));
-    // 两个启用的手动源：4 + 2 个节点，停用源不计入
+    // 两个启用的手动源：主线路 + 备用线路，停用源不计入
     expect(stats.sources.total).toBe(3);
     expect(stats.sources.enabled).toBe(2);
-    expect(stats.nodes.total).toBe(6);
+    expect(stats.nodes.total).toBe(ENABLED_NODE_COUNT);
 
     const state = await readJson<AppState>(await backend.dispatch("/api/state"));
     const subscription = await backend.dispatch(state.subscriptions[0].link);
@@ -98,8 +103,8 @@ describe("演示模式后端", () => {
     });
     expect(response.status).toBe(200);
     const preview = await readJson<ConfigPreview>(response);
-    // 节点来自种子刷新后的快照：两个启用源共 6 个节点
-    expect(preview.nodeCount).toBe(6);
+    // 节点来自种子刷新后的快照：两个启用源的节点合计
+    expect(preview.nodeCount).toBe(ENABLED_NODE_COUNT);
     expect(preview.rules).toContain("DOMAIN-SUFFIX,example.org,DIRECT");
     // 三条演示链：同源两跳与跨源都能生成，第三条故意匹配不到落地
     expect(preview.chains.map((chain) => chain.status)).toEqual(["ok", "ok", "empty-landing"]);
@@ -112,6 +117,22 @@ describe("演示模式后端", () => {
     const after = await readJson<AppState>(await backend.dispatch("/api/state"));
     // 演示种子写入过链式代理配置，所以不再是「默认配置」
     expect(after.configIsDefault).toBe(false);
+  });
+
+  it("节点排序画布能从演示订阅读到全部种子节点", async () => {
+    const backend = createBackend();
+    const state = await readJson<AppState>(await backend.dispatch("/api/state"));
+    const response = await backend.dispatch(`/api/subscriptions/${state.subscriptions[0].id}/nodes`);
+    expect(response.status).toBe(200);
+
+    const body = await readJson<{ nodeCount: number; truncated: boolean; nodes: Array<{ name: string; sourceName?: string }> }>(
+      response
+    );
+    expect(body.nodeCount).toBe(ENABLED_NODE_COUNT);
+    expect(body.truncated).toBe(false);
+    // 卡片要显示源名，节点名带演示标记
+    expect(body.nodes.every((node) => node.name.includes("演示"))).toBe(true);
+    expect(body.nodes.every((node) => Boolean(node.sourceName))).toBe(true);
   });
 
   it("不向外部发起请求：远程源刷新直接失败而不是真的去抓", async () => {

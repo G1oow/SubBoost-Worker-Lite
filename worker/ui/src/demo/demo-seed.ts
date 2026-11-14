@@ -16,21 +16,36 @@ function ssNode(host: string, port: number, name: string): string {
 }
 
 const PRIMARY_NODES = [
-  ssNode("node-01.example.com", 8388, "东京 · 演示 01"),
-  ssNode("node-02.example.com", 8388, "东京 · 演示 02"),
-  ssNode("node-03.example.com", 8388, "大阪 · 演示 03"),
-  ssNode("node-04.example.com", 8388, "新加坡 · 演示 04"),
+  ssNode("node-01.example.com", 8388, "🇭🇰 香港 01｜演示"),
+  ssNode("node-02.example.com", 8388, "🇭🇰 香港 02｜演示"),
+  ssNode("node-03.example.com", 8388, "🇯🇵 东京 01｜演示"),
+  ssNode("node-04.example.com", 8388, "🇯🇵 东京 02｜演示"),
+  ssNode("node-05.example.com", 8388, "🇯🇵 大阪 01｜演示"),
+  ssNode("node-06.example.com", 8388, "🇸🇬 新加坡 01｜演示"),
+  ssNode("node-07.example.com", 8388, "🇹🇼 台湾 01｜演示"),
+  ssNode("node-08.example.com", 8388, "🇰🇷 首尔 01｜演示"),
+  ssNode("node-09.example.com", 8388, "🇺🇸 洛杉矶 01｜演示"),
+  ssNode("node-10.example.com", 8388, "🇺🇸 圣何塞 01｜演示"),
+  ssNode("node-11.example.com", 8388, "🇬🇧 伦敦 01｜演示"),
+  ssNode("node-12.example.com", 8388, "🇩🇪 法兰克福 01｜演示"),
 ];
 
 const BACKUP_NODES = [
-  ssNode("backup-01.example.com", 8443, "洛杉矶 · 备用 01"),
-  ssNode("backup-02.example.com", 8443, "法兰克福 · 备用 02"),
+  ssNode("backup-01.example.com", 8443, "🇺🇸 西雅图 01｜演示"),
+  ssNode("backup-02.example.com", 8443, "🇳🇱 阿姆斯特丹 01｜演示"),
+  ssNode("backup-03.example.com", 8443, "🇫🇷 巴黎 01｜演示"),
+  ssNode("backup-04.example.com", 8443, "🇨🇦 多伦多 01｜演示"),
+  ssNode("backup-05.example.com", 8443, "🇦🇺 悉尼 01｜演示"),
+  ssNode("backup-06.example.com", 8443, "🇭🇰 香港 03｜演示"),
 ];
 
-const DISABLED_NODES = [ssNode("paused-01.example.com", 8388, "已停用 · 演示 05")];
+const DISABLED_NODES = [
+  ssNode("paused-01.example.com", 8388, "🇯🇵 东京 03｜演示"),
+  ssNode("paused-02.example.com", 8388, "🇯🇵 东京 04｜演示"),
+];
 
-const RENAME_ORIGIN = "东京 · 演示 02";
-const RENAME_TARGET = "东京 · 演示 02（已改名）";
+const RENAME_ORIGIN = "🇯🇵 东京 02｜演示";
+const RENAME_TARGET = "🇯🇵 东京 02｜演示·改名";
 
 /**
  * 重命名表的 key 是节点内容指纹（见 worker/src/node-renames.ts），不是节点名，
@@ -110,19 +125,19 @@ export const DEMO_CHAINS: Array<{
   {
     id: "demo-local-chain",
     name: "⛓ 演示本地两跳链",
-    relay: [{ sourceIndex: 0, nodeName: "东京 · 演示 01" }],
-    landing: [{ sourceIndex: 0, nodeName: "大阪 · 演示 03" }],
+    relay: [{ sourceIndex: 0, nodeName: "🇯🇵 东京 01｜演示" }],
+    landing: [{ sourceIndex: 0, nodeName: "🇯🇵 大阪 01｜演示" }],
   },
   {
     id: "demo-unused-chain",
     name: "🇺🇸 演示跨源链",
-    relay: [{ sourceIndex: 0, nodeName: "新加坡 · 演示 04" }],
-    landing: [{ sourceIndex: 1, nodeName: "洛杉矶 · 备用 01" }],
+    relay: [{ sourceIndex: 0, nodeName: "🇸🇬 新加坡 01｜演示" }],
+    landing: [{ sourceIndex: 1, nodeName: "🇺🇸 西雅图 01｜演示" }],
   },
   {
     id: "demo-broken-chain",
     name: "🇩🇪 演示失效链",
-    relay: [{ sourceIndex: 0, nodeName: "东京 · 演示 01" }],
+    relay: [{ sourceIndex: 0, nodeName: "🇯🇵 东京 01｜演示" }],
     landing: [{ sourceIndex: 0, nodeName: "不存在的落地" }],
   },
 ];
