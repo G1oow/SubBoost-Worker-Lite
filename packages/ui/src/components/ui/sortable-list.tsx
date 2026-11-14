@@ -75,10 +75,12 @@ export function SortableList({
   );
 }
 
+type SortableActivator = "handle" | "card";
+
 type SortableItemContextValue = Pick<
   ReturnType<typeof useSortable>,
   "attributes" | "listeners" | "setActivatorNodeRef"
-> & { label: string; disabled: boolean };
+> & { label: string; disabled: boolean; activator: SortableActivator };
 
 const SortableItemContext = React.createContext<SortableItemContextValue | null>(null);
 
@@ -87,21 +89,31 @@ export type SortableItemProps = {
   /** 手柄的可访问名与读屏播报使用的条目名 */
   label: string;
   disabled?: boolean;
+  /**
+   * 拖拽从哪开始：
+   * - `handle`（默认）：只从 `SortableHandle` 拖，适合一行一条的列表（卡片里有按钮/链接）；
+   * - `card`：按住整张卡片就能拖，适合网格画布这类卡片本身没有交互的场合。
+   */
+  activator?: SortableActivator;
   children: React.ReactNode;
 };
 
 /**
  * 列表中的一项：只负责注册拖拽节点与接线，外观完全交给 `children` 里的卡片。
- * 手柄由卡片自己渲染（见 `SortableHandle`），不再由列表在外面撑出一列。
+ *
+ * 默认由卡片自己渲染手柄（见 `SortableHandle`）；`activator="card"` 时把监听与可访问属性
+ * 挂到条目本身，整张卡片就是拖拽把手，不再需要（也不应再渲染）手柄。
  */
-export function SortableItem({ id, label, disabled = false, children }: SortableItemProps) {
+export function SortableItem({ id, label, disabled = false, activator = "handle", children }: SortableItemProps) {
   const { setNodeRef, transform, transition, isDragging, attributes, listeners, setActivatorNodeRef } =
     useSortable({ id, disabled });
 
   const value = React.useMemo<SortableItemContextValue>(
-    () => ({ label, disabled, attributes, listeners, setActivatorNodeRef }),
-    [label, disabled, attributes, listeners, setActivatorNodeRef]
+    () => ({ label, disabled, activator, attributes, listeners, setActivatorNodeRef }),
+    [label, disabled, activator, attributes, listeners, setActivatorNodeRef]
   );
+
+  const cardActivator = activator === "card";
 
   return (
     <li
@@ -111,12 +123,35 @@ export function SortableItem({ id, label, disabled = false, children }: Sortable
         transition: isDragging ? undefined : transition,
       }}
       /*
-       * 拖动中把卡片抬到最上层并描亮描边，其余项保持原样：
-       * 不加位移或缩放，避免被拖动的卡片连同文字一起被插值重采样。
+       * 拖动中把卡片抬到最上层，其余项保持原样：不加位移或缩放，
+       * 避免被拖动的卡片连同文字一起被插值重采样。
+       *
+       * 整卡拖拽时描边由卡片自己负责（监听挂在卡片外层 div 上，`[&>div]` 会命中那层壳），
+       * 这里只保留抬升与轻微透明，不猜卡片结构。
        */
-      className={cn("relative list-none", isDragging && "z-10 opacity-90 [&>div]:border-card-border-hover")}
+      className={cn(
+        "relative list-none",
+        isDragging && "z-10 opacity-90",
+        isDragging && !cardActivator && "[&>div]:border-card-border-hover"
+      )}
     >
-      <SortableItemContext.Provider value={value}>{children}</SortableItemContext.Provider>
+      {cardActivator ? (
+        /*
+         * 整卡拖拽：监听与可访问属性（role=button、tabIndex、aria-roledescription）挂在卡片外层，
+         * `<li>` 保留列表语义，读屏仍能按列表浏览。
+         * `touch-pan-y` 让竖向滑动继续滚动页面，长按 220ms 才进入拖拽（见 SortableGrid 的传感器）。
+         */
+        <div
+          ref={setActivatorNodeRef}
+          {...attributes}
+          {...listeners}
+          className="h-full cursor-grab touch-pan-y active:cursor-grabbing"
+        >
+          <SortableItemContext.Provider value={value}>{children}</SortableItemContext.Provider>
+        </div>
+      ) : (
+        <SortableItemContext.Provider value={value}>{children}</SortableItemContext.Provider>
+      )}
     </li>
   );
 }
@@ -142,8 +177,11 @@ export type SortableHandleProps = {
 export function SortableHandle({ label, className }: SortableHandleProps = {}) {
   const context = React.useContext(SortableItemContext);
   if (!context) throw new Error("SortableHandle 必须渲染在 SortableItem 内部");
-  const { label: itemLabel, disabled, attributes, listeners, setActivatorNodeRef } = context;
+  const { label: itemLabel, disabled, activator, attributes, listeners, setActivatorNodeRef } = context;
   const name = label ?? itemLabel;
+
+  // 整卡拖拽时监听已经挂在条目上，再渲染手柄只会多一个焦点目标
+  if (activator === "card") return null;
 
   return (
     <button

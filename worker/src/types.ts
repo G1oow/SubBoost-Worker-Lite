@@ -20,6 +20,13 @@ export const MAX_SOURCE_NAME_LENGTH = 80;
 export const MAX_NODE_NAME_LENGTH = 120;
 export const MAX_NODE_RENAMES = 4000;
 export const MAX_PREVIEW_NODES = 500;
+/**
+ * 「节点排序」画布一次加载的节点上限。
+ *
+ * 画布是全量渲染的（跨行拖拽排序与虚拟化不兼容），上千张卡片还能拖，
+ * 再多就该让用户缩小勾选的订阅范围。超过上限时响应带 `truncated` 标记，界面如实提示。
+ */
+export const MAX_CANVAS_NODES = 1000;
 export const MAX_USER_AGENT_LENGTH = 200;
 export const MAX_MANUAL_TEXT_BYTES = 512 * 1024;
 export const MAX_PARSE_ERRORS = 20;
@@ -182,3 +189,31 @@ export type NodeSummary = {
   renamed: boolean;
 };
 
+
+/**
+ * 画布里的一个节点卡片。
+ *
+ * 比 `NodeSummary` 多带来源与标记：卡片要显示源名、按源高亮，
+ * 信息节点/链落地节点在画布上要与普通节点区分开。
+ */
+export type CanvasNodeSummary = NodeSummary & {
+  /** 归属于哪个源（同一节点出现在多个源时取首个源） */
+  sourceId?: string;
+  sourceName?: string;
+  /** 机场信息节点：会进 🚀 节点选择，但业务组会过滤掉 */
+  infoNode?: boolean;
+  /** 被链式代理当作落地节点（组里已被出口组顶替） */
+  chainLanding?: boolean;
+};
+
+/** `GET /api/subscriptions/:id/nodes` 的响应 */
+export type SubscriptionCanvasNodes = {
+  subscription: { id: string; name: string };
+  /** 该订阅合并去重后的节点总数（未截断） */
+  nodeCount: number;
+  /** 节点数超过上限、只返回了前 MAX_CANVAS_NODES 个 */
+  truncated: boolean;
+  /** 参与合并的源（按实际顺序），界面用它说明「排序覆盖哪些源」 */
+  sources: Array<{ id: string; name: string; nodeCount: number; missingSnapshot: boolean }>;
+  nodes: CanvasNodeSummary[];
+};

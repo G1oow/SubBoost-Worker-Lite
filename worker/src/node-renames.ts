@@ -1,8 +1,11 @@
+import { isSubscriptionInfoNodeName } from "@subboost/core/subscription/info-node-name";
+import { getNodeOriginName, getNodeSourceIds } from "@subboost/core/subscription/node-source-state";
 import type { ParsedNode } from "@subboost/core/types/node";
 import {
   MAX_NODE_NAME_LENGTH,
   MAX_NODE_RENAMES,
   MAX_PREVIEW_NODES,
+  type CanvasNodeSummary,
   type NodeRenames,
   type NodeSummary,
 } from "./types";
@@ -13,7 +16,6 @@ import {
  */
 export { hashNodeKey, isRenameKey, nodeRenameKey } from "@subboost/core/node-rename-key";
 import { isRenameKey, nodeRenameKey } from "@subboost/core/node-rename-key";
-
 
 export function applyNodeRenames(node: ParsedNode, renames?: NodeRenames): ParsedNode {
   if (!renames) return node;
@@ -90,6 +92,41 @@ export function sanitizeNodeRenames(input: unknown): NodeRenames | undefined {
     count += 1;
   }
   return count > 0 ? out : undefined;
+}
+
+/**
+ * 画布卡片的摘要：比 `toNodeSummary` 多带来源与标记。
+ *
+ * 入参是「已经合并去重、已套用改名」的节点（`mergeSnapshotNodes` 的产物），
+ * 所以展示名取 `node.name`、原名取 `_originName`——不能再用改名表反查，
+ * 那一层的 name 已经是显示名，反查会把 originName 也变成显示名。
+ *
+ * `sourceNames` / `chainLandingKeys` 由调用方按订阅上下文准备好：
+ * 同一节点出现在多个源时取首个源，链落地节点用内容指纹匹配。
+ */
+export function toCanvasNodeSummary(
+  node: ParsedNode,
+  context: { sourceNames: Map<string, string>; chainLandingKeys: Set<string> }
+): CanvasNodeSummary {
+  const key = nodeRenameKey(node);
+  const originName = getNodeOriginName(node);
+  const name = typeof node.name === "string" && node.name ? node.name : originName;
+  const sourceId = getNodeSourceIds(node)[0];
+  const sourceName = sourceId ? context.sourceNames.get(sourceId) : undefined;
+
+  return {
+    key,
+    name,
+    originName,
+    type: nodeType(node),
+    ...(nodeServer(node) ? { server: nodeServer(node) } : {}),
+    ...(nodePort(node) !== undefined ? { port: nodePort(node) } : {}),
+    renamed: name !== originName,
+    ...(sourceId ? { sourceId } : {}),
+    ...(sourceName ? { sourceName } : {}),
+    ...(isSubscriptionInfoNodeName(name) ? { infoNode: true } : {}),
+    ...(context.chainLandingKeys.has(key) ? { chainLanding: true } : {}),
+  };
 }
 
 /** 协议分布（按节点数降序，同数量按协议名字典序）。 */

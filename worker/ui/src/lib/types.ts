@@ -130,6 +130,29 @@ export type SourceNodesResponse = {
   parseErrors: string[];
 };
 
+/**
+ * 「节点排序」画布上的一张卡片。
+ *
+ * `key` 是内容指纹（与改名表、链引用同一套），画布顺序就是按它落库的 `config.nodeOrder`。
+ */
+export type CanvasNodeSummary = NodeSummary & {
+  sourceId?: string;
+  sourceName?: string;
+  /** 机场信息节点：进 🚀 节点选择但不参与业务组 */
+  infoNode?: boolean;
+  /** 被链式代理当作落地节点（组里已被出口组顶替） */
+  chainLanding?: boolean;
+};
+
+/** `GET /api/subscriptions/:id/nodes` 的响应 */
+export type SubscriptionNodesResponse = {
+  subscription: { id: string; name: string };
+  nodeCount: number;
+  truncated: boolean;
+  sources: Array<{ id: string; name: string; nodeCount: number; missingSnapshot: boolean }>;
+  nodes: CanvasNodeSummary[];
+};
+
 export type ProtocolCount = { type: string; count: number };
 
 export type DashboardSourceStat = {

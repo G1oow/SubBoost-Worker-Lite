@@ -16,6 +16,7 @@ import {
   buildCacheETag,
   getOrGenerateSubscription,
   getOrGenerateSubscriptionByShortCode,
+  loadSubscriptionNodes,
   previewConfig,
   refreshAll,
   type GetOrGenerateResult,
@@ -329,6 +330,18 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       nodes: collectNodeSummaries(nodes, source.nodeRenames),
       parseErrors,
     });
+  }
+
+  // 某条订阅的节点列表（按已保存的自定义顺序排好）：生成配置页「节点排序」画布用。
+  // 与订阅生成走同一条合并链路，画布序号即输出顺序。
+  const subscriptionNodesMatch = /^\/api\/subscriptions\/([^/]+)\/nodes$/.exec(path);
+  if (subscriptionNodesMatch && method === "GET") {
+    const subscriptionId = decodeURIComponent(subscriptionNodesMatch[1]);
+    const subscription = (await store.listStoredSubscriptions()).find((item) => item.id === subscriptionId);
+    if (!subscription) throw new ApiError(404, "NOT_FOUND", "订阅不存在");
+    // order=source 供画布「重置为源顺序」使用：跳过自定义顺序，与清空 nodeOrder 后的输出一致
+    const order = url.searchParams.get("order") === "source" ? "source" : "saved";
+    return json(await loadSubscriptionNodes(pipelineDeps, subscription, { order }));
   }
 
   // 用草稿配置试生成：只读，不抓上游、不写缓存，供管理端保存前校验

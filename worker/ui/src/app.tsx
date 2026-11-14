@@ -29,6 +29,7 @@ import type {
   ParseNodesResponse,
   SourceInput,
   SourceNodesResponse,
+  SubscriptionNodesResponse,
   StatusRecord,
 } from "./lib/types";
 import { runPageTransition } from "./lib/view-transition";
@@ -270,6 +271,17 @@ export function App() {
     [client]
   );
 
+  /** 节点排序画布：按订阅读取合并后的节点，`order=source` 用于重置为源顺序 */
+  const handleLoadSubscriptionNodes = React.useCallback(
+    async (subscriptionId: string, options?: { order?: "saved" | "source" }) => {
+      const suffix = options?.order === "source" ? "?order=source" : "";
+      return client.get<SubscriptionNodesResponse>(
+        `/api/subscriptions/${encodeURIComponent(subscriptionId)}/nodes${suffix}`
+      );
+    },
+    [client]
+  );
+
   const handleCreateSubscription = async (input: {
     name: string;
     sourceIds: string[];
@@ -488,6 +500,7 @@ export function App() {
                 onPreview={handlePreviewConfig}
                 onDirtyChange={handleConfigDirtyChange}
                 onLoadNodes={handleLoadNodes}
+                onLoadSubscriptionNodes={handleLoadSubscriptionNodes}
               />
             ) : null}
           </>

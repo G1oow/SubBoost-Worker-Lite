@@ -11,8 +11,9 @@ import { SegmentedControl } from "@subboost/ui/motion/segmented-control";
 import { readChains } from "../lib/chain-editor";
 import { isConfigChanged, reconcileWithBaseline, type ConfigRecord } from "../lib/rule-editor";
 import type { ConfigSection } from "../lib/routes";
-import type { AppState, ConfigPreview, SourceNodesResponse } from "../lib/types";
+import type { AppState, ConfigPreview, SourceNodesResponse, SubscriptionNodesResponse } from "../lib/types";
 import { ConfigChainsSection } from "./config-chains-section";
+import { ConfigNodesSection } from "./config-nodes-section";
 import { ConfigRulesSection } from "./config-rules-section";
 
 export type ConfigPanelProps = {
@@ -27,16 +28,23 @@ export type ConfigPanelProps = {
   onDirtyChange?: (dirty: boolean) => void;
   /** 读取某个源的节点：链式代理里「先选源、再挑节点」要用 */
   onLoadNodes?: (sourceId: string) => Promise<SourceNodesResponse>;
+  /** 读取某条订阅合并后的节点：节点排序画布用；`order: "source"` 用于重置为源顺序 */
+  onLoadSubscriptionNodes?: (
+    subscriptionId: string,
+    options?: { order?: "saved" | "source" }
+  ) => Promise<SubscriptionNodesResponse>;
 };
 
 const SECTION_OPTIONS: Array<{ id: ConfigSection; label: string }> = [
   { id: "rules", label: "规则" },
+  { id: "nodes", label: "节点排序" },
   { id: "chains", label: "链式代理" },
   { id: "json", label: "高级 JSON" },
 ];
 /** tabpanel 的可访问名与分段控件用同一套文案 */
 const SECTION_LABELS: Record<ConfigSection, string> = {
   rules: "规则",
+  nodes: "节点排序",
   chains: "链式代理",
   json: "高级 JSON",
 };
@@ -80,6 +88,7 @@ export function ConfigPanel({
   onPreview,
   onDirtyChange,
   onLoadNodes,
+  onLoadSubscriptionNodes,
 }: ConfigPanelProps) {
   const { toast } = useToast();
   const baseline = state.config;
@@ -326,6 +335,14 @@ export function ConfigPanel({
         className="animate-page-in space-y-4 sm:space-y-6"
       >
         {activeSection === "rules" ? <ConfigRulesSection config={draft} onChange={applyVisual} /> : null}
+        {activeSection === "nodes" ? (
+          <ConfigNodesSection
+            config={draft}
+            subscriptions={state.subscriptions}
+            onLoadSubscriptionNodes={onLoadSubscriptionNodes}
+            onChange={applyVisual}
+          />
+        ) : null}
         {activeSection === "chains" ? (
           <ConfigChainsSection
             config={draft}
