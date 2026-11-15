@@ -78,6 +78,10 @@ export function App() {
   const [statsLoading, setStatsLoading] = React.useState(false);
   const [loading, setLoading] = React.useState(false);
   const [refreshing, setRefreshing] = React.useState(false);
+  /** 自动刷新是否已在跑：连续保存时不再叠一轮，避免撞上服务端的刷新锁 */
+  const refreshingRef = React.useRef(false);
+  /** 刷新期间又保存了一次：等当前这轮结束后补跑，别把后一次改动落下 */
+  const autoRefreshPendingRef = React.useRef(false);
   const [route, setRoute] = React.useState<AppRoute>(() => readRouteFromHash());
   const page = route.page;
   const routeRef = React.useRef(route);
@@ -242,10 +246,60 @@ export function App() {
     setStats(null);
   };
 
+  /**
+   * 跑一轮刷新：抓取/解析全部启用的源，并重新生成订阅缓存。
+   * `automatic` 只影响提示文案——自动刷新是保存后的收尾动作，不该读起来像用户手动点了一次。
+   */
+  const handleRefresh = React.useCallback(
+    async (options?: { automatic?: boolean }): Promise<void> => {
+      setRefreshing(true);
+      try {
+        const result = await client.send<StatusResponse>("POST", "/api/refresh");
+        setState((current) => (current ? { ...current, status: result.status } : current));
+        toast({ variant: "success", title: options?.automatic ? "已自动刷新" : "刷新完成" });
+      } finally {
+        setRefreshing(false);
+      }
+    },
+    [client, toast]
+  );
+
+  /**
+   * 保存源之后自动跑一轮刷新，用户不用再回页头手动点一次。
+   * 刷新失败只提示，不影响已经成功的保存；401 由 api-client 统一退回 token 页。
+   */
+  const autoRefreshAfterSave = React.useCallback(async (): Promise<void> => {
+    if (refreshingRef.current) {
+      autoRefreshPendingRef.current = true;
+      return;
+    }
+    refreshingRef.current = true;
+    try {
+      do {
+        autoRefreshPendingRef.current = false;
+        try {
+          await handleRefresh({ automatic: true });
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "刷新失败";
+          const inProgress = message.includes("刷新进行中");
+          toast({
+            variant: inProgress ? "warning" : "destructive",
+            title: inProgress ? "刷新进行中" : "自动刷新失败",
+            description: inProgress ? "上一轮刷新还没结束，稍后再保存一次即可补上。" : message,
+          });
+        }
+      } while (autoRefreshPendingRef.current);
+    } finally {
+      refreshingRef.current = false;
+    }
+  }, [handleRefresh, toast]);
+
   const handleSaveSources = async (sources: SourceInput[]) => {
     const result = await client.send<SourcesResponse>("PUT", "/api/sources", { sources });
     setState((current) => (current ? { ...current, sources: result.sources } : current));
     await loadState();
+    // 保存后立刻刷新：节点快照与订阅缓存跟上这次改动，省掉用户手动点「刷新」这一步
+    void autoRefreshAfterSave();
   };
 
   const handleReorderSources = async (ids: string[]) => {
@@ -390,18 +444,6 @@ export function App() {
       client.send<ConfigPreview>("POST", "/api/config/preview", { config }),
     [client]
   );
-
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    try {
-      const result = await client.send<StatusResponse>("POST", "/api/refresh");
-      setState((current) => (current ? { ...current, status: result.status } : current));
-      toast({ variant: "success", title: "刷新完成" });
-    } finally {
-      setRefreshing(false);
-    }
-  };
-
   if (!token) return <TokenGate onAuthenticated={handleAuthenticated} />;
 
   /* 可勾进订阅的链：链建好后就是一个源，这里把配置里的链投影成选项（不用 useMemo：本行在早返回之后） */
