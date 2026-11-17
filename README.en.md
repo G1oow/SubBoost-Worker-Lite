@@ -73,13 +73,13 @@ One subscription has five access forms; `/sub/<token>` and the short link `/s/<c
 | `GET /sub/<token>?target=<app>` | 302 to the client deep link |
 | `GET /s/<code>` | 8-character short link, identical output to the original link |
 
-`<app>` accepts `clash`, `stash`, `shadowrocket`, `singbox`, `v2rayng` and `hiddify`:
+`<app>` accepts `clash`, `mihomo`, `stash`, `shadowrocket`, `singbox`, `v2rayng` and `hiddify`:
 
 ```text
 https://<your-worker>/sub/<token>?target=clash
 ```
 
-The server checks the subscription once, then 302s to the matching app deep link carrying the same URL with `target` stripped. Unknown `target` values are ignored and the request returns plain YAML. In-app browsers such as WeChat and QQ usually block custom schemes — copy the link instead.
+The server checks the subscription once, then 302s to the matching app deep link carrying the same URL with `target` stripped. Unknown `target` values are ignored and the request returns plain YAML. The “one-click import” buttons in the admin UI do not go through that 302 — they put the client scheme straight into `<a href>`, and a click is a user gesture every browser honours. In-app browsers such as WeChat and QQ usually block custom schemes — copy the link instead.
 
 age delivery needs `AGE_RECIPIENT` (an `age1…` recipient key) configured on the Worker, and only the matching private key can decrypt the output. Full steps, key management and decryption are documented in [docs/age-encryption.md](./docs/age-encryption.md).
 
