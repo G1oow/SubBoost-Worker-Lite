@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.23.0" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.24.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -158,6 +158,37 @@ describe("router sources", () => {
     );
     expect(response.status).toBe(400);
   });
+  it("unbinds a deleted source from bound subscriptions instead of asking for a re-save", async () => {
+    const h = createHarness();
+    const kept = await h.store.saveSources([
+      { name: "keep", kind: "manual", manualText: SS },
+      { name: "drop", kind: "manual", manualText: SS },
+    ]);
+    const { dto } = await h.store.createSubscription({
+      name: "two",
+      sourceIds: kept.map((source) => source.id),
+    });
+
+    // PUT /api/sources 是全量替换：少传一个源就是删除它
+    const response = await route(
+      apiRequest("/api/sources", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          sources: [{ id: kept[0].id, name: "keep", kind: "manual", manualText: SS }],
+        }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+
+    const state = (await (await route(apiRequest("/api/state"), h.env, h.deps)).json()) as {
+      subscriptions: Array<{ id: string; sourceIds: string[] }>;
+    };
+    expect(state.subscriptions.find((item) => item.id === dto.id)?.sourceIds).toEqual([kept[0].id]);
+  });
+
 });
 
 describe("router card order", () => {

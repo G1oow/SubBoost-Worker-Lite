@@ -223,7 +223,7 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
   const handleDelete = async (source: SourceDto) => {
     const confirmed = await confirmDialog({
       title: "删除源？",
-      description: `删除「${source.name}」会同时移除它的节点快照，引用它的订阅将重新生成。`,
+      description: `删除「${source.name}」会同时移除它的节点快照，引用它的订阅会自动解绑并重新生成。`,
       confirmText: "删除",
       variant: "destructive",
     });

@@ -595,7 +595,7 @@ export type Store = ReturnType<typeof createStore>;
 export function createStore(env: Env): {
   listSources(): Promise<SourceDto[]>;                 // 解密 payload
   listStoredSources(): Promise<StoredSource[]>;
-  saveSources(inputs: SourceInput[]): Promise<SourceDto[]>; // 校验在 router 完成；此处只负责加密与持久化、删除孤儿快照
+  saveSources(inputs: SourceInput[]): Promise<SourceDto[]>; // 校验在 router 完成；此处只负责加密与持久化、删除孤儿快照、解绑已删除源的订阅绑定
   listSubscriptions(origin: string): Promise<SubscriptionDto[]>; // link = `${origin}/sub/${decrypt(tokenEnc)}`
   createSubscription(input: { name: string; sourceIds: string[]; chainIds?: string[] }): Promise<{ dto: SubscriptionDto; token: string }>;
   deleteSubscription(id: string): Promise<boolean>;
