@@ -66,6 +66,23 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
+/**
+ * 从订阅的绑定源里剔除已被删除的源，返回新的绑定数组；无需改动时返回 null。
+ *
+ * 整份绑定都指向已删除的源时返回 null（保持原样）：`sourceIds: []` 的语义是
+ * 「全部启用源」，就地清空会把这条订阅悄悄扩大成聚合所有源，与「删掉这个源」的意图相反。
+ * 这种情况留给用户在订阅页重新选择绑定。
+ */
+export function pruneRemovedSourceIds(
+  sourceIds: string[],
+  removedIds: ReadonlySet<string>
+): string[] | null {
+  if (removedIds.size === 0) return null;
+  const kept = sourceIds.filter((id) => !removedIds.has(id));
+  if (kept.length === sourceIds.length || kept.length === 0) return null;
+  return kept;
+}
+
 /** 只允许当前集合的精确排列；不让过期页面覆盖新增或删除的条目。 */
 export function reorderByIds<T extends { id: string }>(items: T[], ids: string[]): T[] {
   const byId = new Map(items.map((item) => [item.id, item]));
@@ -166,8 +183,10 @@ export function createStore(env: Env) {
     await kv.put(KEY_SOURCES, JSON.stringify(stored));
 
     // 删除已移除源的快照（尽力而为，失败不影响保存结果）
+    const removedIds = new Set<string>();
     for (const item of existing) {
       if (nextIds.has(item.id)) continue;
+      removedIds.add(item.id);
       try {
         await kv.delete(snapshotKey(item.id));
       } catch {
@@ -175,9 +194,20 @@ export function createStore(env: Env) {
       }
     }
 
-    // 源集合或节点改名都会影响已生成的 YAML：清掉订阅缓存，下次访问重新生成
+    // 订阅绑定里残留的已删除源就地剔除：删源之后这些订阅自动收窄到剩余源，
+    // 用户不必再到订阅页逐条打开、重新保存一遍才生效。一次写回，避免逐条 put。
     const subs = await listStoredSubscriptions();
-    for (const sub of subs) {
+    let rebound = false;
+    const nextSubs = subs.map((sub) => {
+      const pruned = pruneRemovedSourceIds(sub.sourceIds ?? [], removedIds);
+      if (!pruned) return sub;
+      rebound = true;
+      return { ...sub, sourceIds: pruned, updatedAt: now };
+    });
+    if (rebound) await writeSubscriptions(nextSubs);
+
+    // 源集合或节点改名都会影响已生成的 YAML：清掉订阅缓存，下次访问重新生成
+    for (const sub of nextSubs) {
       try {
         await kv.delete(cacheKey(sub.id));
       } catch {

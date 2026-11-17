@@ -73,6 +73,54 @@ describe("createStore sources", () => {
     expect(kv.has(snapshotKey(first.id))).toBe(true);
   });
 
+  it("unbinds removed sources from subscriptions without touching other bindings", async () => {
+    const [first, second] = await store.saveSources([
+      { name: "a", kind: "manual", manualText: "ss://a" },
+      { name: "b", kind: "manual", manualText: "ss://b" },
+    ]);
+    const both = (await store.createSubscription({ name: "both", sourceIds: [first.id, second.id] })).dto;
+    const onlySecond = (await store.createSubscription({ name: "second", sourceIds: [second.id] })).dto;
+    const allSources = (await store.createSubscription({ name: "all", sourceIds: [] })).dto;
+    for (const id of [both.id, onlySecond.id, allSources.id]) {
+      await store.putCache({
+        subscriptionId: id,
+        yaml: "proxies: []",
+        nodeCount: 0,
+        generatedAt: first.createdAt,
+        configHash: "test",
+      });
+    }
+    const beforeById = new Map((await store.listStoredSubscriptions()).map((item) => [item.id, item]));
+
+    // 删掉源 a：绑定了它的订阅自动收窄到剩下的源，用户不用逐条重新保存
+    await store.saveSources([{ id: second.id, name: "b", kind: "manual", manualText: "ss://b" }]);
+
+    const stored = await store.listStoredSubscriptions();
+    const byId = new Map(stored.map((item) => [item.id, item]));
+    expect(byId.get(both.id)?.sourceIds).toEqual([second.id]);
+    expect(byId.get(both.id)?.name).toBe("both");
+    // 没绑定被删源的订阅原样保留：不会因为别的源被删而白改一次记录
+    expect(byId.get(onlySecond.id)).toEqual(beforeById.get(onlySecond.id));
+    // 空绑定（= 全部启用源）不受删源影响
+    expect(byId.get(allSources.id)).toEqual(beforeById.get(allSources.id));
+    // 缓存照旧全部清掉：下次访问按新绑定重新生成
+    for (const id of [both.id, onlySecond.id, allSources.id]) {
+      expect(await store.getCache(id)).toBeNull();
+    }
+  });
+
+  it("keeps a binding whose sources are all removed so it does not become all-sources", async () => {
+    const [only] = await store.saveSources([{ name: "a", kind: "manual", manualText: "ss://a" }]);
+    const { dto } = await store.createSubscription({ name: "only", sourceIds: [only.id] });
+
+    // 清空绑定等于「聚合全部启用源」，删源时不能自动走到这个状态
+    await store.saveSources([]);
+
+    const [stored] = await store.listStoredSubscriptions();
+    expect(stored.id).toBe(dto.id);
+    expect(stored.sourceIds).toEqual([only.id]);
+  });
+
   it("keeps ids stable when inputs carry an id", async () => {
     const [first] = await store.saveSources([{ name: "a", kind: "manual", manualText: "ss://a" }]);
     const [updated] = await store.saveSources([
