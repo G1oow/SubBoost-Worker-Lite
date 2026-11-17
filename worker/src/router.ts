@@ -545,7 +545,9 @@ async function handleSubscription(request: Request, entry: SubscriptionEntry): P
   }
 
   if (entry.target) {
-    // 一键导入只做「订阅存在 + 拼深链」，不生成 YAML、不做加密
+    // 一键导入只做「订阅存在 + 拼深链」，不生成 YAML、不做加密。
+    // 管理端的一键导入按钮直接给客户端 scheme，不走这里；这条 302 是给分享出去
+    // 的 `?target=` 链接用的，浏览器对「跨 scheme 重定向」这一跳并不总是放行。
     let stored: StoredSubscription | null;
     try {
       stored = await entry.findStored();

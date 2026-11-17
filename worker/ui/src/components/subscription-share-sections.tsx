@@ -11,12 +11,15 @@ import type { AgeCapabilities } from "../lib/types";
  * 分享弹窗、一键导入弹窗、age 加密弹窗都复用这里，避免同一段 JSX 抄三份。
  */
 
-/** 一键导入：每个客户端一个深链按钮，服务端收到 `?target=<id>` 后 302 到对应 scheme */
+/** 一键导入：每个客户端一个按钮，直接指向客户端 scheme（点击即用户手势，无中间页） */
 export function ImportLinksSection({
   link,
+  name,
   heading = true,
 }: {
   link: string;
+  /** 订阅名，作为客户端里的备注 */
+  name: string;
   /** 弹窗自己已经有同名标题时传 false，避免「一键导入」出现两次 */
   heading?: boolean;
 }) {
@@ -32,7 +35,7 @@ export function ImportLinksSection({
         <p className="text-xs text-fg-45">{hint}</p>
       )}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-        {buildImportLinks(link).map((item) => (
+        {buildImportLinks(link, name).map((item) => (
           <Button key={item.id} asChild variant="secondary" size="sm">
             <a href={item.href}>{item.label}</a>
           </Button>

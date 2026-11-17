@@ -124,7 +124,7 @@ export function SubscriptionShareContent({
 
       {age?.misconfigured ? <AgeMisconfiguredNotice /> : null}
 
-      {age?.only ? <AgeOnlyNotice /> : <ImportLinksSection link={shareLink} />}
+      {age?.only ? <AgeOnlyNotice /> : <ImportLinksSection link={shareLink} name={subscription.name} />}
 
       {age?.enabled ? (
         <AgeSection link={shareLink} age={age} copied={ageCopied} onCopy={onCopyAgeLink} />

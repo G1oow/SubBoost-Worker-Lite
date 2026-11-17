@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.20.0" },
+  app: { name: "SubBoost Lite", version: "0.21.0" },
   sources: [
     {
       id: "s1",
@@ -90,7 +90,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.20.0");
+    expect(html).toContain("v0.21.0");
     expect(html).toContain("content");
   });
 
@@ -235,8 +235,16 @@ describe("admin UI rendering", () => {
     const html = renderToStaticMarkup(
       React.createElement(SubscriptionShareContent, { subscription: STATE.subscriptions[0] })
     );
-    for (const target of ["clash", "stash", "shadowrocket", "singbox", "v2rayng", "hiddify"]) {
-      expect(html).toContain(`?target=${target}`);
+    for (const prefix of [
+      "clash://install-config?url=",
+      "mihomo://install-config?url=",
+      "stash://install-config?url=",
+      "shadowrocket://add/sub://",
+      "sing-box://import-remote-profile?url=",
+      "v2rayng://install-sub?url=",
+      "hiddify://import/",
+    ]) {
+      expect(html).toContain(prefix);
     }
     expect(html).toContain("一键导入");
   });
@@ -319,9 +327,12 @@ describe("admin UI rendering", () => {
 
   it("renders the shared import and age sections", () => {
     const imports = renderToStaticMarkup(
-      React.createElement(ImportLinksSection, { link: "https://worker.example.com/sub/tokenvalue" })
+      React.createElement(ImportLinksSection, {
+        link: "https://worker.example.com/sub/tokenvalue",
+        name: "默认订阅",
+      })
     );
-    expect(imports).toContain("?target=clash");
+    expect(imports).toContain("clash://install-config?url=");
     expect(imports).toContain("一键导入");
 
     const age = renderToStaticMarkup(
