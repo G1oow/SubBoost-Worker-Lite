@@ -22,7 +22,7 @@ export type SubscriptionImportDialogProps = {
   ageOnly?: boolean;
 };
 
-/** 卡片上的「一键导入」按钮对应的弹窗：列客户端深链，手机上点一下就能导入 */
+/** 卡片上的「一键导入」按钮对应的弹窗：每个客户端一个按钮，点按直接唤起对应 App */
 export function SubscriptionImportDialog({
   subscription,
   onClose,
@@ -71,7 +71,7 @@ export function SubscriptionImportDialog({
               <AgeOnlyNotice />
             ) : (
               <>
-                <ImportLinksSection link={link} heading={false} />
+                <ImportLinksSection link={link} name={subscription.name} heading={false} />
                 <DialogFooter className="flex-col gap-2 sm:flex-row">
                   <Button type="button" onClick={handleCopy} className="w-full sm:w-auto">
                     {copied ? (

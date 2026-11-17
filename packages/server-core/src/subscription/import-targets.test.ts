@@ -7,6 +7,7 @@ import {
 } from "./import-targets";
 
 const SUB_URL = "https://worker.example.com/sub/abcDEF123";
+const NAME = "演示订阅";
 
 describe("parseImportTarget", () => {
   it("识别全部受支持的客户端并忽略大小写与空白", () => {
@@ -23,46 +24,64 @@ describe("parseImportTarget", () => {
     expect(parseImportTarget(null)).toBeNull();
     expect(parseImportTarget(undefined)).toBeNull();
   });
+
+  it("每个客户端都有展示名", () => {
+    for (const target of IMPORT_TARGETS) {
+      expect(target.label.length).toBeGreaterThan(0);
+    }
+  });
 });
 
 describe("buildImportDeepLink", () => {
+  const encodedUrl = encodeURIComponent(SUB_URL);
+  const encodedName = encodeURIComponent(NAME);
+
   const cases: Array<[ImportTargetId, string]> = [
-    ["clash", "clash://install-config?url=https%3A%2F%2Fworker.example.com%2Fsub%2FabcDEF123"],
-    ["stash", "stash://install-config?url=https%3A%2F%2Fworker.example.com%2Fsub%2FabcDEF123"],
-    [
-      "shadowrocket",
-      "shadowrocket://add/sub://aHR0cHM6Ly93b3JrZXIuZXhhbXBsZS5jb20vc3ViL2FiY0RFRjEyMw?remark=%E6%BC%94%E7%A4%BA%E8%AE%A2%E9%98%85",
-    ],
-    [
-      "singbox",
-      "sing-box://import-remote-profile?url=https%3A%2F%2Fworker.example.com%2Fsub%2FabcDEF123#%E6%BC%94%E7%A4%BA%E8%AE%A2%E9%98%85",
-    ],
-    [
-      "v2rayng",
-      "v2rayng://install-sub?url=https%3A%2F%2Fworker.example.com%2Fsub%2FabcDEF123&name=%E6%BC%94%E7%A4%BA%E8%AE%A2%E9%98%85",
-    ],
-    [
-      "hiddify",
-      "hiddify://import/https%3A%2F%2Fworker.example.com%2Fsub%2FabcDEF123",
-    ],
+    ["clash", `clash://install-config?url=${encodedUrl}`],
+    ["mihomo", `mihomo://install-config?url=${encodedUrl}&name=${encodedName}`],
+    ["stash", `stash://install-config?url=${encodedUrl}`],
+    ["shadowrocket", `shadowrocket://add/sub://${btoa(SUB_URL)}?remark=${encodedName}`],
+    ["singbox", `sing-box://import-remote-profile?url=${encodedUrl}#${encodedName}`],
+    ["v2rayng", `v2rayng://install-sub?url=${encodedUrl}#${encodedName}`],
+    ["hiddify", `hiddify://import/${encodedUrl}#${encodedName}`],
   ];
 
   it("每个客户端都生成约定的深链", () => {
     for (const [target, expected] of cases) {
-      expect(buildImportDeepLink(target, { url: SUB_URL, name: "演示订阅" })).toBe(expected);
+      expect(buildImportDeepLink(target, { url: SUB_URL, name: NAME })).toBe(expected);
     }
+  });
+
+  it("用例表覆盖全部受支持的客户端", () => {
+    expect(cases.map(([target]) => target).sort()).toEqual(
+      IMPORT_TARGETS.map((target) => target.id).sort()
+    );
+  });
+
+  it("Shadowrocket 用标准 base64，不用 URL-safe 变体", () => {
+    // 这条链接的 base64 里带 `+`：换成 URL-safe 会把 `+` 变 `-`、`/` 变 `_`、去掉 `=`，
+    // Shadowrocket 按标准 base64 解析该路径段会直接拒绝 → 「App 拉起但什么都没导入」
+    const url = "https://worker.example.com/sub/aB3?z=~~";
+    expect(btoa(url)).toContain("+");
+
+    const link = buildImportDeepLink("shadowrocket", { url, name: NAME });
+    const payload = link.slice("shadowrocket://add/sub://".length, link.indexOf("?remark="));
+    expect(payload).toMatch(/^[A-Za-z0-9+/]+={0,2}$/);
+    expect(payload).not.toContain("-");
+    expect(payload).not.toContain("_");
+    expect(atob(payload)).toBe(url);
   });
 
   it("短链也能作为导入地址", () => {
     const short = "https://worker.example.com/s/abc123XY";
-    expect(buildImportDeepLink("clash", { url: short, name: "演示订阅" })).toContain(
-      "url=https%3A%2F%2Fworker.example.com%2Fs%2Fabc123XY"
+    expect(buildImportDeepLink("clash", { url: short, name: NAME })).toContain(
+      `url=${encodeURIComponent(short)}`
     );
   });
 
   it("订阅名里的特殊字符被转义，CR/LF 被剥离", () => {
     const link = buildImportDeepLink("v2rayng", { url: SUB_URL, name: "A&B\r\nC" });
-    expect(link).toContain("name=A%26B%20C");
+    expect(link).toContain("#A%26B%20C");
     expect(link).not.toMatch(/[\r\n]/);
   });
 
