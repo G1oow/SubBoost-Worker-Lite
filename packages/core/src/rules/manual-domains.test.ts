@@ -4,6 +4,7 @@ import {
   buildManualProcessRuleTexts,
   normalizeManualDomain,
   normalizeManualDomainList,
+  normalizeManualProcessList,
 } from "./manual-domains";
 
 const targets = { direct: "国内直连", proxy: "自动选择", reject: "广告拦截" };
@@ -90,5 +91,54 @@ describe("手动进程规则", () => {
       "PROCESS-NAME,curl,DIRECT",
       "PROCESS-PATH-REGEX,(?i)leigod,DIRECT",
     ]);
+  });
+});
+
+describe("边界输入", () => {
+  it("空值与空目标不会生成规则", () => {
+    expect(normalizeManualDomain(null)).toBeNull();
+    expect(normalizeManualDomain(undefined)).toBeNull();
+    // 只有通配前缀时归一化后为空
+    expect(normalizeManualDomain("*.")).toBeNull();
+    expect(normalizeManualDomainList([null, 123, " "])).toEqual(["123"]);
+
+    const { texts, dropped } = buildManualDomainRuleTexts(
+      { direct: ["example.com"], proxy: ["example.org"], reject: ["example.net"] },
+      { direct: "", proxy: "", reject: "" }
+    );
+    expect(texts).toEqual([]);
+    expect(dropped).toEqual([]);
+  });
+
+  it("被丢弃的条目只记录非空原值", () => {
+    const { dropped } = buildManualDomainRuleTexts(
+      { direct: ["", "  ", "a.*.com"], proxy: [], reject: [] },
+      targets
+    );
+    expect(dropped).toEqual(["a.*.com"]);
+  });
+
+  it("进程清单忽略空值并接受非字符串", () => {
+    expect(normalizeManualProcessList([null, undefined, " ", "curl"])).toEqual(["curl"]);
+    expect(normalizeManualProcessList(42)).toEqual([]);
+  });
+});
+
+describe("清单目标缺失", () => {
+  it("目标为空时整列跳过，不产生死规则", () => {
+    const { texts } = buildManualDomainRuleTexts(
+      { direct: ["example.com"], proxy: ["example.org"], reject: ["example.net"] },
+      { direct: undefined as never, proxy: null as never, reject: "" }
+    );
+    expect(texts).toEqual([]);
+  });
+
+  it("null 条目既不生成规则也不进丢弃列表", () => {
+    const { texts, dropped } = buildManualDomainRuleTexts(
+      { direct: [null as never, "cdn.example.com"], proxy: [], reject: [] },
+      targets
+    );
+    expect(texts).toEqual(["DOMAIN-SUFFIX,cdn.example.com,国内直连"]);
+    expect(dropped).toEqual([]);
   });
 });

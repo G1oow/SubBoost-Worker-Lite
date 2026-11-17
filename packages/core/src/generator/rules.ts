@@ -182,7 +182,7 @@ function buildCustomRuleEntry(
   moduleNames: Record<string, string>,
   customProxyGroups: CustomProxyGroup[] = [],
   chainGroups: ChainGroupRef[] = [],
-  resolvePolicyTarget: (target: string) => string = (target) => target
+  resolvePolicyTarget: (target: string) => string
 ): GeneratedRuleEntry {
   const noResolve = Boolean(rule.noResolve) && (rule.type === "IP-CIDR" || rule.type === "IP-CIDR6");
   const target = resolvePolicyTarget(
@@ -209,7 +209,7 @@ function buildCustomRuleSetEntry(
   moduleNames: Record<string, string>,
   customProxyGroups: CustomProxyGroup[] = [],
   chainGroups: ChainGroupRef[] = [],
-  resolvePolicyTarget: (target: string) => string = (target) => target
+  resolvePolicyTarget: (target: string) => string
 ): GeneratedRuleEntry {
   const noResolve = Boolean(ruleSet.noResolve);
   const target = resolvePolicyTarget(
@@ -438,7 +438,7 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     resolvePolicyTarget
   );
   // Steam 路由开关：整组 Steam 规则的目标在「Steam 代理」和 DIRECT 之间切换
-  const steamModuleName = moduleNames["steam"] ?? "";
+  const steamModuleName = moduleNames["steam"];
   const steamRouteTarget = steamViaProxy ? steamModuleName : "DIRECT";
   const steamDownloadTarget = steamViaProxy && steamDownloadViaProxy ? steamModuleName : "DIRECT";
   const emittedRuleKeys = new Set<string>();
@@ -456,12 +456,12 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     }
     if (manualDomains) {
       const { texts } = buildManualDomainRuleTexts(manualDomains, {
-        direct: moduleNames["cn"] ?? "国内直连",
-        proxy: moduleNames["auto"] ?? "自动选择",
-        reject: moduleNames["ad"] ?? "广告拦截",
+        direct: moduleNames["cn"],
+        proxy: moduleNames["auto"],
+        reject: moduleNames["ad"],
       });
       for (const text of texts) {
-        entries.push(buildSpecialRuleEntry(`manual-domain:${text}`, text, text, text.split(",")[2] ?? ""));
+        entries.push(buildSpecialRuleEntry(`manual-domain:${text}`, text, text, text.split(",")[2]));
       }
     }
     if (editableEntries.length === 0) return;
@@ -503,7 +503,6 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
       resolvePolicyTarget,
       steamTarget
     );
-    if (emittedRuleKeys.has(entry.key)) continue;
     emittedRuleKeys.add(entry.key);
     entries.push(entry);
   }

@@ -4,7 +4,10 @@ import {
   buildRuleOrderView,
   generateRules,
   getCustomRuleSetOrderKey,
+  hasFullRuleOrderKeys,
+  normalizePersistedRuleOrder,
   resolveFullRuleOrder,
+  resolveModuleName,
 } from "./rules";
 import { PROXY_GROUP_MODULES } from "./proxy-group-modules";
 
@@ -109,13 +112,13 @@ describe("内置规则生成", () => {
     ];
     const base = generate({ customRules });
     const reordered = generate({ customRules, ruleOrder: ["custom-rule:b", "custom-rule:a"] });
-    expect(base.indexOf("DOMAIN,a.example.com,国内直连")).toBeLessThan(
-      base.indexOf("DOMAIN,b.example.com,国内直连")
-    );
-    expect(reordered.indexOf("DOMAIN,b.example.com,国内直连")).toBeLessThan(
-      reordered.indexOf("DOMAIN,a.example.com,国内直连")
-    );
-    expect(reordered.filter((rule) => !rule.includes("example.com"))).toEqual(FULL_RULES);
+    const ruleA = "DOMAIN,a.example.com,国内直连";
+    const ruleB = "DOMAIN,b.example.com,国内直连";
+    expect(base.indexOf(ruleA)).toBeLessThan(base.indexOf(ruleB));
+    expect(reordered.indexOf(ruleB)).toBeLessThan(reordered.indexOf(ruleA));
+    // 手动条目之外必须与默认顺序逐条一致（用精确集合判断，不做子串匹配）
+    const customTexts = new Set([ruleA, ruleB]);
+    expect(reordered.filter((rule) => !customTexts.has(rule))).toEqual(FULL_RULES);
   });
 
   it("内置规则支持停用与改目标", () => {
@@ -151,7 +154,7 @@ describe("内置规则生成", () => {
       availablePolicyTargets: ["手动选择", "DIRECT", "REJECT"],
       fallbackPolicyTarget: "手动选择",
     } as Parameters<typeof buildGeneratedRuleEntries>[0]);
-    const steamRule = entries.find((entry) => entry.text.includes("steamcommunity.com"));
+    const steamRule = entries.find((entry) => entry.key === "module:steam:domain-steamcommunity");
     expect(steamRule?.target).toBe("手动选择");
   });
 
@@ -161,6 +164,41 @@ describe("内置规则生成", () => {
       customRules: [],
     });
     expect(entries.at(-1)?.text).toBe("MATCH,手动选择");
+  });
+});
+
+describe("手动域名 / 进程规则与顺序视图", () => {
+  it("手动条目插在广告规则集之前，且不进入持久化顺序", () => {
+    const options = {
+      enabledModules: ALL_MODULES,
+      customRules: [],
+      manualDomains: { direct: ["cdn.example.com"], proxy: ["api.example.org"], reject: [] },
+      manualProcessRules: ["curl"],
+    };
+    const view = buildRuleOrderView(options);
+    const texts = view.entries.map((entry) => entry.text);
+    expect(texts).toContain("PROCESS-NAME,curl,DIRECT");
+    expect(texts).toContain("DOMAIN-SUFFIX,cdn.example.com,国内直连");
+    expect(texts.indexOf("DOMAIN-SUFFIX,api.example.org,自动选择")).toBeLessThan(
+      texts.indexOf("RULE-SET,广告集合_rules,广告拦截")
+    );
+    expect(view.fullOrder.some((key) => key.startsWith("manual-"))).toBe(true);
+    expect(normalizePersistedRuleOrder(options).some((key) => key.startsWith("manual-"))).toBe(false);
+  });
+
+  it("广告分组关闭时手动条目仍然生成（位置落到末尾）", () => {
+    const view = buildRuleOrderView({
+      enabledModules: ["select", "auto"],
+      customRules: [],
+      manualDomains: { direct: ["example.net"], proxy: [], reject: [] },
+    });
+    expect(view.entries.map((entry) => entry.text)).toContain("DOMAIN-SUFFIX,example.net,国内直连");
+  });
+
+  it("未知分组名原样返回，特殊规则键也算完整顺序", () => {
+    expect(resolveModuleName("nope")).toBe("nope");
+    expect(hasFullRuleOrderKeys(["special:match"])).toBe(true);
+    expect(hasFullRuleOrderKeys(["custom-rule:a"])).toBe(false);
   });
 });
 

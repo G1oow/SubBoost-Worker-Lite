@@ -275,8 +275,8 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
   const generateGroup = (module: ProxyGroupModule) => {
     const moduleName = resolveModuleNameFromModule(module, proxyGroupNameOverrides);
     const advanced = proxyGroupAdvanced[module.id];
-    // 内置分组：成员表写死（自动选择=全部节点 / 手动选择=[自动选择,DIRECT] …），不做自动测速
-    if (module.members) {
+    // 内置分组默认用固定成员表；高级设置里显式改成测速/负载均衡类型时仍按类型生成
+    if (module.members && (!advanced?.groupType || advanced.groupType === "select")) {
       groups.push({
         name: moduleName,
         type: "select",
@@ -291,40 +291,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
     }
     const groupType: ProxyGroupGroupType = advanced?.groupType ?? module.groupType;
     switch (groupType) {
-      case "select":
-        if (module.id === "select") {
-          const defaultProxies = fallbackTargets(
-            autoTarget,
-            "DIRECT",
-            "REJECT",
-            ...allMemberNames
-          );
-          groups.push({
-            name: moduleName,
-            type: "select",
-            // “节点选择”组本身不应包含自己；默认先走“⚡ 自动选择”更符合开箱即用
-            proxies: resolveGroupProxyNames(defaultProxies, advanced, {
-              kind: "module",
-              id: module.id,
-              name: moduleName,
-            }),
-            ...providerUse,
-          });
-        } else {
-          const defaultProxies = moduleBaseProxies.filter((target) => target !== moduleName);
-          groups.push({
-            name: moduleName,
-            type: "select",
-            proxies: resolveGroupProxyNames(defaultProxies, advanced, {
-              kind: "module",
-              id: module.id,
-              name: moduleName,
-            }),
-            ...providerUse,
-          });
-        }
-        break;
-
+      // select 类型已在上面按固定成员表处理（members），这里只处理高级设置改成的测速/负载均衡类型
       case "url-test":
           groups.push(createGeneratedProxyGroup(
             moduleName,
@@ -484,39 +451,17 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
     groups.push(createCustomProxyGroup(customGroup));
   }
 
-  // 按 PROXY_GROUP_ORDER 顺序生成代理组
-  let insertedCustom = false;
+  // 按 PROXY_GROUP_ORDER 顺序生成内置分组
   for (const moduleId of PROXY_GROUP_ORDER) {
-    // 自定义分流组插入位置：在 🍏 苹果服务 与 📲 电报消息之间
-    if (!insertedCustom && moduleId === "ai" && inlineCustomProxyGroups.length > 0) {
-      insertedCustom = true;
-      for (const customGroup of inlineCustomProxyGroups) {
-        groups.push(createCustomProxyGroup(customGroup));
-      }
-    }
-
     if (!enabledSet.has(moduleId)) continue;
-    
-    const proxyModule = PROXY_GROUP_MODULES.find(m => m.id === moduleId);
+    const proxyModule = PROXY_GROUP_MODULES.find((m) => m.id === moduleId);
     if (!proxyModule) continue;
-    
-    processedModules.add(moduleId);
     generateGroup(proxyModule);
   }
 
-  // 处理不在 PROXY_GROUP_ORDER 中的模块（按原始顺序添加到末尾）
-  for (const proxyModule of PROXY_GROUP_MODULES) {
-    if (!enabledSet.has(proxyModule.id)) continue;
-    if (processedModules.has(proxyModule.id)) continue;
-    
-    generateGroup(proxyModule);
-  }
-
-  // 若未命中插入点（例如未来移除 private），则追加到末尾
-  if (!insertedCustom && inlineCustomProxyGroups.length > 0) {
-    for (const customGroup of inlineCustomProxyGroups) {
-      groups.push(createCustomProxyGroup(customGroup));
-    }
+  // 其余分组（不在固定顺序里的自定义组）追加在末尾
+  for (const customGroup of inlineCustomProxyGroups) {
+    groups.push(createCustomProxyGroup(customGroup));
   }
 
   return groups;

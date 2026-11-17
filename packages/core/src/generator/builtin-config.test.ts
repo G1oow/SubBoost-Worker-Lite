@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { generateClashConfig, generateClashYaml } from "./index";
 import { DEFAULT_DNS_CONFIG } from "./dns";
+import { isBuiltinRuleKey } from "./rules";
 
 function ssNode(name: string): ParsedNode {
   return {
@@ -146,5 +147,28 @@ describe("手动域名 / 进程规则 / Steam 开关", () => {
     const rules = rulesOf({});
     expect(rules).toContain("PROCESS-NAME,steam.exe,Steam 代理");
     expect(rules).toContain("DOMAIN,steamcdn-a.akamaihd.net,DIRECT");
+  });
+});
+
+
+describe("高级设置与内置规则键的边界分支", () => {
+  it("只改类型不给策略时，负载均衡走默认策略", () => {
+    const config = generateClashConfig({
+      nodes: [ssNode("Node A"), ssNode("Node B")],
+      userConfig: { customRules: [] },
+      proxyGroupAdvanced: { cn: { groupType: "load-balance" } },
+    });
+    const groups = (config["proxy-groups"] ?? []) as Array<{ name: string; type?: string; strategy?: string }>;
+
+    expect(groups.find((group) => group.name === "国内直连")).toMatchObject({
+      type: "load-balance",
+      strategy: "consistent-hashing",
+    });
+  });
+
+  it("内置规则键判断覆盖普通键、GEO 兜底键与未知键", () => {
+    expect(isBuiltinRuleKey("module:cn:geo-cn")).toBe(true);
+    expect(isBuiltinRuleKey("module:auto:geo-non-cn")).toBe(true);
+    expect(isBuiltinRuleKey("module:cn:missing")).toBe(false);
   });
 });

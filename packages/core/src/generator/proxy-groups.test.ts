@@ -160,10 +160,10 @@ describe("proxy group generator", () => {
     expect(getAllGroupNames(["select"], [customGroup("custom", "select")])).toContain("Custom custom");
   });
 
-  it("ignores built-in group type overrides and applies explicitly added members", () => {
+  it("honors advanced group type overrides and explicit members", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
-      enabledModules: ["select", "auto", "ad"],
+      enabledModules: ["select", "auto", "ad", "steam"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
@@ -173,18 +173,82 @@ describe("proxy group generator", () => {
           extraMembers: [{ kind: "direct" }],
           memberOrder: [{ kind: "direct" }, { kind: "node", name: "Node B" }],
         },
+        cn: { groupType: "load-balance", strategy: "round-robin" },
+        steam: { groupType: "url-test" },
       },
     });
 
-    // 内置分组表里给了 members，类型固定为 select，groupType 覆写与测速字段都不生效
-    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
-      type: "select",
-      proxies: ["DIRECT", "Node B", "Node A"],
-    });
-    expect(groups.find((group) => group.name === "自动选择")).not.toHaveProperty("url");
-    expect(groups.find((group) => group.name === "自动选择")).not.toHaveProperty("interval");
+    // 高级设置显式改了类型时按类型生成（测速/故障转移/负载均衡都还能用）
+    const auto = groups.find((group) => group.name === "自动选择");
+    expect(auto).toMatchObject({ type: "fallback", proxies: ["DIRECT", "Node B", "Node A"] });
+    const steam = groups.find((group) => group.name === "Steam 代理");
+    expect(steam).toMatchObject({ type: "url-test" });
+    expect(steam).toHaveProperty("url");
+
+    // 没改类型的仍用固定成员表，不带测速字段
+    const select = groups.find((group) => group.name === "手动选择");
+    expect(select).toMatchObject({ type: "select", proxies: ["自动选择", "DIRECT"] });
+    expect(select).not.toHaveProperty("url");
+    expect(select).not.toHaveProperty("interval");
   });
 
+  it("applies load-balance strategy overrides on builtin groups", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A"), node("Node B")],
+      enabledModules: ["cn"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      proxyGroupAdvanced: { cn: { groupType: "load-balance", strategy: "round-robin" } },
+    });
+
+    expect(groups.find((group) => group.name === "国内直连")).toMatchObject({
+      type: "load-balance",
+      strategy: "round-robin",
+      proxies: ["Node A", "Node B"],
+    });
+  });
+
+  it("同一落地节点出现在两条链时只认第一个出口组", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A"), node("Node B")],
+      enabledModules: ["auto"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      chainMemberPlan: {
+        exitGroups: [
+          { id: "c1", name: "出口一", landingNodes: ["Node A"] },
+          { id: "c2", name: "出口二", landingNodes: ["Node A"] },
+        ],
+      },
+    });
+
+    // 落地节点被替换成出口组名；出口组不在可用成员里时被过滤，只剩普通节点
+    expect(groups.find((group) => group.name === "自动选择")?.proxies).toEqual(["Node B"]);
+  });
+  it("自定义组名不是字符串时不影响内置分组生成", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A")],
+      enabledModules: ["cn"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      customProxyGroups: [
+        {
+          id: "bad-name",
+          name: 123 as never,
+          emoji: "",
+          groupType: "select",
+          includeInGroupMembers: true,
+        },
+      ],
+    });
+
+    // 名字不是字符串的自定义组不会被登记成可选成员，内置分组仍按固定成员表生成
+    // 名字不是字符串的自定义组不会被登记成可选成员，内置分组仍按固定成员表生成
+    expect(groups.some((group) => group.name === "国内直连")).toBe(true);
+  });
   it("defaults ordinary custom groups to node-only members without adding them to node select", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
@@ -467,23 +531,16 @@ describe("proxy group generator", () => {
       ],
     });
 
-    // 内置分组类型固定为 select，groupType 覆写不再生效
-    expect(groups.find((group) => group.name === "自动选择")).toEqual({
-      name: "自动选择",
-      type: "select",
-      proxies: ["Node A", "Node B"],
+    // 高级设置显式改了类型时按类型生成
+    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
+      type: "load-balance",
+      strategy: "round-robin",
       use: ["remote"],
     });
-    expect(groups.find((group) => group.name === "国内直连")).toMatchObject({
-      type: "select",
-      proxies: ["DIRECT"],
-    });
-    // 成员表写死：Steam 代理 = [自动选择, 手动选择, DIRECT]
-    expect(groups.find((group) => group.name === "Steam 代理")?.proxies).toEqual([
-      "自动选择",
-      "手动选择",
-      "DIRECT",
-    ]);
+    const cnGroup = groups.find((group) => group.name === "国内直连");
+    expect(cnGroup?.type).toBe("select");
+    expect(cnGroup?.proxies).toContain("REJECT");
+    expect(groups.find((group) => group.name === "Steam 代理")?.type).toBe("url-test");
     expect(providers["skip-by-name"]).toBeUndefined();
     expect(providers["relative-path"]).toMatchObject({
       url: "https://rules.example.com/geosite/relative.mrs",

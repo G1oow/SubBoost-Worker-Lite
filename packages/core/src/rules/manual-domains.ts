@@ -24,6 +24,20 @@ const IPV4_PATTERN = /^(?:\d{1,3}\.){3}\d{1,3}$/;
 const HOSTNAME_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
 
 /**
+ * 去掉通配前缀与结尾点：`*.example.com.` → `example.com`。
+ *
+ * 用下标扫描而不是 `^\.+` / `\.+$`：输入是用户粘贴的任意文本，长串 `.` 会让这类
+ * 正则走多项式回溯（CodeQL js/polynomial-redos）。
+ */
+function stripWildcardEdges(input: string): string {
+  let start = 0;
+  while (start < input.length && (input[start] === "*" || input[start] === ".")) start += 1;
+  let end = input.length;
+  while (end > start && input[end - 1] === ".") end -= 1;
+  return input.slice(start, end);
+}
+
+/**
  * 归一化手写域名：去掉通配前缀、协议头、userinfo、路径、端口、结尾点。
  *
  * 归一化失败返回 null —— 例如 `a.*.com` 用域名规则表达不出来，与其生成一条永远匹配不到的
@@ -32,17 +46,17 @@ const HOSTNAME_PATTERN = /^[a-z0-9_-]+(?:\.[a-z0-9_-]+)*$/;
 export function normalizeManualDomain(value: unknown): string | null {
   let host = String(value ?? "").trim().toLowerCase();
   if (!host) return null;
-  // 协议头（https:// 等）与 userinfo（user:pass@）
-  host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//u, "").replace(/^.*@/u, "");
+  // 协议头（https:// 等）
+  host = host.replace(/^[a-z][a-z0-9+.-]*:\/\//u, "");
+  // userinfo（user:pass@）：取最后一个 @ 之后的部分，避免回溯型 `^.*@`
+  const at = host.lastIndexOf("@");
+  if (at >= 0) host = host.slice(at + 1);
   // 路径 / 查询 / 片段
   host = host.split(/[/?#]/u)[0];
   // 端口
   host = host.replace(/:\d+$/u, "");
-  // 通配前缀 "*.example.com" 与 ".example.com" 都按 DOMAIN-SUFFIX,example.com 处理
-  host = host.replace(/^\*\.?/u, "");
-  host = host.replace(/^\.+/u, "");
-  // 根域尾点（DNS 记录里常见的 "example.com."）
-  host = host.replace(/\.+$/u, "");
+  // 通配前缀 "*.example.com" 与 ".example.com" 都按 DOMAIN-SUFFIX,example.com 处理；根域尾点一并去掉
+  host = stripWildcardEdges(host);
   if (!host) return null;
   return HOSTNAME_PATTERN.test(host) ? host : null;
 }
@@ -109,7 +123,6 @@ export function buildManualDomainRuleTexts(
 
   const specificity = (rule: string) => {
     const [type, value = ""] = rule.split(",");
-    if (type === "DOMAIN") return 0;
     if (type === "IP-CIDR") return 3000;
     // 标签越多越具体：a.b.example.com 排在 example.com 之前
     return 1000 - value.split(".").length;
