@@ -99,14 +99,13 @@ describe("public core generator extra branch coverage", () => {
     );
   });
 
-  it("keeps preset rule providers ahead of duplicate custom provider ids", () => {
+  it("keeps the builtin ad provider ahead of duplicate custom provider ids", () => {
     const providers = generateRuleProviders({
       nodes: [ssNode("Alpha")],
-      enabledModules: ["cn"],
+      enabledModules: ["ad"],
       ruleProviderBaseUrl: "https://rules.example/base",
       testUrl: "https://latency.example/generate_204",
       testInterval: 300,
-      experimentalCnUseCnRuleSet: true,
       customProxyGroups: [
         {
           id: "custom",
@@ -116,19 +115,29 @@ describe("public core generator extra branch coverage", () => {
         },
       ],
       customRuleSets: [
-        { id: "cn", name: "Should Not Override", behavior: "domain", path: "https://custom.example/cn.mrs", target: "Custom" },
+        { id: "广告集合_rules", name: "Should Not Override", behavior: "domain", path: "https://custom.example/ad.mrs", target: "Custom" },
         { id: "custom-only", name: "Custom Only", behavior: "ipcidr", path: "https://custom.example/ip.mrs", target: "Custom" },
       ],
     });
 
-    expect(providers.cn).toMatchObject({
-      url: "https://rules.example/base/geosite/cn.mrs",
-      path: "./ruleset/cn.mrs",
+    // 内置广告规则集优先，自定义规则集不能顶掉它
+    expect(providers["广告集合_rules"]).toMatchObject({
+      behavior: "domain",
+      path: "./ruleset/广告集合_rules.list",
     });
+    expect(providers["广告集合_rules"].url).toContain("AdvertisingLite_Domain_For_Clash.txt");
     expect(providers["custom-only"]).toMatchObject({
       behavior: "ipcidr",
       url: "https://custom.example/ip.mrs",
     });
+    // 广告分组关掉时连内置规则集也不生成
+    expect(generateRuleProviders({
+      nodes: [ssNode("Alpha")],
+      enabledModules: [],
+      ruleProviderBaseUrl: "https://rules.example/base",
+      testUrl: "https://latency.example/generate_204",
+      testInterval: 300,
+    })).toEqual({});
   });
 
   it("serializes YAML with sorted rest keys, listener variants, and DNS policy cleanup", () => {
@@ -370,10 +379,14 @@ describe("public core generator extra branch coverage", () => {
       },
     ];
 
-    expect(generateRules({ enabledModules: [], customRules: [] })).toEqual(["MATCH,🚀 节点选择"]);
+    // 没有开启任何分组时只剩「始终生成」的本地回环/进程直连规则与兜底 MATCH
+    expect(generateRules({ enabledModules: [], customRules: [] }).at(-1)).toBe("MATCH,手动选择");
+    expect(generateRules({ enabledModules: [], customRules: [] })).toContain(
+      "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"
+    );
     expect(
       normalizePersistedRuleOrder({
-        enabledModules: ["cn", "final"],
+        enabledModules: ["cn"],
         customRules,
         customRuleSets,
         ruleOrder: [123 as unknown as string, " ", "custom-rule:rule-b", "custom-rule:rule-b", "custom-rule:rule-a"],
@@ -383,10 +396,10 @@ describe("public core generator extra branch coverage", () => {
     ).toEqual(["custom-rule:rule-b", "custom-rule:rule-a", "custom-rule-set:group-rule"]);
 
     const applied = resolveAppliedRuleOrder({
-      enabledModules: ["cn", "final"],
+      enabledModules: ["cn"],
       customRules,
       customRuleSets,
-      ruleOrder: ["module:cn:geosite-cn", "special:match", "custom-rule:rule-b"],
+      ruleOrder: ["module:cn:geo-cn", "special:match", "custom-rule:rule-b"],
       availablePolicyTargets: ["Custom Target", "DIRECT"],
       fallbackPolicyTarget: "DIRECT",
     });
@@ -395,7 +408,7 @@ describe("public core generator extra branch coverage", () => {
     expect(applied).toContain("custom-rule-set:group-rule");
     expect(
       generateRules({
-        enabledModules: ["cn", "final"],
+        enabledModules: ["cn"],
         customRules,
         customRuleSets,
         ruleOrder: applied,

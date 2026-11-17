@@ -11,6 +11,10 @@ export const DEFAULT_SUBBOOST_CONFIG = {
   testInterval: 300,
   ruleProviderBaseUrl: DEFAULT_RULE_PROVIDER_BASE_URL,
   customRules: [],
+  manualDomains: { direct: [], proxy: [], reject: [] } as const,
+  manualProcessRules: [],
+  steamViaProxy: true,
+  steamDownloadViaProxy: false,
   ruleOrder: [],
   cnIpNoResolve: true,
   experimentalCnUseCnRuleSet: true,
@@ -29,6 +33,14 @@ export function buildDefaultUserConfig(template: TemplateType): UserConfig {
     testInterval: DEFAULT_SUBBOOST_CONFIG.testInterval,
     ruleProviderBaseUrl: DEFAULT_SUBBOOST_CONFIG.ruleProviderBaseUrl,
     customRules: [...DEFAULT_SUBBOOST_CONFIG.customRules],
+    manualDomains: {
+      direct: [...DEFAULT_SUBBOOST_CONFIG.manualDomains.direct],
+      proxy: [...DEFAULT_SUBBOOST_CONFIG.manualDomains.proxy],
+      reject: [...DEFAULT_SUBBOOST_CONFIG.manualDomains.reject],
+    },
+    manualProcessRules: [...DEFAULT_SUBBOOST_CONFIG.manualProcessRules],
+    steamViaProxy: DEFAULT_SUBBOOST_CONFIG.steamViaProxy,
+    steamDownloadViaProxy: DEFAULT_SUBBOOST_CONFIG.steamDownloadViaProxy,
     ruleOrder: [...DEFAULT_SUBBOOST_CONFIG.ruleOrder],
     cnIpNoResolve: DEFAULT_SUBBOOST_CONFIG.cnIpNoResolve,
     experimentalCnUseCnRuleSet: DEFAULT_SUBBOOST_CONFIG.experimentalCnUseCnRuleSet,
@@ -68,11 +80,11 @@ export function buildDefaultBaseConfigPatch(options: {
     "geo-auto-update": true,
     "geodata-loader": "standard",
     "geo-update-interval": 24,
+    // 与内置规则同源：GEOSITE/GEOIP 走 meta-rules-dat 的 latest 数据
     "geox-url": {
-      geoip: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geoip.dat",
-      geosite: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/geosite.dat",
-      mmdb: "https://testingcf.jsdelivr.net/gh/MetaCubeX/meta-rules-dat@release/country.mmdb",
-      asn: "https://github.com/xishang0128/geoip/releases/download/latest/GeoLite2-ASN.mmdb",
+      geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat",
+      geosite: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat",
+      mmdb: "https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country-lite.mmdb",
     },
   };
 }
@@ -90,6 +102,10 @@ export function buildDefaultSubBoostTemplateConfig(type: TemplateType): SubBoost
     customRuleSets: [],
     builtinRuleEdits: {},
     customRules: [],
+    manualDomains: { direct: [], proxy: [], reject: [] },
+    manualProcessRules: [],
+    steamViaProxy: true,
+    steamDownloadViaProxy: false,
     ruleOrder: [],
     cnIpNoResolve: DEFAULT_SUBBOOST_CONFIG.cnIpNoResolve,
     experimentalCnUseCnRuleSet: DEFAULT_SUBBOOST_CONFIG.experimentalCnUseCnRuleSet,
@@ -112,25 +128,43 @@ log-level: info
 unified-delay: true
 tcp-concurrent: true
 find-process-mode: strict
+# 内置规则用到 GEOSITE / GEOIP，数据源跟规则同步
+geodata-mode: true
+geo-auto-update: true
+geodata-loader: standard
+geo-update-interval: 24
+geox-url:
+  geoip: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geoip-lite.dat
+  geosite: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/geosite.dat
+  mmdb: https://github.com/MetaCubeX/meta-rules-dat/releases/download/latest/country-lite.mmdb
 
 # DNS 配置
 dns:
   enable: true
-  listen: "127.0.0.1:5335"
-  use-system-hosts: false
+  hosts:
+    localhost: 127.0.0.1
+    "*.localhost": 127.0.0.1
+  cache-algorithm: arc
+  ipv6: false
+  respect-rules: true
+  use-hosts: true
+  use-system-hosts: true
   enhanced-mode: fake-ip
   fake-ip-range: 198.18.0.1/16
-  default-nameserver: [180.76.76.76, 182.254.118.118, 8.8.8.8, 180.184.2.2]
-  nameserver: [180.76.76.76, 119.29.29.29, 180.184.1.1, 223.5.5.5, 8.8.8.8, "https://223.6.6.6/dns-query#h3=true", "https://dns.alidns.com/dns-query", "https://cloudflare-dns.com/dns-query", "https://doh.pub/dns-query"]
-  fallback: ["https://dns.quad9.net/dns-query", "https://dns.alidns.com/dns-query", "https://doh.pub/dns-query", "https://public.dns.iij.jp/dns-query", "https://101.101.101.101/dns-query", "https://208.67.220.220/dns-query", "tls://8.8.4.4", "tls://1.0.0.1:853", "https://cloudflare-dns.com/dns-query", "https://dns.google/dns-query"]
-  fallback-filter: {geoip: true, ipcidr: [240.0.0.0/4, 0.0.0.0/32, 127.0.0.1/32], domain: ["+.google.com", "+.facebook.com", "+.twitter.com", "+.youtube.com", "+.xn--ngstr-lra8j.com", "+.google.cn", "+.googleapis.cn", "+.googleapis.com", "+.gvt1.com"]}
-  fake-ip-filter: ["*.lan", "stun.*.*.*", "stun.*.*", time.windows.com, time.nist.gov, time.apple.com, time.asia.apple.com, "*.ntp.org.cn", "*.openwrt.pool.ntp.org", time1.cloud.tencent.com, time.ustc.edu.cn, pool.ntp.org, ntp.ubuntu.com, ntp.aliyun.com, ntp1.aliyun.com, ntp2.aliyun.com, ntp3.aliyun.com, ntp4.aliyun.com, ntp5.aliyun.com, ntp6.aliyun.com, ntp7.aliyun.com, time1.aliyun.com, time2.aliyun.com, time3.aliyun.com, time4.aliyun.com, time5.aliyun.com, time6.aliyun.com, time7.aliyun.com, "*.time.edu.cn", time1.apple.com, time2.apple.com, time3.apple.com, time4.apple.com, time5.apple.com, time6.apple.com, time7.apple.com, time1.google.com, time2.google.com, time3.google.com, time4.google.com, music.163.com, "*.music.163.com", "*.126.net", musicapi.taihe.com, music.taihe.com, songsearch.kugou.com, trackercdn.kugou.com, "*.kuwo.cn", api-jooxtt.sanook.com, api.joox.com, joox.com, y.qq.com, "*.y.qq.com", streamoc.music.tc.qq.com, mobileoc.music.tc.qq.com, isure.stream.qqmusic.qq.com, dl.stream.qqmusic.qq.com, aqqmusic.tc.qq.com, amobile.music.tc.qq.com, "*.xiami.com", "*.music.migu.cn", music.migu.cn, "*.msftconnecttest.com", "*.msftncsi.com", localhost.ptlogin2.qq.com, "*.*.*.srv.nintendo.net", "*.*.stun.playstation.net", "xbox.*.*.microsoft.com", "*.ipv6.microsoft.com", "*.*.xboxlive.com", speedtest.cros.wr.pvp.net]
-  # nameserver-policy 示例（full）
-  # nameserver-policy:
-  #   "rule-set:company": ["172.16.0.53", "172.16.0.54"]
-  #   "geosite:cn": ["223.5.5.5", "119.29.29.29"]
-  #   "+.home.arpa": ["192.168.1.1"]
-  #   "+.example.com": ["https://dns.quad9.net/dns-query", "tls://1.1.1.1:853"]
+  fake-ip-filter-mode: blacklist
+  fake-ip-filter: ["+.lan", "+.local", "+.localhost", "+.home.arpa", "+.in-addr.arpa", "+.ip6.arpa", localhost, stun.l.google.com, stun1.l.google.com, stun2.l.google.com, stun3.l.google.com, stun4.l.google.com, "+.stun.qq.com", "+.stun.miwifi.com", "+.msftconnecttest.com", "+.msftncsi.com", dns.msftncsi.com, "+.miwifi.com", "+.routerlogin.com", "+.routerlogin.net", "+.tplinkwifi.net", "+.tplinklogin.net", router.asus.com, time.windows.com, time.apple.com, time-ios.apple.com, time.cloud.tencent.com, ntp.aliyun.com, "+.ntp.org", "+.captive.apple.com", localhost.ptlogin2.qq.com, localhost.sec.qq.com]
+  # 引导 DNS，必须是纯 IP
+  default-nameserver: [223.5.5.5, 119.29.29.29]
+  # 解析节点域名：只用国内可信 DoH
+  proxy-server-nameserver: ["https://223.5.5.5/dns-query#disable-ipv6=true"]
+  # 仅控制 DIRECT 出站时的域名解析
+  direct-nameserver: [system]
+  direct-nameserver-follow-policy: false
+  # 默认 nameserver（境外 DoH，配合 respect-rules 经代理出站）
+  nameserver: ["https://1.1.1.1/dns-query#disable-ipv6=true", "https://8.8.8.8/dns-query#disable-ipv6=true"]
+  # 国内 / 私有域名走国内 DoH
+  nameserver-policy:
+    "geosite:private,cn,geolocation-cn": ["https://223.5.5.5/dns-query#disable-ipv6=true", "https://119.29.29.29/dns-query#disable-ipv6=true"]
 
 # 配置文件管理
 profile:

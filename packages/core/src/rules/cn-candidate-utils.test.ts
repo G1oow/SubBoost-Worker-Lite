@@ -31,19 +31,19 @@ describe("CN candidate utils", () => {
     ]);
   });
 
-  it("collects enabled parent rules and respects exclusions", () => {
+  it("collects no parent rules because builtin rules are literal instead of rule sets", () => {
     expect(collectCnCandidateParents([], { defaultToAll: false })).toEqual([]);
     expect(collectCnCandidateParents([" select ", " "])).toEqual([]);
 
-    const parents = collectCnCandidateParents([], { defaultToAll: true });
-    expect(parents.length).toBeGreaterThan(0);
-    const first = parents[0];
-    if (!first) throw new Error("Expected at least one parent");
-
-    const excluded = collectCnCandidateParents([first.parentModuleId], {
-      excludedRuleKeys: [`${first.parentModuleId}:${first.parentRuleId}`],
-    });
-    expect(excluded).not.toContainEqual(first);
+    // 内置规则改成了字面量（DOMAIN / PROCESS / GEOSITE），没有任何带 behavior/path 的 mrs 规则集，
+    // 所以「按分组开关收集父规则」不再有输入
+    expect(collectCnCandidateParents([], { defaultToAll: true })).toEqual([]);
+    // core 分组永远跳过；非 core 的 steam 也没有规则集规则
+    expect(collectCnCandidateParents(["select", "auto", "cn", "steam"])).toEqual([]);
+    // 排除参数仍然接受规则键，只是已没有可被排除的父规则
+    expect(
+      collectCnCandidateParents(["steam"], { excludedRuleKeys: ["steam:geosite-steam"] })
+    ).toEqual([]);
   });
 
   it("normalizes rule list content before duplicate and coverage checks", () => {
@@ -161,45 +161,18 @@ describe("CN candidate utils", () => {
     });
   });
 
-  it("builds local candidates from the bundled rule database", () => {
+  it("builds no local candidates because builtin rule sets were replaced by literal rules", () => {
     const parents = collectCnCandidateParents([], { defaultToAll: true });
-    const first = parents[0];
-    if (!first) throw new Error("Expected at least one parent");
+    expect(parents).toEqual([]);
 
-    const candidates = buildLocalCnRuleCandidates({
-      moduleIds: [first.parentModuleId],
-      excludedRuleKeys: [`${first.parentModuleId}:__missing__`],
-    });
-
-    expect(Array.isArray(candidates)).toBe(true);
-    for (const candidate of candidates) {
-      expect(candidate).toMatchObject({
-        behavior: "domain",
-        format: "mrs",
-        coveredByGeolocationCn: false,
-        empty: false,
-        actionable: true,
-      });
-      expect(candidate.path).toBe(`geosite/${candidate.id}.mrs`);
-    }
-
-    const excluded = buildLocalCnRuleCandidates({
-      moduleIds: [first.parentModuleId],
-      excludedRuleKeys: [`${first.parentModuleId}:${first.parentRuleId}`],
-    });
-    expect(excluded.every((candidate) => candidate.parentRuleId !== first.parentRuleId)).toBe(true);
-
-    expect(buildLocalCnRuleCandidates({ moduleIds: ["google"] })).toContainEqual(
-      expect.objectContaining({
-        id: "google-cn",
-        name: "google-cn（谷歌中国）",
-        parentRuleId: "google",
-        parentModuleId: "google",
+    expect(buildLocalCnRuleCandidates({ moduleIds: ["steam"] })).toEqual([]);
+    expect(
+      buildLocalCnRuleCandidates({
+        moduleIds: ["steam"],
+        excludedRuleKeys: ["steam:geosite-steam"],
       })
-    );
-    expect(buildLocalCnRuleCandidates({ moduleIds: ["google", "apple"] }).map((candidate) => candidate.id)).toEqual([
-      "apple-cn",
-      "google-cn",
-    ]);
+    ).toEqual([]);
+    // 已删除的分组 id 同样不产生候选
+    expect(buildLocalCnRuleCandidates({ moduleIds: ["google", "apple"] })).toEqual([]);
   });
 });

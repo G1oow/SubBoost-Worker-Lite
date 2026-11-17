@@ -19,18 +19,20 @@ import { resolveProxyGroupMembers } from "@subboost/core/proxy-group-advanced";
 import { isSubscriptionInfoNodeName } from "@subboost/core/subscription/info-node-name";
 import type { ChainGroupRef } from "@subboost/core/proxy-group-targets";
 
-import { PROXY_GROUP_MODULES, type ProxyGroupModule, type ProxyGroupRule } from "./proxy-group-modules";
 import {
-  EXPERIMENTAL_CN_RULE,
-  generateRules,
-  resolveModuleName,
-  resolveModuleNameFromModule,
-} from "./rules";
-import { getModuleRuleOrderKey } from "./module-rules";
+  BUILTIN_RULE_KEYS,
+  BUILTIN_RULE_PROVIDER_ID,
+  BUILTIN_RULE_PROVIDER_URL,
+  PROXY_GROUP_MODULES,
+  type ProxyGroupModule,
+  type ProxyGroupModuleMember,
+  type ProxyGroupRule,
+} from "./proxy-group-modules";
+import { generateRules, resolveModuleName, resolveModuleNameFromModule } from "./rules";
 import { buildRuleSetUrlFromPath } from "@subboost/core/rules/rule-model";
 import { buildTypedProxyGroup } from "./proxy-group-type";
 
-export { PROXY_GROUP_MODULES };
+export { BUILTIN_RULE_KEYS, PROXY_GROUP_MODULES };
 export type { ProxyGroupModule, ProxyGroupRule };
 export { generateRules };
 
@@ -60,10 +62,6 @@ export interface ProxyGroupGenerateOptions {
   customRuleSets?: CustomRuleSet[];
   proxyGroupAdvanced?: Record<string, ProxyGroupAdvancedConfig>;
   builtinRuleEdits?: BuiltinRuleEdits;
-  // 国内服务 GeoIP 规则是否使用 no-resolve（默认 true；关闭可提升命中率但可能造成 DNS 泄露）
-  cnIpNoResolve?: boolean;
-  // 实验性：为“国内服务”额外启用 cn（geosite/cn.mrs），并将其规则后置（放到 global 之后）
-  experimentalCnUseCnRuleSet?: boolean;
   proxyGroupNameOverrides?: Record<string, string>;
   ruleOrder?: string[];
   /** 链式代理：出口组名与其落地节点（成员收敛用） */
@@ -111,34 +109,10 @@ function customTargetIsDisabled(
 }
 
 /**
- * 代理组显示顺序（在 Clash 客户端中的排列顺序）
- * 
- * 顺序：节点选择 → 自动选择 → (中转组插入位置) → 广告 → 服务 → 私有/国内 → 非中国 → 漏网之鱼
+ * 代理组显示顺序（在 Clash 客户端中的排列顺序），与脚本里的分组顺序一致：
+ * 自动选择 → 手动选择 → 国内直连 → 广告拦截 → Steam 代理
  */
-const PROXY_GROUP_ORDER: string[] = [
-  // 1. 核心选择组（最前面）
-  "select", "auto",
-  // 2. 广告拦截
-  "ad",
-  // 3. 常用服务
-  "ai", "gemini", "youtube", "google", "microsoft", "apple",
-  // 4. 社交通讯
-  "telegram", "twitter", "meta", "discord", "social-other",
-  // 5. 流媒体
-  "netflix", "disney", "streaming-west", "streaming-asia",
-  // 6. 游戏平台
-  "steam", "gaming-pc", "gaming-console",
-  // 7. 技术服务
-  "github", "cloud", "dev-tools", "storage",
-  // 8. 金融服务
-  "payment", "crypto",
-  // 9. 其他
-  "google-scholar", "education", "news", "shopping", "adult",
-  // 10. 直连组（靠后）
-  "private", "cn",
-  // 11. 兜底组（最后）
-  "global", "final",
-];
+const PROXY_GROUP_ORDER: string[] = ["auto", "select", "cn", "ad", "steam"];
 
 /**
  * 生成代理组配置
@@ -219,6 +193,21 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
     return out;
   };
   const fallbackTargets = (...targets: unknown[]) => policyTargets(...targets, "DIRECT", "REJECT");
+  /** 内置分组的固定成员表 → 组名列表（节点全集按链感知替换） */
+  const resolveModuleMemberNames = (members: ProxyGroupModuleMember[]): string[] => {
+    const out: string[] = [];
+    for (const member of members) {
+      if (typeof member === "string") {
+        out.push(member);
+      } else if ("nodes" in member && member.nodes) {
+        out.push(...memberNames);
+      } else if ("module" in member) {
+        const name = moduleNames[member.module];
+        if (name) out.push(name);
+      }
+    }
+    return policyTargets(...out);
+  };
   const selectTarget = enabledModuleTarget("select");
   const autoTarget = enabledModuleTarget("auto");
   const moduleBaseProxies = selectTarget
@@ -286,42 +275,23 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
   const generateGroup = (module: ProxyGroupModule) => {
     const moduleName = resolveModuleNameFromModule(module, proxyGroupNameOverrides);
     const advanced = proxyGroupAdvanced[module.id];
+    // 内置分组默认用固定成员表；高级设置里显式改成测速/负载均衡类型时仍按类型生成
+    if (module.members && (!advanced?.groupType || advanced.groupType === "select")) {
+      groups.push({
+        name: moduleName,
+        type: "select",
+        proxies: resolveGroupProxyNames(
+          resolveModuleMemberNames(module.members).filter((target) => target !== moduleName),
+          advanced,
+          { kind: "module", id: module.id, name: moduleName }
+        ),
+        ...providerUse,
+      });
+      return;
+    }
     const groupType: ProxyGroupGroupType = advanced?.groupType ?? module.groupType;
     switch (groupType) {
-      case "select":
-        if (module.id === "select") {
-          const defaultProxies = fallbackTargets(
-            autoTarget,
-            "DIRECT",
-            "REJECT",
-            ...allMemberNames
-          );
-          groups.push({
-            name: moduleName,
-            type: "select",
-            // “节点选择”组本身不应包含自己；默认先走“⚡ 自动选择”更符合开箱即用
-            proxies: resolveGroupProxyNames(defaultProxies, advanced, {
-              kind: "module",
-              id: module.id,
-              name: moduleName,
-            }),
-            ...providerUse,
-          });
-        } else {
-          const defaultProxies = moduleBaseProxies.filter((target) => target !== moduleName);
-          groups.push({
-            name: moduleName,
-            type: "select",
-            proxies: resolveGroupProxyNames(defaultProxies, advanced, {
-              kind: "module",
-              id: module.id,
-              name: moduleName,
-            }),
-            ...providerUse,
-          });
-        }
-        break;
-
+      // select 类型已在上面按固定成员表处理（members），这里只处理高级设置改成的测速/负载均衡类型
       case "url-test":
           groups.push(createGeneratedProxyGroup(
             moduleName,
@@ -481,39 +451,17 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
     groups.push(createCustomProxyGroup(customGroup));
   }
 
-  // 按 PROXY_GROUP_ORDER 顺序生成代理组
-  let insertedCustom = false;
+  // 按 PROXY_GROUP_ORDER 顺序生成内置分组
   for (const moduleId of PROXY_GROUP_ORDER) {
-    // 自定义分流组插入位置：在 🍏 苹果服务 与 📲 电报消息之间
-    if (!insertedCustom && moduleId === "ai" && inlineCustomProxyGroups.length > 0) {
-      insertedCustom = true;
-      for (const customGroup of inlineCustomProxyGroups) {
-        groups.push(createCustomProxyGroup(customGroup));
-      }
-    }
-
     if (!enabledSet.has(moduleId)) continue;
-    
-    const proxyModule = PROXY_GROUP_MODULES.find(m => m.id === moduleId);
+    const proxyModule = PROXY_GROUP_MODULES.find((m) => m.id === moduleId);
     if (!proxyModule) continue;
-    
-    processedModules.add(moduleId);
     generateGroup(proxyModule);
   }
 
-  // 处理不在 PROXY_GROUP_ORDER 中的模块（按原始顺序添加到末尾）
-  for (const proxyModule of PROXY_GROUP_MODULES) {
-    if (!enabledSet.has(proxyModule.id)) continue;
-    if (processedModules.has(proxyModule.id)) continue;
-    
-    generateGroup(proxyModule);
-  }
-
-  // 若未命中插入点（例如未来移除 private），则追加到末尾
-  if (!insertedCustom && inlineCustomProxyGroups.length > 0) {
-    for (const customGroup of inlineCustomProxyGroups) {
-      groups.push(createCustomProxyGroup(customGroup));
-    }
+  // 其余分组（不在固定顺序里的自定义组）追加在末尾
+  for (const customGroup of inlineCustomProxyGroups) {
+    groups.push(createCustomProxyGroup(customGroup));
   }
 
   return groups;
@@ -523,42 +471,18 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
  * 生成规则提供者配置
  */
 export function generateRuleProviders(options: ProxyGroupGenerateOptions): Record<string, RuleProvider> {
-  const {
-    enabledModules,
-    ruleProviderBaseUrl,
-    customRuleSets = [],
-    builtinRuleEdits,
-    customProxyGroups = [],
-  } = options;
+  const { enabledModules, ruleProviderBaseUrl, customRuleSets = [], customProxyGroups = [] } = options;
   const providers: Record<string, RuleProvider> = {};
   const enabledSet = new Set(enabledModules);
 
-  // 预设模块的规则
-  for (const proxyModule of PROXY_GROUP_MODULES) {
-    if (!enabledSet.has(proxyModule.id)) continue;
-
-    for (const rule of proxyModule.rules) {
-      const edit = builtinRuleEdits?.[getModuleRuleOrderKey(proxyModule.id, rule.id)];
-      if (edit?.enabled === false) continue;
-      providers[rule.id] = {
-        type: "http",
-        behavior: rule.behavior,
-        url: `${ruleProviderBaseUrl}/${rule.path}`,
-        path: `./ruleset/${rule.id}.mrs`,
-        interval: 86400,
-        format: "mrs",
-      };
-    }
-  }
-
-  if (options.experimentalCnUseCnRuleSet && enabledSet.has("cn") && !providers[EXPERIMENTAL_CN_RULE.id]) {
-    providers[EXPERIMENTAL_CN_RULE.id] = {
+  // 内置规则集：只有广告域名集合一个（blackmatrix7 的纯域名列表，behavior: domain）
+  if (enabledSet.has("ad")) {
+    providers[BUILTIN_RULE_PROVIDER_ID] = {
       type: "http",
-      behavior: EXPERIMENTAL_CN_RULE.behavior,
-      url: `${ruleProviderBaseUrl}/${EXPERIMENTAL_CN_RULE.path}`,
-      path: `./ruleset/${EXPERIMENTAL_CN_RULE.id}.mrs`,
+      behavior: "domain",
+      url: BUILTIN_RULE_PROVIDER_URL,
+      path: `./ruleset/${BUILTIN_RULE_PROVIDER_ID}.list`,
       interval: 86400,
-      format: "mrs",
     };
   }
 
@@ -582,22 +506,14 @@ export function generateRuleProviders(options: ProxyGroupGenerateOptions): Recor
 /**
  * 根据模板获取启用的模块列表
  */
-export function getModulesForTemplate(template: "minimal" | "standard" | "full"): string[] {
-  switch (template) {
-    case "minimal":
-      return ["select", "auto", "ad", "private", "cn", "global", "final"];
-    case "standard":
-      return ["select", "auto", "ad", "private", "cn", "global", "ai", "youtube", "google", "microsoft", "apple", "github", "telegram", "final"];
-    case "full":
-    default:
-      // 排除默认关闭的模块
-      return PROXY_GROUP_MODULES.filter((m) => m.id !== "adult" && m.id !== "gemini" && m.id !== "google-scholar").map((m) => m.id);
-  }
+export function getModulesForTemplate(_template: "minimal" | "standard" | "full"): string[] {
+  // 内置分组固定为 5 个，模板差异只体现在其它默认值上
+  return PROXY_GROUP_MODULES.map((module) => module.id);
 }
 
 export function getGroupTarget(groupId: string): string {
   const proxyModule = PROXY_GROUP_MODULES.find((m) => m.id === groupId);
-  return proxyModule?.name || "🚀 节点选择";
+  return proxyModule?.name || "手动选择";
 }
 
 /**

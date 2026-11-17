@@ -3,644 +3,226 @@ import {
   buildGeneratedRuleEntries,
   buildRuleOrderView,
   generateRules,
+  getCustomRuleSetOrderKey,
   hasFullRuleOrderKeys,
   normalizePersistedRuleOrder,
-  resolveAppliedRuleOrder,
   resolveFullRuleOrder,
   resolveModuleName,
 } from "./rules";
-import { generateClashConfig } from "./index";
-import { PROXY_GROUP_MODULES } from "./proxy-groups";
-import type { CustomRule, CustomRuleSet } from "@subboost/core/types/config";
+import { PROXY_GROUP_MODULES } from "./proxy-group-modules";
 
-const customRules: CustomRule[] = [
-  {
-    id: "domain-rule",
-    type: "DOMAIN-SUFFIX",
-    value: "example.com",
-    target: "Missing Target",
-  },
-  {
-    id: "ip-rule",
-    type: "IP-CIDR",
-    value: "203.0.113.0/24",
-    target: "DIRECT",
-    noResolve: true,
-  },
+const ALL_MODULES = PROXY_GROUP_MODULES.map((module) => module.id);
+
+function generate(overrides: Record<string, unknown> = {}): string[] {
+  return generateRules({
+    enabledModules: ALL_MODULES,
+    customRules: [],
+    customRuleSets: [],
+    ...overrides,
+  } as Parameters<typeof generateRules>[0]);
+}
+
+const FULL_RULES = [
+  // 本地回环
+  "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+  "IP-CIDR,::1/128,DIRECT,no-resolve",
+  // Steam 进程
+  "PROCESS-NAME,steam.exe,Steam 代理",
+  "PROCESS-NAME,steamwebhelper.exe,Steam 代理",
+  "PROCESS-NAME,steamservice.exe,Steam 代理",
+  // Steam 下载 CDN（直连）
+  "DOMAIN,steamcdn-a.akamaihd.net,DIRECT",
+  "DOMAIN,steampipe.akamaized.net,DIRECT",
+  "DOMAIN,steampipe-kr.akamaized.net,DIRECT",
+  "DOMAIN,steampipe-partner.akamaized.net,DIRECT",
+  "DOMAIN-SUFFIX,steam.cdn.on.net,DIRECT",
+  "DOMAIN-SUFFIX,steam.apac.qtlglb.com,DIRECT",
+  "DOMAIN-SUFFIX,steam.eca.qtlglb.com,DIRECT",
+  "DOMAIN-SUFFIX,steam.naeu.qtlglb.com,DIRECT",
+  "DOMAIN-SUFFIX,steam.ru.qtlglb.com,DIRECT",
+  "DOMAIN-SUFFIX,steam.cdn.webra.ru,DIRECT",
+  "DOMAIN-SUFFIX,steam.cdn.orcon.net.nz,DIRECT",
+  "DOMAIN-SUFFIX,steam.cdn.slingshot.co.nz,DIRECT",
+  "DOMAIN-SUFFIX,client-update.queniuqe.com,DIRECT",
+  "DOMAIN-SUFFIX,dl.steam.clngaa.com,DIRECT",
+  "DOMAIN-SUFFIX,st.dl.bscstorage.net,DIRECT",
+  "DOMAIN-SUFFIX,st.dl.eccdnx.com,DIRECT",
+  "DOMAIN-SUFFIX,st.dl.pinyuncloud.com,DIRECT",
+  "DOMAIN-SUFFIX,steampowered.com.8686c.com,DIRECT",
+  "DOMAIN-SUFFIX,steamstatic.com.8686c.com,DIRECT",
+  "DOMAIN,lv.queniujq.cn,DIRECT",
+  "DOMAIN,xz.pphimalayanrt.com,DIRECT",
+  // Steam 服务域名（代理）
+  "DOMAIN-SUFFIX,steam-chat.com,Steam 代理",
+  "DOMAIN-SUFFIX,steamcommunity.com,Steam 代理",
+  "DOMAIN-SUFFIX,steamcontent.com,Steam 代理",
+  "DOMAIN-SUFFIX,steamgames.com,Steam 代理",
+  "DOMAIN-SUFFIX,steampowered.com,Steam 代理",
+  "DOMAIN-SUFFIX,steamserver.net,Steam 代理",
+  "DOMAIN-SUFFIX,steamstatic.com,Steam 代理",
+  "DOMAIN-SUFFIX,steamusercontent.com,Steam 代理",
+  "DOMAIN-SUFFIX,valve.net,Steam 代理",
+  "DOMAIN-SUFFIX,valvesoftware.com,Steam 代理",
+  "DOMAIN-SUFFIX,s.team,Steam 代理",
+  "GEOSITE,steam,Steam 代理",
+  // 进程直连
+  "PROCESS-PATH-REGEX,(?i)leigod,DIRECT",
+  "PROCESS-NAME,r5apex_dx12.exe,DIRECT",
+  "PROCESS-NAME,start_protected_game.exe,DIRECT",
+  "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
+  // 广告规则集（自定义规则插在它前面）
+  "RULE-SET,广告集合_rules,广告拦截",
+  // GEO 兜底
+  "GEOSITE,private,国内直连",
+  "GEOSITE,onedrive,国内直连",
+  "GEOSITE,microsoft@cn,国内直连",
+  "GEOSITE,category-games@cn,国内直连",
+  "GEOSITE,geolocation-!cn,自动选择",
+  "GEOSITE,cn,国内直连",
+  "GEOIP,telegram,自动选择",
+  "GEOIP,private,国内直连,no-resolve",
+  "GEOIP,cn,国内直连",
+  "MATCH,手动选择",
 ];
 
-const customRuleSets: CustomRuleSet[] = [
-  {
-    id: "media-rule",
-    name: "Media Rule",
-    behavior: "domain",
-    path: "https://rules.example.com/media.mrs",
-    target: "Media",
-    noResolve: true,
-  },
-];
-
-describe("rule generator", () => {
-  it("builds generated rule entries with fallback targets and special rules", () => {
-    const entries = buildGeneratedRuleEntries({
-      enabledModules: ["cn", "global", "final", "streaming-west"],
-      customRules,
-      customRuleSets,
-      experimentalCnUseCnRuleSet: true,
-      cnIpNoResolve: false,
-      proxyGroupNameOverrides: {
-        cn: "CN Direct",
-        final: "Final",
-        "streaming-west": "Streaming",
-      },
-      availablePolicyTargets: ["DIRECT", "🔒 CN Direct", "🐟 Final", "📺 Streaming", "Media"],
-      fallbackPolicyTarget: "DIRECT",
-    });
-    const texts = entries.map((entry) => entry.text);
-    const customIpEntry = entries.find((entry) => entry.key === "custom-rule:ip-rule");
-    const customRuleSetEntry = entries.find((entry) => entry.key === "custom-rule-set:media-rule");
-    const appleTvPlusEntry = entries.find((entry) => entry.key === "module:streaming-west:apple-tvplus");
-
-    expect(resolveModuleName("cn", { cn: "CN Direct" })).toBe("🔒 CN Direct");
-    expect(texts).toContain("DOMAIN-SUFFIX,example.com,DIRECT");
-    expect(texts).toContain("IP-CIDR,203.0.113.0/24,DIRECT,no-resolve");
-    expect(customIpEntry).toMatchObject({
-      summary: "203.0.113.0/24",
-      text: "IP-CIDR,203.0.113.0/24,DIRECT,no-resolve",
-    });
-    expect(texts).toContain("RULE-SET,media-rule,Media,no-resolve");
-    expect(texts).toContain("RULE-SET,apple-tvplus,📺 Streaming");
-    expect(customIpEntry).toMatchObject({ editable: true });
-    expect(customRuleSetEntry).toMatchObject({ editable: true });
-    expect(appleTvPlusEntry).toMatchObject({
-      key: "module:streaming-west:apple-tvplus",
-      kind: "module",
-      editable: false,
-    });
-    expect(entries.some((entry) => entry.key === "special:apple-tvplus")).toBe(false);
-    expect(texts).toContain("RULE-SET,cn,🔒 CN Direct");
-    expect(texts).toContain("MATCH,🐟 Final");
-    expect(texts.find((text) => text.startsWith("RULE-SET,cn-ip,"))).toBe("RULE-SET,cn-ip,🔒 CN Direct");
+describe("内置规则生成", () => {
+  it("默认输出与脚本一致的完整规则表", () => {
+    expect(generate()).toEqual(FULL_RULES);
   });
 
-  it("removes deleted preset module rules from generated rules and providers", () => {
-    const enabledModules = PROXY_GROUP_MODULES.map((proxyModule) => proxyModule.id);
-    const allPresetRuleIds = PROXY_GROUP_MODULES.flatMap((proxyModule) => proxyModule.rules.map((rule) => rule.id));
-    const duplicateRuleIds = allPresetRuleIds.filter((id, index) => allPresetRuleIds.indexOf(id) !== index);
-
-    expect(duplicateRuleIds).toEqual([]);
-
-    for (const proxyModule of PROXY_GROUP_MODULES) {
-      for (const rule of proxyModule.rules) {
-        const config = generateClashConfig({
-          nodes: [],
-          template: "full",
-          userConfig: {
-            enabledGroups: enabledModules,
-            enabledRules: enabledModules,
-            customRules: [],
-            ruleProviderBaseUrl: "https://example.com/rules",
-            experimentalCnUseCnRuleSet: false,
-          },
-          builtinRuleEdits: { [`module:${proxyModule.id}:${rule.id}`]: { enabled: false } },
-        });
-        const rules = Array.isArray(config.rules) ? config.rules : [];
-        const providers = config["rule-providers"] as Record<string, unknown> | undefined;
-
-        expect(rules.filter((line) => line.startsWith(`RULE-SET,${rule.id},`))).toEqual([]);
-        expect(providers?.[rule.id]).toBeUndefined();
-      }
-    }
-  });
-
-  it("handles Apple TV+ deletion and moves without special-rule leftovers", () => {
-    const enabledModules = PROXY_GROUP_MODULES.map((proxyModule) => proxyModule.id);
-    const baseConfig = {
-      nodes: [],
-      template: "full" as const,
-      userConfig: {
-        enabledGroups: enabledModules,
-        enabledRules: enabledModules,
-        customRules: [],
-        ruleProviderBaseUrl: "https://example.com/rules",
-        experimentalCnUseCnRuleSet: false,
-      },
-    };
-    const baseline = generateClashConfig(baseConfig);
-    const deleted = generateClashConfig({
-      ...baseConfig,
-      builtinRuleEdits: { "module:streaming-west:apple-tvplus": { enabled: false } },
+  it("自定义规则与规则集插在广告规则集之前", () => {
+    const rules = generate({
+      customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.com", target: "国内直连" }],
+      customRuleSets: [
+        { id: "my-set", name: "我的规则集", behavior: "domain", path: "geosite/cn.mrs", target: "国内直连" },
+      ],
     });
-    const moved = generateClashConfig({
-      ...baseConfig,
-      builtinRuleEdits: { "module:streaming-west:apple-tvplus": { target: "🔍 谷歌服务" } },
-    });
-    const baselineRules = baseline.rules as string[];
-    const appleTvPlusIndex = baselineRules.indexOf("RULE-SET,apple-tvplus,📺 欧美流媒体");
-    const appleIndex = baselineRules.indexOf("RULE-SET,apple,🍏 苹果服务");
-    const hboIndex = baselineRules.indexOf("RULE-SET,hbo,📺 欧美流媒体");
-
-    expect(appleTvPlusIndex).toBeGreaterThanOrEqual(0);
-    expect(appleTvPlusIndex).toBeLessThan(appleIndex);
-    expect(appleTvPlusIndex).toBeLessThan(hboIndex);
-    expect((deleted.rules as string[]).filter((line) => line.startsWith("RULE-SET,apple-tvplus,"))).toEqual([]);
-    expect((deleted["rule-providers"] as Record<string, unknown> | undefined)?.["apple-tvplus"]).toBeUndefined();
-    expect((moved.rules as string[]).filter((line) => line.startsWith("RULE-SET,apple-tvplus,"))).toEqual([
-      "RULE-SET,apple-tvplus,🔍 谷歌服务",
+    const index = rules.indexOf("RULE-SET,广告集合_rules,广告拦截");
+    expect(rules.slice(index - 2, index)).toEqual([
+      "DOMAIN-SUFFIX,example.com,国内直连",
+      "RULE-SET,my-set,国内直连",
     ]);
-    expect((moved["rule-providers"] as Record<string, { url?: string }> | undefined)?.["apple-tvplus"]?.url).toBe(
-      "https://example.com/rules/geosite/apple-tvplus.mrs"
-    );
+    expect(rules.at(-1)).toBe("MATCH,手动选择");
   });
 
-  it("normalizes persisted order in editable-only and full-order modes", () => {
-    const editableOrder = normalizePersistedRuleOrder({
-      enabledModules: ["cn", "global", "final"],
-      customRules,
-      customRuleSets,
-      ruleOrder: ["custom-rule-set:media-rule", "missing", "custom-rule:domain-rule"],
-    });
-    const fullOrder = normalizePersistedRuleOrder({
-      enabledModules: ["cn", "global", "final"],
-      customRules,
-      customRuleSets,
-      ruleOrder: ["module:global:geolocation-!cn", "custom-rule:domain-rule", "special:match"],
-    });
-    const applied = resolveAppliedRuleOrder({
-      enabledModules: ["cn", "global", "final"],
-      customRules,
-      customRuleSets,
-      ruleOrder: ["module:global:geolocation-!cn"],
-    });
+  it("自定义规则可以按 ruleOrder 调整相对顺序，内置规则位置不动", () => {
+    const customRules = [
+      { id: "a", type: "DOMAIN", value: "a.example.com", target: "国内直连" },
+      { id: "b", type: "DOMAIN", value: "b.example.com", target: "国内直连" },
+    ];
+    const base = generate({ customRules });
+    const reordered = generate({ customRules, ruleOrder: ["custom-rule:b", "custom-rule:a"] });
+    const ruleA = "DOMAIN,a.example.com,国内直连";
+    const ruleB = "DOMAIN,b.example.com,国内直连";
+    expect(base.indexOf(ruleA)).toBeLessThan(base.indexOf(ruleB));
+    expect(reordered.indexOf(ruleB)).toBeLessThan(reordered.indexOf(ruleA));
+    // 手动条目之外必须与默认顺序逐条一致（用精确集合判断，不做子串匹配）
+    const customTexts = new Set([ruleA, ruleB]);
+    expect(reordered.filter((rule) => !customTexts.has(rule))).toEqual(FULL_RULES);
+  });
 
-    expect(hasFullRuleOrderKeys(["custom-rule:domain-rule"])).toBe(false);
-    expect(hasFullRuleOrderKeys(["module:global:geolocation-!cn"])).toBe(true);
-    expect(editableOrder).toEqual(["custom-rule-set:media-rule", "custom-rule:domain-rule", "custom-rule:ip-rule"]);
-    expect(fullOrder).toEqual(["module:global:geolocation-!cn", "custom-rule:domain-rule"]);
-    expect(applied).toContain("module:global:geolocation-!cn");
-    expect(applied.indexOf("custom-rule:domain-rule")).toBeLessThan(applied.indexOf("module:global:geolocation-!cn"));
-    expect(resolveAppliedRuleOrder({
-      enabledModules: ["cn", "global", "final"],
-      customRules,
-      customRuleSets,
-      ruleOrder: ["custom-rule-set:media-rule", "custom-rule:ip-rule"],
-    }).slice(0, 3)).toEqual(["custom-rule-set:media-rule", "custom-rule:ip-rule", "custom-rule:domain-rule"]);
-    expect(generateRules({
-      enabledModules: [],
+  it("内置规则支持停用与改目标", () => {
+    const rules = generate({
+      builtinRuleEdits: {
+        "module:steam:geosite-steam": { enabled: false },
+        "module:auto:geo-non-cn": { target: { kind: "module", id: "steam" } },
+      },
+    });
+    expect(rules).not.toContain("GEOSITE,steam,Steam 代理");
+    expect(rules).toContain("GEOSITE,geolocation-!cn,Steam 代理");
+  });
+
+  it("关闭分组后它的规则不再生成，但本地回环与进程直连保留", () => {
+    const rules = generate({ enabledModules: ["select", "auto", "cn"] });
+    expect(rules).not.toContain("PROCESS-NAME,steam.exe,Steam 代理");
+    expect(rules).not.toContain("RULE-SET,广告集合_rules,广告拦截");
+    expect(rules).toContain("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve");
+    expect(rules).toContain("PROCESS-NAME,r5apex_dx12.exe,DIRECT");
+    expect(rules.at(-1)).toBe("MATCH,手动选择");
+  });
+
+  it("分组名改过之后规则目标跟着改", () => {
+    const rules = generate({ proxyGroupNameOverrides: { steam: "游戏代理" } });
+    expect(rules).toContain("DOMAIN-SUFFIX,steamcommunity.com,🎮 游戏代理");
+    expect(rules).toContain("MATCH,手动选择");
+  });
+
+  it("目标分组不可用时回退到兜底策略", () => {
+    const entries = buildGeneratedRuleEntries({
+      enabledModules: ALL_MODULES,
       customRules: [],
-      fallbackPolicyTarget: "DIRECT",
-    })).toEqual(["MATCH,DIRECT"]);
+      availablePolicyTargets: ["手动选择", "DIRECT", "REJECT"],
+      fallbackPolicyTarget: "手动选择",
+    } as Parameters<typeof buildGeneratedRuleEntries>[0]);
+    const steamRule = entries.find((entry) => entry.key === "module:steam:domain-steamcommunity");
+    expect(steamRule?.target).toBe("手动选择");
   });
 
-  it("keeps inactive preset anchors so deleted or moved rules can restore their full-order position", () => {
+  it("MATCH 永远指向手动选择", () => {
+    const entries = buildGeneratedRuleEntries({
+      enabledModules: ALL_MODULES,
+      customRules: [],
+    });
+    expect(entries.at(-1)?.text).toBe("MATCH,手动选择");
+  });
+});
+
+describe("手动域名 / 进程规则与顺序视图", () => {
+  it("手动条目插在广告规则集之前，且不进入持久化顺序", () => {
     const options = {
-      enabledModules: PROXY_GROUP_MODULES.map((proxyModule) => proxyModule.id),
+      enabledModules: ALL_MODULES,
       customRules: [],
-      customRuleSets: [],
-      fallbackPolicyTarget: "DIRECT",
+      manualDomains: { direct: ["cdn.example.com"], proxy: ["api.example.org"], reject: [] },
+      manualProcessRules: ["curl"],
     };
-    const baselineOrder = buildGeneratedRuleEntries(options)
-      .filter((entry) => entry.key !== "special:match")
-      .map((entry) => entry.key);
-
-    for (const proxyModule of PROXY_GROUP_MODULES) {
-      for (const rule of proxyModule.rules) {
-        const sourceKey = `module:${proxyModule.id}:${rule.id}`;
-        const targetModuleId = proxyModule.id === "google" ? "ai" : "google";
-        const baselineIndex = baselineOrder.indexOf(sourceKey);
-        expect(baselineIndex).toBeGreaterThanOrEqual(0);
-
-        const afterDeleteOrder = normalizePersistedRuleOrder({
-          ...options,
-          builtinRuleEdits: { [sourceKey]: { enabled: false } },
-          ruleOrder: baselineOrder,
-        });
-        const afterDeleteApplied = resolveAppliedRuleOrder({
-          ...options,
-          builtinRuleEdits: { [sourceKey]: { enabled: false } },
-          ruleOrder: afterDeleteOrder,
-        });
-        const afterRestoreApplied = resolveAppliedRuleOrder({
-          ...options,
-          ruleOrder: afterDeleteOrder,
-        });
-        const afterMoveOrder = normalizePersistedRuleOrder({
-          ...options,
-          builtinRuleEdits: { [sourceKey]: { target: resolveModuleName(targetModuleId) } },
-          ruleOrder: baselineOrder,
-        });
-        const afterMoveApplied = resolveAppliedRuleOrder({
-          ...options,
-          builtinRuleEdits: { [sourceKey]: { target: resolveModuleName(targetModuleId) } },
-          ruleOrder: afterMoveOrder,
-        });
-
-        expect(afterDeleteOrder).toContain(sourceKey);
-        expect(afterDeleteApplied).not.toContain(sourceKey);
-        expect(afterRestoreApplied.indexOf(sourceKey)).toBe(baselineIndex);
-        expect(afterMoveOrder).toContain(sourceKey);
-        expect(afterMoveApplied.indexOf(sourceKey)).toBe(baselineIndex);
-      }
-    }
-  });
-
-  it("keeps missing editable rules near their canonical neighbors in full-order mode", () => {
-    const options = {
-      enabledModules: ["ad", "private", "global", "final"],
-      customRules,
-      customRuleSets: [],
-      fallbackPolicyTarget: "DIRECT",
-    };
-    const entries = buildGeneratedRuleEntries(options);
-    const adKey = entries.find((entry) => entry.key.startsWith("module:ad:"))?.key;
-    if (!adKey) throw new Error("Expected ad module rule");
-
-    const applied = resolveAppliedRuleOrder({
-      ...options,
-      ruleOrder: [adKey],
-    });
-
-    expect(resolveModuleName("missing-module")).toBe("missing-module");
-    expect(applied.slice(applied.indexOf(adKey) + 1, applied.indexOf(adKey) + 3)).toEqual([
-      "custom-rule:domain-rule",
-      "custom-rule:ip-rule",
-    ]);
-    expect(
-      buildGeneratedRuleEntries({
-        enabledModules: ["final"],
-        customRules: [
-          {
-            id: "domain-no-resolve",
-            type: "DOMAIN-SUFFIX",
-            value: "example.org",
-            target: "DIRECT",
-            noResolve: true,
-          },
-        ],
-        customRuleSets: [
-          {
-            id: "plain-rule",
-            name: "Plain Rule",
-            behavior: "domain",
-            path: "https://rules.example.com/plain.mrs",
-            target: "Plain",
-          },
-        ],
-        fallbackPolicyTarget: "DIRECT",
-      }).map((entry) => entry.text)
-    ).toEqual(["DOMAIN-SUFFIX,example.org,DIRECT", "RULE-SET,plain-rule,Plain", "MATCH,🐟 漏网之鱼"]);
-    expect(
-      normalizePersistedRuleOrder({
-        enabledModules: [],
-        customRules: [],
-        ruleOrder: ["custom-rule:missing"],
-      })
-    ).toEqual([]);
-    expect(
-      normalizePersistedRuleOrder({
-        enabledModules: ["streaming-west"],
-        customRules: [],
-        customRuleSets: [],
-        ruleOrder: ["special:apple-tvplus", "module:streaming-west:apple-tvplus"],
-      })
-    ).toEqual(["module:streaming-west:apple-tvplus"]);
-  });
-
-  it("keeps module-targeted custom rules while dropping disabled custom-group targets", () => {
-    const entries = buildGeneratedRuleEntries({
-      enabledModules: ["private", "apple"],
-      customProxyGroups: [
-        { id: "disabled", name: "Disabled", emoji: "", groupType: "select", enabled: false },
-      ],
-      customRules: [
-        {
-          id: "module-target",
-          type: "DOMAIN",
-          value: "module.example",
-          target: { kind: "module", id: "select" },
-          noResolve: true,
-        },
-        {
-          id: "disabled-name",
-          type: "DOMAIN",
-          value: "disabled-name.example",
-          target: "Disabled",
-        },
-        {
-          id: "disabled-ref",
-          type: "DOMAIN",
-          value: "disabled-ref.example",
-          target: { kind: "custom", id: "disabled" },
-        },
-      ],
-      customRuleSets: [
-        {
-          id: "module-set",
-          name: "Module Set",
-          behavior: "domain",
-          path: "https://rules.example.com/module.mrs",
-          target: { kind: "module", id: "select" },
-        },
-      ],
-      fallbackPolicyTarget: "DIRECT",
-    });
-    const texts = entries.map((entry) => entry.text);
-
-    expect(texts).toContain("DOMAIN,module.example,🚀 节点选择");
-    expect(texts).toContain("RULE-SET,module-set,🚀 节点选择");
-    expect(texts.some((text) => text.includes("disabled-name.example"))).toBe(false);
-    expect(texts.some((text) => text.includes("disabled-ref.example"))).toBe(false);
-    expect(texts.some((text) => text.startsWith("RULE-SET,private-ip,🏠 私有网络,no-resolve"))).toBe(true);
-    expect(texts.some((text) => text.startsWith("RULE-SET,apple,🍏 苹果服务"))).toBe(true);
-
-    expect(hasFullRuleOrderKeys(undefined)).toBe(false);
-    expect(
-      normalizePersistedRuleOrder({
-        enabledModules: [],
-        customRules,
-        customRuleSets: [],
-        ruleOrder: undefined,
-      })
-    ).toEqual([]);
-    expect(
-      resolveAppliedRuleOrder({
-        enabledModules: [],
-        customRules,
-        customRuleSets: [],
-        ruleOrder: ["module:global:geolocation-!cn"],
-      })
-    ).toEqual(["custom-rule:domain-rule", "custom-rule:ip-rule"]);
-  });
-
-  it("applies builtin module target edits and cn no-resolve overrides", () => {
-    const entries = buildGeneratedRuleEntries({
-      enabledModules: ["cn"],
-      customRules: [],
-      customRuleSets: [],
-      customProxyGroups: [
-        { id: "regional", name: "Regional", emoji: "R", groupType: "select" },
-      ],
-      builtinRuleEdits: {
-        "module:cn:cn-ip": { target: { kind: "custom", id: "regional" } },
-      },
-      cnIpNoResolve: true,
-      availablePolicyTargets: ["Regional", "DIRECT"],
-      fallbackPolicyTarget: "DIRECT",
-    });
-    const texts = entries.map((entry) => entry.text);
-
-    expect(texts).toContain("RULE-SET,cn-ip,Regional,no-resolve");
-    expect(texts).toContain("MATCH,DIRECT");
-    expect(entries.find((entry) => entry.key === "module:cn:cn-ip")).toMatchObject({
-      noResolve: true,
-      sourceLabel: "🔒 国内服务",
-      target: "Regional",
-    });
-  });
-
-  it("cleans noisy persisted full-order keys without losing active editable rules", () => {
-    const applied = resolveAppliedRuleOrder({
-      enabledModules: ["global"],
-      customRules,
-      customRuleSets,
-      ruleOrder: [
-        " module:global:geolocation-!cn ",
-        "module:global:geolocation-!cn",
-        1 as never,
-        "custom-rule:ip-rule",
-        "custom-rule:missing",
-        "module:unknown:missing",
-        "special:match",
-      ],
-      fallbackPolicyTarget: "DIRECT",
-    });
-    const persisted = normalizePersistedRuleOrder({
-      enabledModules: ["global"],
-      customRules,
-      customRuleSets,
-      ruleOrder: [
-        " module:global:geolocation-!cn ",
-        "module:global:geolocation-!cn",
-        1 as never,
-        "custom-rule:ip-rule",
-        "custom-rule:missing",
-        "module:unknown:missing",
-        "special:match",
-      ],
-      fallbackPolicyTarget: "DIRECT",
-    });
-
-    expect(persisted).toEqual(["module:global:geolocation-!cn", "custom-rule:ip-rule"]);
-    expect(applied).toEqual([
-      "custom-rule:domain-rule",
-      "custom-rule-set:media-rule",
-      "module:global:geolocation-!cn",
-      "custom-rule:ip-rule",
-    ]);
-  });
-
-  it("applies fallback policy targets and no-resolve guards for mixed custom rules", () => {
-    const entries = buildGeneratedRuleEntries({
-      enabledModules: ["cn", "global", "final"],
-      customRules: [
-        {
-          id: "cidr6",
-          type: "IP-CIDR6",
-          value: "2001:db8::/32",
-          target: "Missing",
-          noResolve: true,
-        },
-        {
-          id: "process",
-          type: "PROCESS-NAME",
-          value: "curl",
-          target: "DIRECT",
-          noResolve: true,
-        },
-      ],
-      customRuleSets: [
-        {
-          id: "fallback-set",
-          name: "Fallback Set",
-          behavior: "domain",
-          path: "https://rules.example.com/fallback.mrs",
-          target: "Missing",
-          noResolve: false,
-        },
-        {
-          id: "custom-set",
-          name: "Custom Set",
-          behavior: "classical" as never,
-          path: "https://rules.example.com/custom.yaml",
-          target: { kind: "custom", id: "regional" },
-          noResolve: true,
-        },
-      ],
-      customProxyGroups: [
-        { id: "regional", name: "Regional", emoji: "", groupType: "select" },
-      ],
-      builtinRuleEdits: {
-        "module:cn:cn-ip": { enabled: false },
-        "module:global:geolocation-!cn": { target: "Missing" },
-      },
-      experimentalCnUseCnRuleSet: true,
-      cnIpNoResolve: true,
-      availablePolicyTargets: ["DIRECT", "Regional", "🐟 漏网之鱼"],
-      fallbackPolicyTarget: "DIRECT",
-      ruleOrder: [
-        "module:cn:cn-ip",
-        "custom-rule:process",
-        "custom-rule-set:custom-set",
-        "special:experimental-cn",
-        "special:match",
-      ],
-    });
-    const texts = entries.map((entry) => entry.text);
-    const persisted = normalizePersistedRuleOrder({
-      enabledModules: ["cn", "global", "final"],
-      customRules: [
-        { id: "cidr6", type: "IP-CIDR6", value: "2001:db8::/32", target: "Missing", noResolve: true },
-        { id: "process", type: "PROCESS-NAME", value: "curl", target: "DIRECT", noResolve: true },
-      ],
-      customRuleSets: [
-        {
-          id: "custom-set",
-          name: "Custom Set",
-          behavior: "classical" as never,
-          path: "https://rules.example.com/custom.yaml",
-          target: { kind: "custom", id: "regional" },
-          noResolve: true,
-        },
-      ],
-      builtinRuleEdits: {
-        "module:cn:cn-ip": { enabled: false },
-      },
-      ruleOrder: [
-        "module:cn:cn-ip",
-        "custom-rule:process",
-        "custom-rule:missing",
-        "special:experimental-cn",
-        "special:match",
-      ],
-      experimentalCnUseCnRuleSet: true,
-      fallbackPolicyTarget: "DIRECT",
-    });
-
-    expect(texts).toContain("IP-CIDR6,2001:db8::/32,DIRECT,no-resolve");
+    const view = buildRuleOrderView(options);
+    const texts = view.entries.map((entry) => entry.text);
     expect(texts).toContain("PROCESS-NAME,curl,DIRECT");
-    expect(texts).not.toContain("PROCESS-NAME,curl,DIRECT,no-resolve");
-    expect(texts).toContain("RULE-SET,fallback-set,DIRECT");
-    expect(texts).toContain("RULE-SET,custom-set,Regional,no-resolve");
-    expect(texts).not.toContain("RULE-SET,cn-ip,🔒 国内服务,no-resolve");
-    expect(texts).toContain("RULE-SET,geolocation-!cn,DIRECT");
-    expect(texts).toContain("RULE-SET,cn,DIRECT");
-    expect(texts).toContain("RULE-SET,geolocation-cn,DIRECT");
-    expect(texts.at(-1)).toBe("MATCH,🐟 漏网之鱼");
-    expect(persisted).toEqual([
-      "module:cn:cn-ip",
-      "custom-rule:process",
-      "special:experimental-cn",
-    ]);
-  });
-});
-
-describe("full rule order", () => {
-  const allModuleIds = PROXY_GROUP_MODULES.map((proxyModule) => proxyModule.id);
-  const presetKeys = PROXY_GROUP_MODULES.flatMap((proxyModule) =>
-    proxyModule.rules.map((rule) => `module:${proxyModule.id}:${rule.id}`)
-  );
-
-  it("puts preset rules missing from a saved full order back at their canonical anchor", () => {
-    // 保存全量顺序时奈飞模块还没开启、顺序里没有它的规则；
-    // 之后开启时若追加到末尾，会落在 geolocation-!cn 之后而永远命中不到
-    const savedOrder = resolveAppliedRuleOrder({
-      enabledModules: ["ad", "private", "cn", "global", "final"],
-      customRules,
-      customRuleSets: [],
-    });
-    const applied = resolveAppliedRuleOrder({
-      enabledModules: ["ad", "private", "cn", "netflix", "global", "final"],
-      customRules,
-      customRuleSets: [],
-      ruleOrder: savedOrder,
-    });
-
-    expect(applied.slice(-3)).toEqual([
-      "module:netflix:netflix",
-      "module:netflix:netflix-ip",
-      "module:global:geolocation-!cn",
-    ]);
-    expect(applied.indexOf("module:cn:cn-ip")).toBeLessThan(applied.indexOf("module:netflix:netflix"));
-  });
-
-  it("keeps user-placed custom rules ahead of a preset rule that comes back", () => {
-    const applied = resolveAppliedRuleOrder({
-      enabledModules: ["ad", "private", "global", "final"],
-      customRules: [customRules[1]],
-      customRuleSets: [],
-      ruleOrder: ["module:ad:category-ads-all", "custom-rule:ip-rule", "module:global:geolocation-!cn"],
-    });
-
-    expect(applied).toEqual([
-      "module:ad:category-ads-all",
-      "custom-rule:ip-rule",
-      "module:private:private",
-      "module:private:private-ip",
-      "module:global:geolocation-!cn",
-    ]);
-  });
-
-  it("resolves one complete order covering every module regardless of which ones are enabled", () => {
-    const canonical = resolveFullRuleOrder({ enabledModules: ["final"], customRules, customRuleSets });
-    expect(new Set(canonical)).toEqual(
-      new Set([...presetKeys, "custom-rule:domain-rule", "custom-rule:ip-rule", "custom-rule-set:media-rule"])
+    expect(texts).toContain("DOMAIN-SUFFIX,cdn.example.com,国内直连");
+    expect(texts.indexOf("DOMAIN-SUFFIX,api.example.org,自动选择")).toBeLessThan(
+      texts.indexOf("RULE-SET,广告集合_rules,广告拦截")
     );
-    expect(canonical).toHaveLength(presetKeys.length + 3);
-
-    // 把一条自定义规则挪到油管规则之后，再故意截掉一段内置规则模拟旧顺序
-    const moved = canonical.filter((key) => key !== "custom-rule:ip-rule");
-    moved.splice(moved.indexOf("module:youtube:youtube") + 1, 0, "custom-rule:ip-rule");
-    const partial = moved.filter((key) => !key.startsWith("module:streaming-asia:"));
-
-    for (const ruleOrder of [moved, partial]) {
-      const minimal = resolveFullRuleOrder({ enabledModules: ["select", "final"], customRules, customRuleSets, ruleOrder });
-      const everything = resolveFullRuleOrder({ enabledModules: allModuleIds, customRules, customRuleSets, ruleOrder });
-      expect(minimal).toEqual(everything);
-      expect(minimal).toEqual(moved);
-    }
-
-    expect(
-      resolveAppliedRuleOrder({ enabledModules: ["youtube", "google", "final"], customRules, customRuleSets, ruleOrder: moved })
-    ).toEqual(moved.filter((key) => key.startsWith("custom-") || /^module:(youtube|google):/u.test(key)));
+    expect(view.fullOrder.some((key) => key.startsWith("manual-"))).toBe(true);
+    expect(normalizePersistedRuleOrder(options).some((key) => key.startsWith("manual-"))).toBe(false);
   });
 
-  it("keeps disabled builtin rules in place for the visual editor", () => {
+  it("广告分组关闭时手动条目仍然生成（位置落到末尾）", () => {
     const view = buildRuleOrderView({
-      enabledModules: ["private", "global", "final"],
+      enabledModules: ["select", "auto"],
       customRules: [],
-      customRuleSets: [],
-      builtinRuleEdits: { "module:private:private-ip": { enabled: false } },
+      manualDomains: { direct: ["example.net"], proxy: [], reject: [] },
     });
+    expect(view.entries.map((entry) => entry.text)).toContain("DOMAIN-SUFFIX,example.net,国内直连");
+  });
 
-    expect(view.entries.map((entry) => [entry.key, entry.enabled])).toEqual([
-      ["module:private:private", true],
-      ["module:private:private-ip", false],
-      ["module:global:geolocation-!cn", true],
-    ]);
-    expect(view.matchEntry.text).toBe("MATCH,🐟 漏网之鱼");
-    expect(view.fullOrder).toContain("module:netflix:netflix");
-    expect(
-      generateRules({
-        enabledModules: ["private", "global", "final"],
-        customRules: [],
-        customRuleSets: [],
-        builtinRuleEdits: { "module:private:private-ip": { enabled: false } },
-        ruleOrder: view.fullOrder,
-      })
-    ).toEqual([
-      "RULE-SET,private,🏠 私有网络",
-      "RULE-SET,geolocation-!cn,🌍 非中国",
-      "MATCH,🐟 漏网之鱼",
-    ]);
+  it("未知分组名原样返回，特殊规则键也算完整顺序", () => {
+    expect(resolveModuleName("nope")).toBe("nope");
+    expect(hasFullRuleOrderKeys(["special:match"])).toBe(true);
+    expect(hasFullRuleOrderKeys(["custom-rule:a"])).toBe(false);
   });
 });
+
+describe("规则顺序视图", () => {
+  it("完整顺序覆盖全部内置规则与系统规则", () => {
+    const full = resolveFullRuleOrder({ enabledModules: ALL_MODULES, customRules: [] });
+    expect(full).toHaveLength(FULL_RULES.length - 1);
+    expect(full[0]).toBe("module:cn:loopback-v4");
+    expect(full.at(-1)).toBe("module:cn:geoip-cn");
+  });
+
+  it("视图保留停用的内置规则，便于就地重新启用", () => {
+    const view = buildRuleOrderView({
+      enabledModules: ALL_MODULES,
+      customRules: [],
+      builtinRuleEdits: { "module:ad:ad-set": { enabled: false } },
+    });
+    const adRule = view.entries.find((entry) => entry.key === "module:ad:ad-set");
+    expect(adRule?.enabled).toBe(false);
+    expect(view.matchEntry.text).toBe("MATCH,手动选择");
+  });
+
+  it("自定义规则集使用固定 key 前缀", () => {
+    expect(getCustomRuleSetOrderKey("my-set")).toBe("custom-rule-set:my-set");
+  });
+});
+

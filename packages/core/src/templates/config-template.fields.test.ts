@@ -243,7 +243,7 @@ describe("validateSubBoostTemplateConfig field validation", () => {
     expectInvalid(
       {
         builtinRuleEdits: {
-          "module:cn:geolocation-cn": "bad",
+          "module:cn:geoip-cn": "bad",
         } as never,
       },
       "builtinRuleEdits 的值必须是对象"
@@ -251,7 +251,7 @@ describe("validateSubBoostTemplateConfig field validation", () => {
     expectInvalid(
       {
         builtinRuleEdits: {
-          "module:cn:geolocation-cn": { target: 1 },
+          "module:cn:geoip-cn": { target: 1 },
         } as never,
       },
       "builtinRuleEdits.target 必须是字符串或有效代理组引用"
@@ -259,7 +259,7 @@ describe("validateSubBoostTemplateConfig field validation", () => {
     expectInvalid(
       {
         builtinRuleEdits: {
-          "module:cn:geolocation-cn": { enabled: true },
+          "module:cn:geoip-cn": { enabled: true },
         } as never,
       },
       "builtinRuleEdits.enabled 只能是 false"

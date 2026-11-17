@@ -5,6 +5,7 @@ import { nodeRenameKey } from "@subboost/core/node-rename-key";
 import { buildGenerateOptionsFromConfig } from "@subboost/core/subscription/config-utils";
 import { ALL_RULES } from "@subboost/core/rules-database";
 import {
+  LOCKED_MODULE_IDS,
   buildModuleToggleGroups,
   buildRuleEditorView,
   catalogRuleSetPath,
@@ -17,6 +18,7 @@ import {
   moveRule,
   moveRuleToLine,
   reconcileWithBaseline,
+  reservedRuleSetIds,
   saveCustomRule,
   saveCustomRuleSet,
   setBuiltinRuleEnabled,
@@ -50,15 +52,51 @@ describe("rule editor view", () => {
   it("lists the default rules in generated order with line numbers", () => {
     const view = buildRuleEditorView(defaultConfig());
     expect(view.rows.slice(0, 3).map((row) => [row.line, row.key])).toEqual([
-      [1, "module:ad:category-ads-all"],
-      [2, "module:private:private"],
-      [3, "module:private:private-ip"],
+      [1, "module:cn:loopback-v4"],
+      [2, "module:cn:loopback-v6"],
+      [3, "module:steam:proc-steam"],
     ]);
-    expect(view.rows.at(-1)).toMatchObject({ key: "special:experimental-cn", movable: false });
-    expect(view.matchText).toBe("MATCH,🐟 漏网之鱼");
+    // 内置规则只挂字面量，detail 是规则前半段（到目标之前）
+    expect(view.rows[0].detail).toBe("IP-CIDR,127.0.0.0/8");
+    expect(view.rows[42]).toMatchObject({ key: "module:ad:ad-set", text: "RULE-SET,广告集合_rules,广告拦截" });
+    expect(view.rows.at(-1)).toMatchObject({
+      key: "module:cn:geoip-cn",
+      line: 52,
+      detail: "GEOIP,cn",
+      movable: false,
+    });
+    expect(view.matchText).toBe("MATCH,手动选择");
     expect(view.matchLine).toBe(view.rows.length + 1);
-    expect(view.counts).toMatchObject({ lines: view.rows.length + 1, builtinDisabled: 0, customRules: 0 });
+    expect(view.counts).toEqual({ lines: 53, builtin: 52, builtinDisabled: 0, customRules: 0, customRuleSets: 0 });
     expect(editorLines(defaultConfig())).toEqual(generatedLines(defaultConfig()));
+  });
+
+  it("applies group name overrides with the builtin emoji", () => {
+    const config = {
+      ...defaultConfig(),
+      proxyGroupNameOverrides: { steam: "游戏代理", cn: "CN Direct" },
+    };
+    const rows = buildRuleEditorView(config).rows;
+
+    expect(rows.find((row) => row.key === "module:steam:domain-steamcommunity")).toMatchObject({
+      text: "DOMAIN-SUFFIX,steamcommunity.com,🎮 游戏代理",
+      sourceLabel: "🎮 游戏代理",
+      detail: "DOMAIN-SUFFIX,steamcommunity.com",
+    });
+    expect(rows.find((row) => row.key === "module:cn:geoip-cn")).toMatchObject({
+      text: "GEOIP,cn,🔒 CN Direct",
+      sourceLabel: "🔒 CN Direct",
+    });
+    expect(buildRuleEditorView(config).matchText).toBe("MATCH,手动选择");
+    expect(listRuleTargetOptions(config).map((option) => option.label)).toEqual([
+      "自动选择",
+      "手动选择",
+      "🔒 CN Direct",
+      "广告拦截",
+      "🎮 游戏代理",
+      "DIRECT（直连）",
+      "REJECT（拒绝）",
+    ]);
   });
 
   it("falls back to the template groups when enabledGroups is missing", () => {
@@ -68,13 +106,25 @@ describe("rule editor view", () => {
 
   it("only offers enabled groups plus DIRECT/REJECT as rule targets", () => {
     const options = listRuleTargetOptions(defaultConfig());
-    expect(options.map((option) => option.value)).toContain("module:ai");
-    expect(options.map((option) => option.value)).not.toContain("module:netflix");
-    expect(options.slice(-2)).toEqual([
+    // 内置分组固定 5 个，名字不再带 emoji
+    expect(options).toEqual([
+      { value: "module:auto", label: "自动选择" },
+      { value: "module:select", label: "手动选择" },
+      { value: "module:cn", label: "国内直连" },
+      { value: "module:ad", label: "广告拦截" },
+      { value: "module:steam", label: "Steam 代理" },
       { value: "policy:DIRECT", label: "DIRECT（直连）" },
       { value: "policy:REJECT", label: "REJECT（拒绝）" },
     ]);
-    expect(fromTargetValue("module:ai")).toEqual({ kind: "module", id: "ai" });
+    expect(listRuleTargetOptions(setModuleEnabled(defaultConfig(), "steam", false)).map((option) => option.value)).toEqual([
+      "module:auto",
+      "module:select",
+      "module:cn",
+      "module:ad",
+      "policy:DIRECT",
+      "policy:REJECT",
+    ]);
+    expect(fromTargetValue("module:cn")).toEqual({ kind: "module", id: "cn" });
     expect(fromTargetValue("policy:REJECT")).toBe("REJECT");
     expect(fromTargetValue("raw:香港 01")).toBe("香港 01");
   });
@@ -110,9 +160,9 @@ describe("rule editor view", () => {
       "r1"
     ).config;
     expect((saved.customRules as { target: unknown }[])[0].target).toEqual({ kind: "chain", id: "c1" });
-    // 链没有可用节点时出口组不生成、目标按回退处理
+    // 链没有可用节点时出口组不生成、目标按回退处理（生成期兜底 = 与 MATCH 一致的「手动选择」）
     expect(generateClashConfig(buildGenerateOptionsFromConfig(saved, { nodes: [] })).rules).toContain(
-      "DOMAIN,example.com,🚀 节点选择"
+      "DOMAIN,example.com,手动选择"
     );
 
     // 有节点时目标就是出口组名，与界面一致。节点与链引用必须同源同指纹，name 不参与指纹
@@ -156,22 +206,31 @@ describe("rule editor view", () => {
 
   it("warns about targets that will fall back during generation", () => {
     const config = {
-      ...defaultConfig(),
+      ...setModuleEnabled(defaultConfig(), "steam", false),
       customRules: [
-        { id: "off", type: "DOMAIN", value: "a.example.com", target: { kind: "module", id: "netflix" } },
+        { id: "off", type: "DOMAIN", value: "a.example.com", target: { kind: "module", id: "steam" } },
         { id: "node", type: "DOMAIN", value: "b.example.com", target: "香港 01" },
+        { id: "bare", type: "DOMAIN", value: "c.example.com", target: "cn" },
       ],
     };
     const rows = buildRuleEditorView(config).rows;
     const off = rows.find((row) => row.key === "custom-rule:off");
     const node = rows.find((row) => row.key === "custom-rule:node");
+    const bare = rows.find((row) => row.key === "custom-rule:bare");
 
-    // 指向未开启分组：生成器回退到 🚀 节点选择，预览文本也要照实显示
-    expect(off).toMatchObject({ text: "DOMAIN,a.example.com,🚀 节点选择", targetValue: "module:netflix" });
+    // 指向未开启分组：生成器回退到「手动选择」，预览文本也要照实显示
+    expect(off).toMatchObject({
+      text: "DOMAIN,a.example.com,手动选择",
+      targetValue: "module:steam",
+      targetLabel: "Steam 代理",
+    });
     expect(off?.targetWarning).toContain("未开启");
     // 认不出的字符串可能是节点名：原样保留并提示
     expect(node).toMatchObject({ text: "DOMAIN,b.example.com,香港 01", targetValue: "raw:香港 01" });
     expect(node?.targetWarning).toContain("同名节点");
+    // 裸分组 id 不会被解析成组名：必须写组名或 { kind: "module", id } 引用
+    expect(bare).toMatchObject({ text: "DOMAIN,c.example.com,cn", targetValue: "raw:cn" });
+    expect(bare?.targetWarning).toContain("不是已开启的分流组");
   });
 
   it("counts invalid entries instead of dropping them from the config", () => {
@@ -184,55 +243,68 @@ describe("rule editor view", () => {
 });
 
 describe("module toggles", () => {
-  it("groups modules by category and locks the select and final groups", () => {
+  it("groups the builtin groups by category and locks only select", () => {
     const groups = buildModuleToggleGroups(defaultConfig());
     expect(groups[0]).toMatchObject({ category: "core", label: "核心组" });
-    const core = groups[0].modules;
-    expect(core.find((module) => module.id === "select")).toMatchObject({ locked: true, enabled: true });
-    expect(core.find((module) => module.id === "final")).toMatchObject({ locked: true, enabled: true });
-    expect(groups.flatMap((group) => group.modules).find((module) => module.id === "netflix")).toMatchObject({
-      enabled: false,
-      ruleCount: 2,
-    });
+    const modules = groups.flatMap((group) => group.modules);
+    // 内置分组固定 5 个，名字不再带 emoji
+    expect(modules.map((module) => [module.id, module.name])).toEqual([
+      ["auto", "自动选择"],
+      ["select", "手动选择"],
+      ["cn", "国内直连"],
+      ["ad", "广告拦截"],
+      ["steam", "Steam 代理"],
+    ]);
+    // 只有承载 MATCH 的「手动选择」锁定
+    expect(modules.filter((module) => module.locked).map((module) => module.id)).toEqual(["select"]);
+    expect([...LOCKED_MODULE_IDS]).toEqual(["select"]);
+    expect(modules.find((module) => module.id === "cn")).toMatchObject({ enabled: true, ruleCount: 13 });
+    expect(modules.find((module) => module.id === "steam")).toMatchObject({ enabled: true, ruleCount: 36 });
   });
 
   it("counts rules that would fall back when a group is switched off", () => {
     const config = {
       ...defaultConfig(),
-      customRules: [{ id: "x", type: "DOMAIN", value: "x.example.com", target: { kind: "module", id: "ai" } }],
-      builtinRuleEdits: { "module:google:google": { target: "🤖 AI 服务" } },
+      customRules: [{ id: "x", type: "DOMAIN", value: "x.example.com", target: { kind: "module", id: "cn" } }],
+      builtinRuleEdits: { "module:steam:domain-steamcommunity": { target: "国内直连" } },
     };
-    const ai = buildModuleToggleGroups(config)
+    const cn = buildModuleToggleGroups(config)
       .flatMap((group) => group.modules)
-      .find((module) => module.id === "ai");
-    expect(ai?.references).toBe(2);
+      .find((module) => module.id === "cn");
+    expect(cn?.references).toBe(2);
   });
 
   it("enables a module in place, keeps enabledRules in sync and writes a complete order", () => {
-    const base = defaultConfig();
-    const next = setModuleEnabled(base, "netflix", true);
+    const base = setModuleEnabled(defaultConfig(), "steam", false);
+    expect(keysOf(base)).not.toContain("module:steam:proc-steam");
+    const next = setModuleEnabled(base, "steam", true);
     const keys = keysOf(next);
 
-    expect(next.enabledGroups).toContain("netflix");
-    expect(next.enabledRules).toContain("netflix");
-    expect(keys.indexOf("module:netflix:netflix")).toBeLessThan(keys.indexOf("module:global:geolocation-!cn"));
+    expect(next.enabledGroups).toContain("steam");
+    expect(next.enabledRules).toContain("steam");
+    // 规则回到它在规范顺序里的位置：本地回环之后、进程直连之前
+    expect(keys.indexOf("module:steam:proc-steam")).toBe(2);
+    expect(keys.indexOf("module:steam:geosite-steam")).toBeLessThan(keys.indexOf("module:cn:proc-leigod"));
     // 完整顺序覆盖未开启的模块，以后再开启它们也有确定的位置
-    expect(next.ruleOrder).toContain("module:adult:category-porn");
+    const withoutAd = setModuleEnabled(next, "ad", false);
+    expect(withoutAd.ruleOrder).toContain("module:ad:ad-set");
+    expect(keysOf(withoutAd)).not.toContain("module:ad:ad-set");
     expect(editorLines(next)).toEqual(generatedLines(next));
   });
 
   it("ignores attempts to switch off locked groups", () => {
     const base = defaultConfig();
     expect(setModuleEnabled(base, "select", false)).toBe(base);
+    // 「漏网之鱼」分组已删除，未知分组同样忽略
     expect(setModuleEnabled(base, "final", false)).toBe(base);
     expect(setModuleEnabled(base, "missing", true)).toBe(base);
   });
 
   it("reconciles a toggle that was undone back to the saved config", () => {
     const base = defaultConfig();
-    const off = reconcileWithBaseline(setModuleEnabled(base, "telegram", false), base);
+    const off = reconcileWithBaseline(setModuleEnabled(base, "steam", false), base);
     expect(isConfigChanged(off, base)).toBe(true);
-    const back = reconcileWithBaseline(setModuleEnabled(off, "telegram", true), base);
+    const back = reconcileWithBaseline(setModuleEnabled(off, "steam", true), base);
     expect(back).toEqual(base);
     expect(isConfigChanged(back, base)).toBe(false);
   });
@@ -243,12 +315,16 @@ describe("custom rules", () => {
     const first = saveCustomRule(defaultConfig(), DIRECT_RULE);
     const second = saveCustomRule(first.config, { ...DIRECT_RULE, value: "example.org" });
     const rows = buildRuleEditorView(second.config).rows;
+    const adIndex = rows.findIndex((row) => row.key === "module:ad:ad-set");
 
-    expect(rows.slice(3, 5).map((row) => [row.line, row.key])).toEqual([
-      [4, first.key],
-      [5, second.key],
+    // 自定义规则插在「广告规则集」之前
+    // 两条自定义规则紧邻「广告规则集」，内置规则共 42 条在其之前
+    expect(adIndex).toBe(44);
+    expect(rows.slice(adIndex - 2, adIndex).map((row) => [row.line, row.key])).toEqual([
+      [43, first.key],
+      [44, second.key],
     ]);
-    expect(rows[5].key).toBe("module:ai:openai");
+    expect(rows[adIndex].line).toBe(45);
     expect(editorLines(second.config)).toEqual(generatedLines(second.config));
   });
 
@@ -264,7 +340,9 @@ describe("custom rules", () => {
     expect((added.config.customRules as ConfigRecord[])[0]).not.toHaveProperty("noResolve");
     expect(rules).toHaveLength(1);
     expect(rules[0]).toMatchObject({ type: "IP-CIDR", noResolve: true });
-    expect(keysOf(ip.config).indexOf(ip.key)).toBe(3);
+    const keys = keysOf(ip.config);
+    expect(keys.indexOf(ip.key)).toBe(42);
+    expect(keys[keys.indexOf("module:ad:ad-set") - 1]).toBe(ip.key);
     expect(editorLines(ip.config)).toContain("IP-CIDR,192.0.2.0/24,DIRECT,no-resolve");
   });
 
@@ -277,33 +355,38 @@ describe("custom rules", () => {
       ],
     };
     const [firstRow, secondRow] = buildRuleEditorView(base).rows.filter((row) => row.kind === "custom-rule");
-    // 先把第二条挪到油管规则后面，顺序里引用的是按下标推导出的 id。
-    // 它原本排在油管之前，挪走后油管上移一行，所以目标行号就是油管原来的下标 + 1
-    let config = moveRuleToLine(base, secondRow.key, keysOf(base).indexOf("module:youtube:youtube") + 1);
-    expect(keysOf(config).indexOf(secondRow.key)).toBe(keysOf(config).indexOf("module:youtube:youtube") + 1);
+    // 先把第二条挪到「本地回环 IPv6」前面，顺序里引用的是按下标推导出的 id
+    let config = moveRuleToLine(base, secondRow.key, keysOf(base).indexOf("module:cn:loopback-v6") + 1);
+    const movedKeys = keysOf(config);
+    expect(movedKeys.indexOf(secondRow.key)).toBe(movedKeys.indexOf("module:cn:loopback-v6") - 1);
 
     config = deleteCustomRule(config, firstRow.customRule!.id);
     const keys = keysOf(config);
     expect(keys).not.toContain(firstRow.key);
     expect(config.ruleOrder).not.toContain(firstRow.key);
-    expect(keys.indexOf(secondRow.key)).toBe(keys.indexOf("module:youtube:youtube") + 1);
+    expect(keys.indexOf(secondRow.key)).toBe(keys.indexOf("module:cn:loopback-v6") - 1);
     expect(editorLines(config)).toEqual(generatedLines(config));
   });
 
   it("moves custom rules one visible row at a time and never moves builtin rules", () => {
     const { config: added, key } = saveCustomRule(defaultConfig(), DIRECT_RULE);
     const down = moveRule(added, key, 1);
-    expect(keysOf(down).indexOf(key)).toBe(keysOf(down).indexOf("module:ai:openai") + 1);
+    // 下移一行就是越过「广告规则集」
+    expect(keysOf(down).indexOf(key)).toBe(keysOf(down).indexOf("module:ad:ad-set") + 1);
 
     const up = moveRule(moveRule(down, key, -1), key, -1);
-    expect(keysOf(up).indexOf(key)).toBe(2);
-    expect(moveRule(up, "module:ad:category-ads-all", 1)).toBe(up);
+    expect(keysOf(up).indexOf(key)).toBe(41);
+    expect(moveRule(up, "module:ad:ad-set", 1)).toBe(up);
 
-    // 挪到 AI 规则后面以后再开启 Gemini：Gemini 落在自己的位置，自定义规则仍在 OpenAI 之后
-    const withGemini = setModuleEnabled(down, "gemini", true);
-    const keys = keysOf(withGemini);
-    expect(keys.indexOf("module:gemini:google-gemini")).toBeLessThan(keys.indexOf("module:ai:openai"));
-    expect(keys.indexOf(key)).toBe(keys.indexOf("module:ai:openai") + 1);
+    // 挪到广告规则集之后，再开启已关掉的 Steam 分组：Steam 规则回到自己的位置，自定义规则留在原处
+    const offSteam = setModuleEnabled(defaultConfig(), "steam", false);
+    const withCustom = saveCustomRule(offSteam, DIRECT_RULE);
+    const moved = moveRule(withCustom.config, withCustom.key, 1);
+    expect(keysOf(moved).indexOf(withCustom.key)).toBe(keysOf(moved).indexOf("module:ad:ad-set") + 1);
+
+    const keys = keysOf(setModuleEnabled(moved, "steam", true));
+    expect(keys.indexOf("module:steam:proc-steam")).toBe(2);
+    expect(keys.indexOf(withCustom.key)).toBe(keys.indexOf("module:ad:ad-set") + 1);
   });
 
   it("moves a rule to an exact line or to the end before MATCH", () => {
@@ -314,7 +397,7 @@ describe("custom rules", () => {
     const bottom = moveRuleToLine(added, key, 9999);
     const rows = buildRuleEditorView(bottom).rows;
     expect(rows.at(-1)).toMatchObject({ key });
-    expect(editorLines(bottom).slice(-2)).toEqual(["DOMAIN-SUFFIX,example.com,DIRECT", "MATCH,🐟 漏网之鱼"]);
+    expect(editorLines(bottom).slice(-2)).toEqual(["DOMAIN-SUFFIX,example.com,DIRECT", "MATCH,手动选择"]);
     expect(editorLines(bottom)).toEqual(generatedLines(bottom));
   });
 
@@ -349,20 +432,42 @@ describe("custom rule sets", () => {
       idHint: openai.id,
     });
 
-    expect(key).toBe("custom-rule-set:openai-2");
+    // 内置规则表里没有 openai，id 原样保留
+    const reserved = reservedRuleSetIds(defaultConfig());
+    expect(reserved).toContain("ad-set");
+    expect(reserved).not.toContain("openai");
+    expect(key).toBe("custom-rule-set:openai");
     expect((config.customRuleSets as ConfigRecord[])[0]).toEqual({
-      id: "openai-2",
+      id: "openai",
       name: "OpenAI",
       behavior: "domain",
       path: "geosite/openai.mrs",
       target: "DIRECT",
     });
-    expect(editorLines(config)).toContain("RULE-SET,openai-2,DIRECT");
-    expect(generateClashConfig(buildGenerateOptionsFromConfig(config, { nodes: [] }))["rule-providers"]).toMatchObject({
-      "openai-2": { url: expect.stringMatching(/\/geosite\/openai\.mrs$/u) },
+    expect(editorLines(config)).toContain("RULE-SET,openai,DIRECT");
+    const providers = generateClashConfig(buildGenerateOptionsFromConfig(config, { nodes: [] }))[
+      "rule-providers"
+    ] as ConfigRecord;
+    expect(providers).toMatchObject({
+      openai: { url: expect.stringMatching(/\/geosite\/openai\.mrs$/u) },
+      // 内置广告集合是唯一的 rule-provider：behavior 固定 domain，不写 format
+      广告集合_rules: { behavior: "domain", path: "./ruleset/广告集合_rules.list" },
     });
+    expect(providers["广告集合_rules"]).not.toHaveProperty("format");
 
-    const removed = deleteCustomRuleSet(config, "openai-2");
+    // 撞上内置规则 id（广告集合规则集）时补后缀
+    const clash = saveCustomRuleSet(defaultConfig(), {
+      name: "广告集合",
+      behavior: "domain",
+      path: "geosite/ad.mrs",
+      target: "DIRECT",
+      noResolve: false,
+      idHint: "ad-set",
+    });
+    expect(clash.key).toBe("custom-rule-set:ad-set-2");
+    expect((clash.config.customRuleSets as ConfigRecord[])[0]).toMatchObject({ id: "ad-set-2" });
+
+    const removed = deleteCustomRuleSet(config, "openai");
     expect(removed.customRuleSets).toEqual([]);
     expect(removed.ruleOrder).not.toContain(key);
   });
@@ -376,14 +481,15 @@ describe("custom rule sets", () => {
 describe("builtin rule edits", () => {
   it("switches a builtin rule off in place and cleans the edit up when it comes back", () => {
     const base = defaultConfig();
-    const off = setBuiltinRuleEnabled(base, "module:private:private-ip", false);
+    const key = "module:steam:proc-steam-web";
+    const off = setBuiltinRuleEnabled(base, key, false);
     const rows = buildRuleEditorView(off).rows;
 
-    expect(rows[2]).toMatchObject({ key: "module:private:private-ip", enabled: false, line: null });
-    expect(rows[3].line).toBe(3);
+    expect(rows[3]).toMatchObject({ key, enabled: false, line: null });
+    expect(rows[4]).toMatchObject({ key: "module:steam:proc-steam-svc", line: 4 });
     expect(editorLines(off)).toEqual(generatedLines(off));
 
-    const on = setBuiltinRuleEnabled(off, "module:private:private-ip", true);
+    const on = setBuiltinRuleEnabled(off, key, true);
     expect(on.builtinRuleEdits).toEqual({});
     expect(reconcileWithBaseline(on, base)).toEqual(base);
   });
@@ -420,21 +526,26 @@ describe("builtin rule edits", () => {
 
   it("retargets a builtin rule and treats its own group as the default", () => {
     const base = defaultConfig();
-    const moved = setBuiltinRuleTarget(base, "module:google:google", "module:select");
-    const row = buildRuleEditorView(moved).rows.find((item) => item.key === "module:google:google");
+    const key = "module:steam:domain-steamcommunity";
+    const moved = setBuiltinRuleTarget(base, key, "module:select");
+    const row = buildRuleEditorView(moved).rows.find((item) => item.key === key);
 
-    expect(moved.builtinRuleEdits).toEqual({ "module:google:google": { target: { kind: "module", id: "select" } } });
-    expect(row).toMatchObject({ text: "RULE-SET,google,🚀 节点选择", defaultTarget: false });
+    expect(moved.builtinRuleEdits).toEqual({ [key]: { target: { kind: "module", id: "select" } } });
+    expect(row).toMatchObject({
+      text: "DOMAIN-SUFFIX,steamcommunity.com,手动选择",
+      targetLabel: "手动选择",
+      defaultTarget: false,
+    });
     expect(editorLines(moved)).toEqual(generatedLines(moved));
 
-    const restored = setBuiltinRuleTarget(moved, "module:google:google", "module:google");
+    const restored = setBuiltinRuleTarget(moved, key, "module:steam");
     expect(restored.builtinRuleEdits).toEqual({});
   });
 
   it("leaves fields the visual editor does not own untouched", () => {
     const base = { ...defaultConfig(), dnsYaml: "dns:\n  enable: true\n", futureField: { keep: [1, 2] } };
-    let next = setModuleEnabled(base, "netflix", true);
-    next = setBuiltinRuleEnabled(next, "module:ad:category-ads-all", false);
+    let next = setModuleEnabled(base, "steam", false);
+    next = setBuiltinRuleEnabled(next, "module:ad:ad-set", false);
     next = saveCustomRule(next, DIRECT_RULE).config;
     expect(next.dnsYaml).toBe(base.dnsYaml);
     expect(next.futureField).toEqual({ keep: [1, 2] });

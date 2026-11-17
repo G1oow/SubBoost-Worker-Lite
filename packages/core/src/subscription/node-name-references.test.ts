@@ -126,22 +126,21 @@ describe("node name references", () => {
     ]);
   });
 
-  it("uses the active template defaults only when enabled groups are omitted", () => {
+  it("keeps only references to builtin group names, independent of the template", () => {
     const dialerProxyGroups = [
       {
-        relayNodes: ["⚡ 自动选择", "🤖 AI 服务"],
+        relayNodes: ["自动选择", "手动选择", "🤖 AI 服务"],
         targetNodes: [],
       },
     ];
 
-    expect(
-      reconcileNodeNameReferences({ template: "minimal", dialerProxyGroups }, { nodes: [] })
-        .dialerProxyGroups[0].relayNodes
-    ).toEqual(["⚡ 自动选择"]);
-    expect(
-      reconcileNodeNameReferences({ template: "full", dialerProxyGroups }, { nodes: [] })
-        .dialerProxyGroups[0].relayNodes
-    ).toEqual(["⚡ 自动选择", "🤖 AI 服务"]);
+    // 内置分组固定 5 个，模板之间不再有启用集合差异：已删除的 AI 分组名一律被剔除
+    for (const template of ["minimal", "standard", "full"] as const) {
+      expect(
+        reconcileNodeNameReferences({ template, dialerProxyGroups }, { nodes: [] })
+          .dialerProxyGroups[0].relayNodes
+      ).toEqual(["自动选择", "手动选择"]);
+    }
   });
 
   it("normalizes object rename maps and ignores blank or self mappings", () => {

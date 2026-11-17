@@ -235,7 +235,7 @@ describe("public core branch coverage regressions", () => {
       return {
         schema: SUBBOOST_TEMPLATE_CONFIG_SCHEMA,
         template: "standard",
-        enabledProxyGroups: ["select", "auto", "cn", "global", "final", "select"],
+        enabledProxyGroups: ["auto", "select", "cn", "ad", "steam", "auto"],
         hiddenProxyGroups: ["cn"],
         customProxyGroups: [
           {
@@ -274,7 +274,7 @@ describe("public core branch coverage regressions", () => {
           },
         ],
         builtinRuleEdits: {
-          "module:cn:geolocation-cn": {
+          "module:cn:geo-cn": {
             target: "Custom Stream",
             enabled: false,
           },
@@ -300,7 +300,7 @@ describe("public core branch coverage regressions", () => {
       expect(result.ok).toBe(true);
       if (!result.ok) return;
 
-      expect(result.config.enabledProxyGroups).toEqual(["select", "auto", "cn", "global", "final"]);
+      expect(result.config.enabledProxyGroups).toEqual(["auto", "select", "cn", "ad", "steam"]);
       expect(result.config.customProxyGroups[0]).toMatchObject({
         groupType: "load-balance",
         strategy: "consistent-hashing",
@@ -317,7 +317,7 @@ describe("public core branch coverage regressions", () => {
         [{ schema: "wrong" }, "模板配置 schema 无效"],
         [{ template: "other" }, "模板类型无效"],
         [{ enabledProxyGroups: ["unknown"] }, "enabledProxyGroups 包含未知代理组"],
-        [{ hiddenProxyGroups: ["select", "auto", "cn", "global", "final"] }, "至少需要一个可见代理组"],
+        [{ hiddenProxyGroups: ["auto", "select", "cn", "ad", "steam"] }, "至少需要一个可见代理组"],
         [{ customProxyGroups: [{ id: "", name: "Bad", emoji: "", groupType: "select" }] }, "customProxyGroups.id 不能为空"],
         [{ proxyGroupAdvanced: [] }, "proxyGroupAdvanced 必须是对象"],
         [{ proxyGroupAdvanced: { missing: {} } }, "proxyGroupAdvanced 包含未知代理组"],

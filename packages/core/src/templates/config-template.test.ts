@@ -64,10 +64,10 @@ describe("validateSubBoostTemplateConfig", () => {
   });
 
   it("normalizes rich template config fields", () => {
-    const moduleId = "ai";
+    const moduleId = "steam";
     const result = validateSubBoostTemplateConfig(
       validConfig({
-        enabledProxyGroups: [...getModulesForTemplate("minimal"), moduleId],
+        enabledProxyGroups: getModulesForTemplate("minimal"),
         hiddenProxyGroups: [],
         customProxyGroups: [
           {
@@ -118,7 +118,7 @@ describe("validateSubBoostTemplateConfig", () => {
           },
         ],
         builtinRuleEdits: {
-          [`module:${moduleId}:openai`]: { enabled: false, target: { kind: "custom", id: "custom" } },
+          [`module:${moduleId}:geosite-steam`]: { enabled: false, target: { kind: "custom", id: "custom" } },
         },
         proxyGroupNameOverrides: {
           [moduleId]: " Renamed ",
@@ -171,7 +171,7 @@ describe("validateSubBoostTemplateConfig", () => {
       targetNodes: ["Target A"],
       enabled: false,
     });
-    expect(result.config.builtinRuleEdits?.[`module:${moduleId}:openai`]).toEqual({
+    expect(result.config.builtinRuleEdits?.[`module:${moduleId}:geosite-steam`]).toEqual({
       enabled: false,
       target: { kind: "custom", id: "custom" },
     });

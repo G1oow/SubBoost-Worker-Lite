@@ -159,7 +159,7 @@ describe("public core extra branch coverage", () => {
           },
         ],
         builtinRuleEdits: {
-          "module:cn:cn-ip": { target: "Custom Select" },
+          "module:cn:geoip-cn": { target: "Custom Select" },
         },
       })
     ).toMatchObject({
@@ -241,11 +241,11 @@ describe("public core extra branch coverage", () => {
 
     expectInvalid({ builtinRuleEdits: [] }, "builtinRuleEdits 必须是对象");
     expectInvalid({ builtinRuleEdits: { "module:missing:rule": { enabled: false } } }, "builtinRuleEdits 包含未知内置规则");
-    expectInvalid({ builtinRuleEdits: { "module:cn:geolocation-cn": "bad" } }, "builtinRuleEdits 的值必须是对象");
+    expectInvalid({ builtinRuleEdits: { "module:cn:geo-cn": "bad" } }, "builtinRuleEdits 的值必须是对象");
     expectInvalid(
-      { builtinRuleEdits: { "module:cn:geolocation-cn": { target: 123 } } },
+      { builtinRuleEdits: { "module:cn:geo-cn": { target: 123 } } },
       "builtinRuleEdits.target 必须是字符串或有效代理组引用"
     );
-    expectInvalid({ builtinRuleEdits: { "module:cn:geolocation-cn": { enabled: true } } }, "builtinRuleEdits.enabled 只能是 false");
+    expectInvalid({ builtinRuleEdits: { "module:cn:geo-cn": { enabled: true } } }, "builtinRuleEdits.enabled 只能是 false");
   });
 });

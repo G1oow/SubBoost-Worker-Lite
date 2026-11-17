@@ -552,9 +552,9 @@ describe("subscription config utils", () => {
     expect(options.dialerProxyGroups).toBeUndefined();
   });
 
-  it("keeps the experimental cn rule position when its switches rely on defaults", () => {
-    // 配置没写 experimentalCnUseCnRuleSet / enabledGroups 时生成按默认值处理（开启、标准模板），
-    // 规范化顺序必须用同样的默认值，否则 special:experimental-cn 的位置会被当成无效 key 丢掉
+  it("normalizes a persisted rule order with removed keys using the default template", () => {
+    // 配置没写 enabledGroups / 规则顺序里混着已删除的模块键时，规范化必须按默认模板（全部内置分组）处理：
+    // 未知的内置规则键被丢掉，只剩自定义规则键，生成时它落在广告规则集之前
     const options = buildGenerateOptionsFromConfig(
       {
         customRules: [{ id: "tail", type: "DOMAIN-SUFFIX", value: "example.com", target: "DIRECT" }],
@@ -563,12 +563,19 @@ describe("subscription config utils", () => {
       { nodes: [node()] },
     );
 
-    expect((generateClashConfig(options).rules as string[]).slice(-4)).toEqual([
-      "RULE-SET,geolocation-!cn,🌍 非中国",
-      "RULE-SET,cn,🔒 国内服务",
+    expect(options.userConfig?.ruleOrder).toEqual(["custom-rule:tail"]);
+
+    const rules = generateClashConfig(options).rules as string[];
+    // 默认模板开启全部内置分组：Steam 与广告规则集都生成
+    expect(rules).toContain("PROCESS-NAME,steam.exe,Steam 代理");
+    expect(rules).toContain("RULE-SET,广告集合_rules,广告拦截");
+    const adRuleIndex = rules.indexOf("RULE-SET,广告集合_rules,广告拦截");
+    expect(rules.slice(adRuleIndex - 1, adRuleIndex + 1)).toEqual([
       "DOMAIN-SUFFIX,example.com,DIRECT",
-      "MATCH,🐟 漏网之鱼",
+      "RULE-SET,广告集合_rules,广告拦截",
     ]);
+    // 兜底出口固定是「手动选择」
+    expect(rules.at(-1)).toBe("MATCH,手动选择");
   });
 
   it("restores persisted group listeners with stable targets and drops malformed entries", () => {

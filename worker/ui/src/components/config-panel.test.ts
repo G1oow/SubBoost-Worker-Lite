@@ -26,10 +26,10 @@ const PREVIEW: ConfigPreview = {
   sourceCount: 2,
   snapshotCount: 1,
   nodeCount: 5,
-  proxyGroupCount: 16,
-  ruleProviderCount: 30,
+  proxyGroupCount: 5,
+  ruleProviderCount: 1,
   chains: [],
-  rules: ["MATCH,🐟 漏网之鱼"],
+  rules: ["MATCH,手动选择"],
 };
 
 /** 与吸顶工具条同一套约束：常驻覆盖层不许位移、缩放与过渡 */
@@ -58,8 +58,13 @@ function saveBar(container: HTMLElement): HTMLElement | null {
   return container.querySelector("[data-config-save-bar]");
 }
 
-function toggleAdRule() {
-  fireEvent.click(screen.getByRole("switch", { name: "启用 广告域名" }));
+/** 让草稿变脏的开关：Steam 路由的第一个开关（默认开启） */
+function steamSwitch(): HTMLElement {
+  return screen.getByRole("switch", { name: "Steam 流量走 Steam 代理" });
+}
+
+function toggleSteam() {
+  fireEvent.click(steamSwitch());
 }
 
 async function confirmInDialog(name: string) {
@@ -86,7 +91,7 @@ describe("生成配置草稿", () => {
     expect(saveBar(container)).toBeNull();
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
 
-    toggleAdRule();
+    toggleSteam();
     const bar = saveBar(container);
     expect(bar).not.toBeNull();
     expect(onDirtyChange).toHaveBeenLastCalledWith(true);
@@ -106,16 +111,14 @@ describe("生成配置草稿", () => {
     await confirmInDialog("放弃修改");
     await waitFor(() => expect(saveBar(container)).toBeNull());
     expect(onDirtyChange).toHaveBeenLastCalledWith(false);
-    expect((screen.getByRole("switch", { name: "启用 广告域名" }) as HTMLElement).getAttribute("aria-checked")).toBe(
-      "true"
-    );
+    expect(steamSwitch().getAttribute("aria-checked")).toBe("true");
   });
 
   it("开关改回原样就不算未保存", () => {
     const { container } = renderPanel();
-    toggleAdRule();
+    toggleSteam();
     expect(saveBar(container)).not.toBeNull();
-    toggleAdRule();
+    toggleSteam();
     expect(saveBar(container)).toBeNull();
   });
 
@@ -125,30 +128,35 @@ describe("生成配置草稿", () => {
     const [headerSave] = screen.getAllByRole("button", { name: "保存" });
     expect((headerSave as HTMLButtonElement).disabled).toBe(true);
 
-    toggleAdRule();
+    toggleSteam();
     fireEvent.click(screen.getAllByRole("button", { name: "保存" })[0]);
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     const saved = onSave.mock.calls[0][0] as Record<string, unknown>;
-    expect(saved.builtinRuleEdits).toEqual({ "module:ad:category-ads-all": { enabled: false } });
+    expect(saved.steamViaProxy).toBe(false);
     expect(saved.futureField).toEqual({ keep: true });
     // 只开关、没动顺序：ruleOrder 保持原来的写法，不制造等价的大段 diff
     expect(saved.ruleOrder).toEqual([]);
   });
 
-  it("调整顺序后写回覆盖全部模块的完整顺序", async () => {
+  it("自定义完整规则应用后写回覆盖全部模块的完整顺序", async () => {
     const onSave = vi.fn(async (_config: Record<string, unknown>) => {});
-    const config = {
-      ...STATE.config,
-      customRules: [{ id: "mine", type: "DOMAIN-SUFFIX", value: "example.com", target: "DIRECT" }],
-    };
-    renderPanel({ onSave, state: { ...STATE, config } });
+    renderPanel({ onSave });
 
-    fireEvent.click(screen.getByRole("button", { name: "下移 example.com" }));
+    fireEvent.change(screen.getByLabelText("自定义完整规则"), {
+      target: { value: "DOMAIN-SUFFIX,example.com,DIRECT" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "应用规则" }));
     fireEvent.click(screen.getAllByRole("button", { name: "保存" })[0]);
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    const order = (onSave.mock.calls[0][0] as Record<string, unknown>).ruleOrder as string[];
-    expect(order).toContain("module:netflix:netflix");
-    expect(order.indexOf("custom-rule:mine")).toBe(order.indexOf("module:ai:openai") + 1);
+    const saved = onSave.mock.calls[0][0] as Record<string, unknown>;
+    const order = saved.ruleOrder as string[];
+    // 完整顺序覆盖全部内置规则，自定义条目排在 MATCH 之前
+    expect(order.filter((key) => key.startsWith("module:"))).toHaveLength(52);
+    expect(order).toContain("module:ad:ad-set");
+    expect(order.filter((key) => key.startsWith("custom-rule:"))).toHaveLength(1);
+    expect(saved.customRules).toEqual([
+      { id: expect.any(String), type: "DOMAIN-SUFFIX", value: "example.com", target: "DIRECT" },
+    ]);
   });
 
   it("恢复默认前要确认", async () => {
@@ -163,46 +171,30 @@ describe("生成配置草稿", () => {
   });
 });
 
-describe("规则列表的键盘焦点", () => {
-  const config = {
-    ...STATE.config,
-    customRules: [
-      { id: "a", type: "DOMAIN-SUFFIX", value: "a.example.com", target: "DIRECT" },
-      { id: "b", type: "DOMAIN-SUFFIX", value: "b.example.com", target: "DIRECT" },
-    ],
-  };
+describe("规则子页的草稿", () => {
+  it("添加直连域名后出现保存条，保存时带上 manualDomains", async () => {
+    const onSave = vi.fn(async (_config: Record<string, unknown>) => {});
+    const { container } = renderPanel({ onSave });
+    expect(saveBar(container)).toBeNull();
 
-  it("连按下移时焦点留在同一个按钮上，删除后交给相邻一行", async () => {
-    renderPanel({ state: { ...STATE, config } });
+    const input = screen.getByLabelText("输入直连域名");
+    fireEvent.change(input, { target: { value: "example.com" } });
+    fireEvent.submit(input.closest("form")!);
+    expect(saveBar(container)).not.toBeNull();
 
-    const down = screen.getByRole("button", { name: "下移 a.example.com" });
-    down.focus();
-    fireEvent.click(down);
-    await waitFor(() =>
-      expect(document.activeElement?.getAttribute("aria-label")).toBe("下移 a.example.com")
-    );
-    const lines = Array.from(document.querySelectorAll('ol[aria-label="最终规则"] > li p.font-mono')).map(
-      (node) => node.textContent
-    );
-    expect(lines.indexOf("DOMAIN-SUFFIX,a.example.com,DIRECT")).toBe(lines.indexOf("DOMAIN-SUFFIX,b.example.com,DIRECT") + 1);
+    // 加完又删掉：草稿回到与已保存配置等价的状态，保存条随之消失
+    fireEvent.click(screen.getByRole("button", { name: "删除 直连域名 example.com" }));
+    expect(saveBar(container)).toBeNull();
 
-    const remove = screen.getByRole("button", { name: "删除 a.example.com" });
-    remove.focus();
-    fireEvent.click(remove);
-    await waitFor(() => expect(screen.queryByRole("button", { name: "删除 a.example.com" })).toBeNull());
-    // 焦点不会掉回 body：落到原来紧随其后的那一行
-    await waitFor(() => expect(document.activeElement?.closest("li")?.textContent).toContain("openai"));
-  });
-
-  it("对话框关闭后把焦点还给打开它的按钮", async () => {
-    renderPanel({ state: { ...STATE, config } });
-    const opener = screen.getByRole("button", { name: "添加规则" });
-    opener.focus();
-    fireEvent.click(opener);
-    const dialog = await screen.findByRole("dialog");
-    fireEvent.click(within(dialog).getByRole("button", { name: "取消" }));
-    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(document.activeElement).toBe(opener);
+    fireEvent.change(input, { target: { value: "example.org" } });
+    fireEvent.submit(input.closest("form")!);
+    fireEvent.click(screen.getAllByRole("button", { name: "保存" })[0]);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect((onSave.mock.calls[0][0] as Record<string, unknown>).manualDomains).toEqual({
+      direct: ["example.org"],
+      proxy: [],
+      reject: [],
+    });
   });
 });
 
@@ -244,11 +236,11 @@ describe("服务端试生成", () => {
     expect(screen.getByRole("status").textContent).toContain("1/2 个源");
 
     // 连续修改只在停下来之后发一次
-    toggleAdRule();
+    toggleSteam();
     await act(async () => {
       vi.advanceTimersByTime(300);
     });
-    toggleAdRule();
+    toggleSteam();
     await act(async () => {
       vi.advanceTimersByTime(600);
     });
@@ -262,7 +254,7 @@ describe("服务端试生成", () => {
       throw new Error("基础和 DNS 配置 YAML 解析失败：示例");
     });
     renderPanel({ onPreview, onSave });
-    toggleAdRule();
+    toggleSteam();
     await act(async () => {
       vi.advanceTimersByTime(600);
     });
@@ -295,24 +287,25 @@ describe("页面布局与折叠", () => {
     expect(screen.getByRole("tab", { name: "链式代理" }).textContent).toBe("链式代理");
   });
 
-  it("分流组默认收起，展开后按分类显示开启数，再收起时正文退场后卸载", async () => {
+  it("最终规则预览默认收起，展开后按行号列出规则，再收起时正文退场后卸载", async () => {
     renderPanel();
-    const toggle = screen.getByRole("button", { name: "调整分流组" });
+    const toggle = screen.getByRole("button", { name: "展开预览" });
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(toggle.getAttribute("aria-controls")).toBeNull();
-    expect(document.getElementById("config-module-toggles")).toBeNull();
+    expect(document.getElementById("config-rule-preview")).toBeNull();
 
     fireEvent.click(toggle);
-    const body = document.getElementById("config-module-toggles");
+    const body = document.getElementById("config-rule-preview");
     expect(body).not.toBeNull();
-    expect(toggle.getAttribute("aria-controls")).toBe("config-module-toggles");
-    // 每个分类标题旁边都有「开启数 / 总数」
-    const headings = Array.from(body!.querySelectorAll("h4")).map((node) => node.textContent ?? "");
-    expect(headings.length).toBeGreaterThan(0);
-    for (const heading of headings) expect(heading).toMatch(/\d+ \/ \d+$/u);
+    expect(toggle.getAttribute("aria-controls")).toBe("config-rule-preview");
+    // 预览是只读列表：带行号，MATCH 固定在最后
+    const rows = within(body as HTMLElement).getAllByRole("listitem");
+    expect(rows.length).toBeGreaterThan(10);
+    expect(rows[0]!.textContent).toMatch(/^1/u);
+    expect(rows[rows.length - 1]!.textContent).toContain("MATCH,手动选择");
 
-    fireEvent.click(screen.getByRole("button", { name: "收起" }));
-    await waitFor(() => expect(document.getElementById("config-module-toggles")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "收起预览" }));
+    await waitFor(() => expect(document.getElementById("config-rule-preview")).toBeNull());
   });
 
   it("JSON 子页的格式化按钮在卡片头，与标题同排", () => {

@@ -34,26 +34,31 @@ function customGroup(id: string, groupType: CustomProxyGroup["groupType"]): Cust
 describe("proxy group generator", () => {
   it("uses per-group test URLs only for automatic testing", () => {
     const groups = generateProxyGroups({
-      nodes: [node("A")], enabledModules: ["select", "auto", "ai"],
-      ruleProviderBaseUrl: "https://local.subboost.test/rules", testUrl: "https://local.subboost.test/default", testInterval: 60,
-      proxyGroupAdvanced: { auto: { testUrl: "https://local.subboost.test/auto" }, ai: { testUrl: "https://local.subboost.test/ignored" } },
+      nodes: [node("A")], enabledModules: ["select", "auto", "ad"],
+      ruleProviderBaseUrl: "https://rules.example.com", testUrl: "https://probe.example.com/default", testInterval: 60,
+      proxyGroupAdvanced: { auto: { testUrl: "https://probe.example.com/auto" } },
       customProxyGroups: [
-        { ...customGroup("url", "url-test"), advanced: { testUrl: "https://local.subboost.test/custom" } },
-        { ...customGroup("filtered", "url-test"), memberSource: "filtered-nodes", advanced: { testUrl: "https://local.subboost.test/filtered" } },
-        { ...customGroup("fallback", "fallback"), advanced: { testUrl: "https://local.subboost.test/ignored" } },
+        { ...customGroup("url", "url-test"), advanced: { testUrl: "https://probe.example.com/custom" } },
+        { ...customGroup("filtered", "url-test"), memberSource: "filtered-nodes", advanced: { testUrl: "https://probe.example.com/filtered" } },
+        { ...customGroup("fallback", "fallback"), advanced: { testUrl: "https://probe.example.com/ignored" } },
       ],
     });
-    expect(groups.find((group) => group.name === "⚡ 自动选择")?.url).toBe("https://local.subboost.test/auto");
-    expect(groups.find((group) => group.name === "Custom url")?.url).toBe("https://local.subboost.test/custom");
-    expect(groups.find((group) => group.name === "Custom filtered")?.url).toBe("https://local.subboost.test/filtered");
-    expect(groups.find((group) => group.name === "Custom fallback")?.url).toBe("https://local.subboost.test/default");
+    expect(groups.find((group) => group.name === "Custom url")?.url).toBe("https://probe.example.com/custom");
+    expect(groups.find((group) => group.name === "Custom filtered")?.url).toBe("https://probe.example.com/filtered");
+    expect(groups.find((group) => group.name === "Custom fallback")?.url).toBe("https://probe.example.com/default");
+    // 内置分组成员表写死、类型固定为 select，分组级 testUrl 不再生效
+    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
+      type: "select",
+      proxies: ["A"],
+    });
+    expect(groups.find((group) => group.name === "自动选择")).not.toHaveProperty("url");
     expect(groups.filter((group) => group.type === "select").every((group) => group.url === undefined)).toBe(true);
   });
   it("generates module, custom, advanced-filtered, and provider-backed groups", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
       proxyProviderNames: ["remote"],
-      enabledModules: ["select", "auto", "ad", "private", "cn", "global", "final", "ai"],
+      enabledModules: ["select", "auto", "cn", "ad", "steam"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
@@ -90,74 +95,160 @@ describe("proxy group generator", () => {
     const rejectProxies = groups.find((group) => group.name === "Custom reject")?.proxies ?? [];
     expect(rejectProxies.slice(0, 2)).toEqual(["REJECT", "DIRECT"]);
     expect(rejectProxies).not.toContain("Node B");
-    expect(groups.find((group) => group.name.includes("节点选择"))).toMatchObject({
+    // 内置分组固定 5 个、顺序固定，排在自定义分组之前
+    expect(groups.map((group) => group.name).slice(0, 5)).toEqual([
+      "自动选择",
+      "手动选择",
+      "国内直连",
+      "广告拦截",
+      "Steam 代理",
+    ]);
+    expect(groups.find((group) => group.name === "手动选择")).toMatchObject({
       type: "select",
       use: ["remote"],
     });
   });
 
   it("generates providers and template metadata helpers", () => {
-    const providers = generateRuleProviders({
+    const baseOptions = {
       nodes: [node("Node A")],
-      enabledModules: ["cn"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
-      experimentalCnUseCnRuleSet: true,
-      builtinRuleEdits: { "module:cn:geolocation-cn": { enabled: false } },
+      builtinRuleEdits: { "module:cn:geoip-cn": { enabled: false as const } },
       customProxyGroups: [customGroup("custom", "select")],
       customRuleSets: [
         {
           id: "custom-rule",
           name: "Custom rule",
-          behavior: "domain",
+          behavior: "domain" as const,
           path: "https://rules.example.com/custom.mrs",
           target: "Custom custom",
         },
       ],
+    };
+    const providers = generateRuleProviders({
+      ...baseOptions,
+      enabledModules: ["select", "auto", "cn", "ad", "steam"],
+    });
+    const withoutAd = generateRuleProviders({
+      ...baseOptions,
+      enabledModules: ["select", "auto", "cn", "steam"],
     });
 
-    expect(providers["cn-ip"]).toMatchObject({
-      url: "https://rules.example.com/geoip/cn.mrs",
-      behavior: "ipcidr",
+    // 内置规则集只剩广告域名集合一个：domain 行为的纯 txt，不再有 format 字段
+    expect(Object.keys(providers)).toEqual(["广告集合_rules", "custom-rule"]);
+    expect(providers["广告集合_rules"]).toEqual({
+      type: "http",
+      behavior: "domain",
+      url: "https://cdn.jsdelivr.net/gh/blackmatrix7/ios_rule_script@master/rule/Clash/AdvertisingLite/AdvertisingLite_Domain_For_Clash.txt",
+      path: "./ruleset/广告集合_rules.list",
+      interval: 86400,
     });
-    expect(providers.cn).toMatchObject({
-      url: "https://rules.example.com/geosite/cn.mrs",
-    });
+    expect(withoutAd["广告集合_rules"]).toBeUndefined();
     expect(providers["custom-rule"]).toMatchObject({
       url: "https://rules.example.com/custom.mrs",
+      behavior: "domain",
+      format: "mrs",
     });
-    expect(getModulesForTemplate("minimal")).toContain("final");
-    expect(getModulesForTemplate("standard")).toContain("github");
-    expect(getModulesForTemplate("full")).not.toContain("adult");
-    expect(getGroupTarget("missing")).toContain("节点选择");
+    // 内置分组固定 5 个，模板之间不再有启用集合差异
+    expect(getModulesForTemplate("minimal")).toEqual(["auto", "select", "cn", "ad", "steam"]);
+    expect(getModulesForTemplate("standard")).toEqual(["auto", "select", "cn", "ad", "steam"]);
+    expect(getModulesForTemplate("full")).toEqual(["auto", "select", "cn", "ad", "steam"]);
+    expect(getGroupTarget("cn")).toBe("国内直连");
+    expect(getGroupTarget("missing")).toBe("手动选择");
     expect(getAllGroupNames(["select"], [customGroup("custom", "select")])).toContain("Custom custom");
   });
 
-  it("applies built-in group type overrides and explicitly added members", () => {
+  it("honors advanced group type overrides and explicit members", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
-      enabledModules: ["select", "auto", "ai"],
+      enabledModules: ["select", "auto", "ad", "steam"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
       proxyGroupAdvanced: {
-        ai: {
+        auto: {
           groupType: "fallback",
           extraMembers: [{ kind: "direct" }],
           memberOrder: [{ kind: "direct" }, { kind: "node", name: "Node B" }],
         },
+        cn: { groupType: "load-balance", strategy: "round-robin" },
+        steam: { groupType: "url-test" },
       },
     });
 
-    expect(groups.find((group) => group.name.includes("AI"))).toMatchObject({
-      type: "fallback",
-      proxies: ["DIRECT", "Node B", "Node A"],
-      url: "https://probe.example.com/204",
-      interval: 120,
+    // 高级设置显式改了类型时按类型生成（测速/故障转移/负载均衡都还能用）
+    const auto = groups.find((group) => group.name === "自动选择");
+    expect(auto).toMatchObject({ type: "fallback", proxies: ["DIRECT", "Node B", "Node A"] });
+    const steam = groups.find((group) => group.name === "Steam 代理");
+    expect(steam).toMatchObject({ type: "url-test" });
+    expect(steam).toHaveProperty("url");
+
+    // 没改类型的仍用固定成员表，不带测速字段
+    const select = groups.find((group) => group.name === "手动选择");
+    expect(select).toMatchObject({ type: "select", proxies: ["自动选择", "DIRECT"] });
+    expect(select).not.toHaveProperty("url");
+    expect(select).not.toHaveProperty("interval");
+  });
+
+  it("applies load-balance strategy overrides on builtin groups", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A"), node("Node B")],
+      enabledModules: ["cn"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      proxyGroupAdvanced: { cn: { groupType: "load-balance", strategy: "round-robin" } },
+    });
+
+    expect(groups.find((group) => group.name === "国内直连")).toMatchObject({
+      type: "load-balance",
+      strategy: "round-robin",
+      proxies: ["Node A", "Node B"],
     });
   });
 
+  it("同一落地节点出现在两条链时只认第一个出口组", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A"), node("Node B")],
+      enabledModules: ["auto"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      chainMemberPlan: {
+        exitGroups: [
+          { id: "c1", name: "出口一", landingNodes: ["Node A"] },
+          { id: "c2", name: "出口二", landingNodes: ["Node A"] },
+        ],
+      },
+    });
+
+    // 落地节点被替换成出口组名；出口组不在可用成员里时被过滤，只剩普通节点
+    expect(groups.find((group) => group.name === "自动选择")?.proxies).toEqual(["Node B"]);
+  });
+  it("自定义组名不是字符串时不影响内置分组生成", () => {
+    const groups = generateProxyGroups({
+      nodes: [node("Node A")],
+      enabledModules: ["cn"],
+      ruleProviderBaseUrl: "https://rules.example.com",
+      testUrl: "https://probe.example.com/204",
+      testInterval: 120,
+      customProxyGroups: [
+        {
+          id: "bad-name",
+          name: 123 as never,
+          emoji: "",
+          groupType: "select",
+          includeInGroupMembers: true,
+        },
+      ],
+    });
+
+    // 名字不是字符串的自定义组不会被登记成可选成员，内置分组仍按固定成员表生成
+    // 名字不是字符串的自定义组不会被登记成可选成员，内置分组仍按固定成员表生成
+    expect(groups.some((group) => group.name === "国内直连")).toBe(true);
+  });
   it("defaults ordinary custom groups to node-only members without adding them to node select", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
@@ -173,13 +264,13 @@ describe("proxy group generator", () => {
       ],
     });
 
-    expect(groups.find((group) => group.name === "🚀 节点选择")?.proxies).toEqual([
-      "⚡ 自动选择",
+    // 手动选择的成员表固定为 [自动选择, DIRECT]，普通自定义组不会挤进去
+    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual([
+      "自动选择",
       "DIRECT",
-      "REJECT",
-      "Node A",
-      "Node B",
     ]);
+    expect(groups.find((group) => group.name === "手动选择")?.proxies).not.toContain("Custom one");
+    expect(groups.find((group) => group.name === "手动选择")?.proxies).not.toContain("Custom two");
     expect(groups.find((group) => group.name === "Custom one")?.proxies).toEqual([
       "DIRECT",
       "REJECT",
@@ -210,10 +301,11 @@ describe("proxy group generator", () => {
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B"), node("Filtered")],
       proxyProviderNames: ["remote"],
-      enabledModules: ["select", "auto", "private"],
+      enabledModules: ["select", "auto", "cn"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
+      proxyGroupAdvanced: { cn: { extraMembers: [{ kind: "custom", id: "normal" }] } },
       customProxyGroups: [
         {
           id: "filtered",
@@ -237,20 +329,14 @@ describe("proxy group generator", () => {
     ]);
     expect(groups.find((group) => group.name === "Filtered Group")).not.toHaveProperty("use");
     expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("Custom normal");
-    expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("🚀 节点选择");
+    expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("手动选择");
     expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("Filtered Group");
-    expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("🚀 节点选择");
+    expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("手动选择");
     expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("Custom normal");
     expect(groups.find((group) => group.name === "Custom normal")).toMatchObject({ use: ["remote"] });
-    expect(groups.find((group) => group.name === "🚀 节点选择")?.proxies).not.toContain("Filtered Group");
-    expect(groups.find((group) => group.name === "🚀 节点选择")?.proxies).not.toContain("Custom normal");
-    expect(groups.find((group) => group.name === "🏠 私有网络")?.proxies?.slice(0, 5)).toEqual([
-      "DIRECT",
-      "REJECT",
-      "Filtered Group",
-      "Custom normal",
-      "🚀 节点选择",
-    ]);
+    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual(["自动选择", "DIRECT"]);
+    // includeInGroupMembers 的自定义组仍可被内置分组显式引用（advanced.extraMembers）
+    expect(groups.find((group) => group.name === "国内直连")?.proxies).toEqual(["DIRECT", "Custom normal"]);
   });
 
   it("keeps filtered-node generated group variants node-scoped and appends inline custom groups without an insert point", () => {
@@ -369,15 +455,24 @@ describe("proxy group generator", () => {
     expect(groups.some((group) => group.name === "Custom disabled")).toBe(false);
     expect(getAllGroupNames(["select"], [disabledGroup])).not.toContain("Custom disabled");
     expect(providers["disabled-rule"]).toBeUndefined();
-    expect(rules).toEqual(["MATCH,DIRECT"]);
+    // 分组全关时只剩 always 的 6 条（本地回环 2 条 + 进程直连 4 条），自定义条目一条都不生成
+    expect(rules).toEqual([
+      "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+      "IP-CIDR,::1/128,DIRECT,no-resolve",
+      "PROCESS-PATH-REGEX,(?i)leigod,DIRECT",
+      "PROCESS-NAME,r5apex_dx12.exe,DIRECT",
+      "PROCESS-NAME,start_protected_game.exe,DIRECT",
+      "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
+      "MATCH,DIRECT",
+    ]);
   });
 
-  it("covers provider target guards and module group type overrides", () => {
+  it("covers provider target guards and built-in group type overrides", () => {
     const disabledByName = { ...customGroup("disabled-name", "select"), enabled: false };
     const groups = generateProxyGroups({
       nodes: [node("Node A"), node("Node B")],
       proxyProviderNames: ["remote"],
-      enabledModules: ["select", "auto", "ai", "private", "cn", "global", "final"],
+      enabledModules: ["select", "auto", "cn", "ad", "steam"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 120,
@@ -393,9 +488,8 @@ describe("proxy group generator", () => {
       ],
       proxyGroupAdvanced: {
         auto: { groupType: "load-balance", strategy: "round-robin" },
-        ai: { groupType: "url-test", regions: ["other"] },
-        private: { groupType: "direct-first", extraMembers: [{ kind: "node", name: "Node B" }] },
         cn: { groupType: "reject-first" },
+        steam: { groupType: "url-test", regions: ["other"] },
       },
     });
     const providers = generateRuleProviders({
@@ -437,27 +531,26 @@ describe("proxy group generator", () => {
       ],
     });
 
-    expect(groups.find((group) => group.name === "⚡ 自动选择")).toMatchObject({
+    // 高级设置显式改了类型时按类型生成
+    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
       type: "load-balance",
       strategy: "round-robin",
-    });
-    expect(groups.find((group) => group.name.includes("AI"))).toMatchObject({
-      type: "url-test",
-      proxies: [],
       use: ["remote"],
     });
-    expect(groups.find((group) => group.name === "🏠 私有网络")?.proxies?.slice(0, 2)).toEqual(["DIRECT", "REJECT"]);
-    expect(groups.find((group) => group.name === "🔒 国内服务")?.proxies?.slice(0, 2)).toEqual(["REJECT", "DIRECT"]);
+    const cnGroup = groups.find((group) => group.name === "国内直连");
+    expect(cnGroup?.type).toBe("select");
+    expect(cnGroup?.proxies).toContain("REJECT");
+    expect(groups.find((group) => group.name === "Steam 代理")?.type).toBe("url-test");
     expect(providers["skip-by-name"]).toBeUndefined();
     expect(providers["relative-path"]).toMatchObject({
       url: "https://rules.example.com/geosite/relative.mrs",
     });
   });
 
-  it("builds groups without providers while keeping info nodes out of testable groups", () => {
+  it("builds groups without providers while keeping info nodes out of group members", () => {
     const groups = generateProxyGroups({
       nodes: [node("余额 | 10GB"), node("Korea Node"), node("US Node")],
-      enabledModules: ["auto", "ai", "private", "global", "final"],
+      enabledModules: ["auto", "select", "cn"],
       ruleProviderBaseUrl: "https://rules.example.com",
       testUrl: "https://probe.example.com/204",
       testInterval: 60,
@@ -487,34 +580,31 @@ describe("proxy group generator", () => {
         },
       ],
       proxyGroupAdvanced: {
-        ai: {
-          groupType: "select",
+        auto: {
           extraMembers: [{ kind: "custom", id: "direct-local" }],
           excludedMembers: [{ kind: "node", name: "US Node" }],
         },
       },
     });
 
-    const auto = groups.find((group) => group.name === "⚡ 自动选择");
-    const ai = groups.find((group) => group.name.includes("AI"));
+    const auto = groups.find((group) => group.name === "自动选择");
     const directLocal = groups.find((group) => group.name === "Direct Local");
     const rejectLocal = groups.find((group) => group.name === "Reject Local");
     const filteredReject = groups.find((group) => group.name === "Filtered Reject");
 
-    expect(auto).toMatchObject({
-      type: "url-test",
-      proxies: ["Korea Node", "US Node"],
-      url: "https://probe.example.com/204",
-      interval: 60,
+    // 自动选择 = 全部节点（信息节点除外）+ 显式追加的自定义组 - 显式排除的节点
+    expect(auto).toEqual({
+      name: "自动选择",
+      type: "select",
+      proxies: ["Korea Node", "Direct Local"],
     });
-    expect(auto).not.toHaveProperty("use");
     expect(auto?.proxies).not.toContain("余额 | 10GB");
-    expect(ai?.proxies).toContain("Direct Local");
-    expect(ai?.proxies).not.toContain("US Node");
+    expect(auto?.proxies).not.toContain("US Node");
     expect(directLocal?.proxies?.slice(0, 2)).toEqual(["DIRECT", "US Node"]);
     expect(directLocal?.proxies).not.toContain("Direct Local");
     expect(rejectLocal?.proxies?.slice(0, 2)).toEqual(["REJECT", "DIRECT"]);
     expect(filteredReject?.proxies).toEqual(["REJECT", "DIRECT", "Korea Node"]);
-    expect(groups.find((group) => group.name === "🐟 漏网之鱼")?.proxies).toContain("Direct Local");
+    // 手动选择的成员表固定，includeInGroupMembers 的自定义组不会自动进入
+    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual(["自动选择", "DIRECT"]);
   });
 });
