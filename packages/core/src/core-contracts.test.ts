@@ -204,7 +204,7 @@ describe("custom routing rule set contracts", () => {
           name: "",
           behavior: "ipcidr",
           path: "https://rules.example.com/geo/geoip/private.mrs",
-          target: "🚀 Renamed",
+          target: "⚡ Renamed",
           noResolve: true,
         },
         {
@@ -222,9 +222,25 @@ describe("custom routing rule set contracts", () => {
           target: { kind: "custom", id: "custom" },
           noResolve: true,
         },
+        {
+          id: "module-by-ref",
+          name: "Module ref",
+          behavior: "domain",
+          path: "geosite/cn.mrs",
+          target: { kind: "module", id: "cn" },
+        },
+        {
+          id: "bare-module-id",
+          name: "Bare id",
+          behavior: "domain",
+          path: "geosite/bare.mrs",
+          target: "cn",
+        },
       ],
     });
 
+    // 裸分组 id（"cn"）不是组名，解析不到目标，该规则集被跳过
+    expect(items.map((item) => item.id)).toEqual(["private", "youtube", "telegram", "module-by-ref"]);
     expect(items).toContainEqual({
       key: "custom-rule-set:private",
       source: { kind: "custom-rule-set", id: "private" },
@@ -235,7 +251,7 @@ describe("custom routing rule set contracts", () => {
       target: {
         kind: "module",
         id: moduleId,
-        name: expect.stringContaining("Renamed"),
+        name: "⚡ Renamed",
         value: `module:${moduleId}`,
       },
       noResolve: true,
@@ -261,6 +277,13 @@ describe("custom routing rule set contracts", () => {
       id: "custom",
       name: "Custom",
       value: "custom:custom",
+    });
+    // `{ kind: "module", id }` 这种引用形式直接落到内置分组名
+    expect(items.find((item) => item.id === "module-by-ref")?.target).toEqual({
+      kind: "module",
+      id: "cn",
+      name: "国内直连",
+      value: "module:cn",
     });
   });
 

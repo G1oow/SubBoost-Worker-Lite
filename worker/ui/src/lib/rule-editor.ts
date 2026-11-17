@@ -10,7 +10,6 @@
 import { DEFAULT_SUBBOOST_CONFIG, buildDefaultUserConfig } from "@subboost/core/config/defaults";
 import { CATEGORY_INFO, PROXY_GROUP_MODULES, type ProxyGroupModule } from "@subboost/core/generator/proxy-groups";
 import {
-  EXPERIMENTAL_CN_RULE,
   buildRuleOrderView,
   getCustomRuleSetOrderKey,
   resolveFullRuleOrder,
@@ -41,8 +40,8 @@ import type {
 
 export type ConfigRecord = Record<string, unknown>;
 
-/** 🚀 节点选择是多数分组的默认出口，🐟 漏网之鱼承接 MATCH：两者关掉会让整份配置失去兜底 */
-export const LOCKED_MODULE_IDS: ReadonlySet<string> = new Set(["select", "final"]);
+/** 手动选择承载 MATCH 兜底，关掉会让整份配置失去兜底出口 */
+export const LOCKED_MODULE_IDS: ReadonlySet<string> = new Set(["select"]);
 
 const MODULE_BY_ID = new Map(PROXY_GROUP_MODULES.map((module) => [module.id, module]));
 const BUILTIN_POLICIES = ["DIRECT", "REJECT"] as const;
@@ -100,6 +99,17 @@ function readBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === "boolean" ? value : fallback;
 }
 
+
+/** 手动域名三表：保存原文，归一化交给生成期（界面要回显用户输入的原始写法） */
+export function readManualDomains(config: ConfigRecord): { direct: string[]; proxy: string[]; reject: string[] } {
+  const value = config.manualDomains;
+  const record = isRecord(value) ? value : {};
+  return {
+    direct: readStringList(record.direct),
+    proxy: readStringList(record.proxy),
+    reject: readStringList(record.reject),
+  };
+}
 export function readNameOverrides(config: ConfigRecord): Record<string, string> {
   if (!isRecord(config.proxyGroupNameOverrides)) return {};
   const out: Record<string, string> = {};
@@ -275,11 +285,10 @@ export function buildRuleOptions(config: ConfigRecord): RulesGenerateOptions {
     chainGroups: ctx.chains.filter((chain) => chain.enabled).map(({ id, name }) => ({ id, name })),
     builtinRuleEdits: model.builtinRuleEdits,
     proxyGroupNameOverrides: ctx.overrides,
-    experimentalCnUseCnRuleSet: readBoolean(
-      config.experimentalCnUseCnRuleSet,
-      DEFAULT_SUBBOOST_CONFIG.experimentalCnUseCnRuleSet
-    ),
-    cnIpNoResolve: readBoolean(config.cnIpNoResolve, DEFAULT_SUBBOOST_CONFIG.cnIpNoResolve),
+    manualDomains: readManualDomains(config),
+    manualProcessRules: readStringList(config.manualProcessRules),
+    steamViaProxy: readBoolean(config.steamViaProxy, true),
+    steamDownloadViaProxy: readBoolean(config.steamDownloadViaProxy, false),
     ruleOrder: readStringList(config.ruleOrder),
     availablePolicyTargets: [...new Set([...groupNames, ...BUILTIN_POLICIES, ...passthrough])],
     fallbackPolicyTarget: ctx.fallback,
@@ -451,7 +460,7 @@ export function buildRuleEditorView(config: ConfigRecord): RuleEditorView {
       const target = describeTarget(targetValue, ctx);
       return {
         ...base,
-        detail: rule?.path ?? "",
+        detail: rule?.path ?? rule?.text ?? "",
         moduleId,
         targetValue,
         targetLabel: target.label,
@@ -481,7 +490,7 @@ export function buildRuleEditorView(config: ConfigRecord): RuleEditorView {
 
     return {
       ...base,
-      detail: entry.key === "special:experimental-cn" ? `实验性：完整国内域名后置，${EXPERIMENTAL_CN_RULE.path}` : "",
+      detail: "",
       moduleId: null,
       targetValue: `raw:${entry.target}`,
       targetLabel: entry.target,
@@ -705,7 +714,6 @@ export type CustomRuleSetInput = {
 export function reservedRuleSetIds(config: ConfigRecord, exceptId?: string): string[] {
   return [
     ...PROXY_GROUP_MODULES.flatMap((module) => module.rules.map((rule) => rule.id)),
-    EXPERIMENTAL_CN_RULE.id,
     ...normalizeRuleModelFromConfig(config).customRuleSets.map((ruleSet) => ruleSet.id).filter((id) => id !== exceptId),
   ];
 }

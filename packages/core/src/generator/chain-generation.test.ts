@@ -106,25 +106,25 @@ describe("链式代理生成", () => {
 
   it("落地节点退出各分组，出口组顶替它原来的坑位", () => {
     const config = generate([chainEntry()]);
-    const selectGroup = membersOf(config, "🚀 节点选择");
+    const autoGroup = membersOf(config, "自动选择");
 
-    expect(selectGroup).toContain(EXIT_GROUP);
-    expect(selectGroup).not.toContain("美国落地-1");
-    expect(selectGroup).not.toContain("美国落地-2");
+    expect(autoGroup).toContain(EXIT_GROUP);
+    expect(autoGroup).not.toContain("美国落地-1");
+    expect(autoGroup).not.toContain("美国落地-2");
     // 前置节点仍然可选（可以直接单跳使用）
-    expect(selectGroup).toContain("日本中转");
+    expect(autoGroup).toContain("日本中转");
     // 坑位顺序：日本中转 → 出口组 → 香港节点
-    expect(selectGroup.indexOf("日本中转")).toBeLessThan(selectGroup.indexOf(EXIT_GROUP));
-    expect(selectGroup.indexOf(EXIT_GROUP)).toBeLessThan(selectGroup.indexOf("香港节点"));
+    expect(autoGroup.indexOf("日本中转")).toBeLessThan(autoGroup.indexOf(EXIT_GROUP));
+    expect(autoGroup.indexOf(EXIT_GROUP)).toBeLessThan(autoGroup.indexOf("香港节点"));
   });
 
-  it("⚡ 自动选择只剔除落地节点，不放入出口组", () => {
+  it("自动选择把落地节点原地替换成出口组", () => {
     const config = generate([chainEntry()]);
-    const autoGroup = membersOf(config, "⚡ 自动选择");
+    const autoGroup = membersOf(config, "自动选择");
 
-    expect(autoGroup).not.toContain(EXIT_GROUP);
+    expect(autoGroup).toEqual(["日本中转", EXIT_GROUP, "香港节点"]);
     expect(autoGroup).not.toContain("美国落地-1");
-    expect(autoGroup).toEqual(expect.arrayContaining(["日本中转", "香港节点"]));
+    expect(autoGroup).not.toContain("美国落地-2");
   });
 
   it("落地节点不出现在出口组以外的任何分组", () => {
@@ -142,10 +142,11 @@ describe("链式代理生成", () => {
     const config = generate([chainEntry()]);
     const names = groupNames(config);
 
-    expect(names.indexOf("⚡ 自动选择")).toBeLessThan(names.indexOf(EXIT_GROUP));
+    expect(names.indexOf("自动选择")).toBeLessThan(names.indexOf(EXIT_GROUP));
     expect(names.indexOf(EXIT_GROUP)).toBeLessThan(names.indexOf(RELAY_GROUP));
-    // 旧中转组等其他分组仍在链的组之后
-    expect(names.indexOf(RELAY_GROUP)).toBeLessThan(names.indexOf("🌍 非中国"));
+    // 其它内置分组仍在链的组之后
+    expect(names.indexOf(RELAY_GROUP)).toBeLessThan(names.indexOf("国内直连"));
+    expect(names.slice(0, 4)).toEqual(["自动选择", "手动选择", EXIT_GROUP, RELAY_GROUP]);
   });
 
   it("前置为空时前置组只放 REJECT，落地仍然生成", () => {
@@ -165,23 +166,23 @@ describe("链式代理生成", () => {
 
     expect(findGroup(config, EXIT_GROUP)).toBeUndefined();
     expect(findGroup(config, RELAY_GROUP)).toBeUndefined();
-    expect(membersOf(config, "🚀 节点选择")).toContain("美国落地-1");
+    expect(membersOf(config, "自动选择")).toContain("美国落地-1");
     expect(nodeByName(config, "美国落地-1")).not.toHaveProperty("dialer-proxy");
   });
 
   it("与内置分组重名时跳过该链", () => {
-    const config = generate([chainEntry({ name: "🚀 节点选择" })]);
+    const config = generate([chainEntry({ name: "手动选择" })]);
     const names = groupNames(config);
 
-    expect(names.filter((name) => name === "🚀 节点选择")).toHaveLength(1);
-    expect(findGroup(config, "🚀 节点选择 · 前置")).toBeUndefined();
+    expect(names.filter((name) => name === "手动选择")).toHaveLength(1);
+    expect(findGroup(config, "手动选择 · 前置")).toBeUndefined();
     expect(nodeByName(config, "美国落地-1")).not.toHaveProperty("dialer-proxy");
   });
 
   it("停用的链不生成分组", () => {
     const config = generate([chainEntry({ enabled: false })]);
     expect(findGroup(config, EXIT_GROUP)).toBeUndefined();
-    expect(membersOf(config, "🚀 节点选择")).toContain("美国落地-1");
+    expect(membersOf(config, "自动选择")).toContain("美国落地-1");
   });
 
   it("出口组类型可配，url-test 带 url 与 interval", () => {
@@ -259,8 +260,8 @@ describe("链作为规则目标", () => {
     const rule = rulesOf(config).find((item) => item.startsWith("DOMAIN-SUFFIX,chat.example.com,"));
     expect(rule).toBeDefined();
     expect(rule).not.toContain(EXIT_GROUP);
-    // 回退到首选策略组（🚀 节点选择），与模块目标的行为一致
-    expect(rule?.endsWith(",🚀 节点选择")).toBe(true);
+    // 回退到与 MATCH 一致的兜底出口「手动选择」
+    expect(rule?.endsWith(",手动选择")).toBe(true);
   });
 
   it("链出口组可以当成分组的高级成员引用", () => {

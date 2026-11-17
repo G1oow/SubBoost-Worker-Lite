@@ -3,6 +3,7 @@
  */
 
 import type { ParsedNode } from "./node";
+import type { ManualDomains } from "@subboost/core/rules/manual-domains";
 
 export const LOAD_BALANCE_STRATEGIES = ["consistent-hashing", "round-robin", "sticky-sessions"] as const;
 export type LoadBalanceStrategy = (typeof LOAD_BALANCE_STRATEGIES)[number];
@@ -192,6 +193,14 @@ export interface UserConfig {
   ruleProviderBaseUrl: string;
   enabledRules: string[];
   customRules: CustomRule[];
+  /** 手动域名三表：直连 → 国内直连 / 代理 → 自动选择 / 拦截 → 广告拦截 */
+  manualDomains?: ManualDomains;
+  /** 手动进程规则（进程名或完整规则），默认目标 DIRECT */
+  manualProcessRules?: string[];
+  /** Steam 流量是否走「Steam 代理」，默认 true */
+  steamViaProxy?: boolean;
+  /** Steam 下载 CDN 是否也走代理，默认 false（直连） */
+  steamDownloadViaProxy?: boolean;
   ruleOrder?: string[];
   // 国内服务 GeoIP 规则是否使用 no-resolve（默认 true；关闭可提升命中率但可能造成 DNS 泄露）
   cnIpNoResolve?: boolean;

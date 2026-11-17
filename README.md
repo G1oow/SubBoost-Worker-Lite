@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-4B5563?style=flat-square" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.20.0-F59E0B?style=flat-square" alt="Version 0.20.0">
+  <img src="https://img.shields.io/badge/version-0.23.0-F59E0B?style=flat-square" alt="Version 0.23.0">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-22C55E?style=flat-square" alt="License: AGPL-3.0-only"></a>
   <img src="https://img.shields.io/badge/Node-%3E%3D22.23.4-3776AB?style=flat-square" alt="Node 版本要求">
 </p>
@@ -73,13 +73,13 @@
 | `GET /sub/<token>?target=<app>` | 302 到客户端深链 |
 | `GET /s/<code>` | 8 字符短链，输出与原链接一致 |
 
-`<app>` 可取 `clash`、`stash`、`shadowrocket`、`singbox`、`v2rayng`、`hiddify`：
+`<app>` 可取 `clash`、`mihomo`、`stash`、`shadowrocket`、`singbox`、`v2rayng`、`hiddify`：
 
 ```text
 https://<your-worker>/sub/<token>?target=clash
 ```
 
-服务端只校验一次订阅是否存在，再把同一条链接（自动去掉 `target`）塞进对应 App 的深链并 302 过去；未知的 `target` 会被忽略，按普通订阅请求返回 YAML。微信、QQ 等应用内浏览器通常会拦截自定义 scheme，拉不起来时改用复制链接。
+服务端只校验一次订阅是否存在，再把同一条链接（自动去掉 `target`）塞进对应 App 的深链并 302 过去；未知的 `target` 会被忽略，按普通订阅请求返回 YAML。管理端页面上的「一键导入」按钮不走这条 302——它直接把客户端 scheme 写进 `<a href>`，点击本身就是用户手势，浏览器一定会放行。微信、QQ 等应用内浏览器通常会拦截自定义 scheme，拉不起来时改用复制链接。
 
 age 交付需要先在 Worker 上配 `AGE_RECIPIENT`（`age1…` 收件公钥），拉到的密文只有持有对应私钥的人能解开；完整步骤、密钥管理与解密流程见 [docs/age-encryption.md](./docs/age-encryption.md)。
 

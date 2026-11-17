@@ -389,15 +389,15 @@ describe("generateClashConfig", () => {
       proxyGroupOrder: ["custom:custom", "dialer:chain", "module:auto", "missing", "module:auto"],
       userConfig: {
         dnsYaml: "",
-        enabledGroups: ["select", "auto", "global", "final"],
+        enabledGroups: ["select", "auto"],
       },
     });
 
     expect(config["proxy-groups"]?.slice(0, 4).map((group) => group.name)).toEqual([
       "Custom",
       "Chain",
-      "⚡ 自动选择",
-      "🚀 节点选择",
+      "自动选择",
+      "手动选择",
     ]);
   });
 
@@ -484,12 +484,12 @@ describe("generateClashConfig", () => {
       ],
       proxyGroupOrder: ["custom:bad-custom", "module:auto"],
       userConfig: {
-        enabledGroups: ["select", "auto", "global", "final"],
+        enabledGroups: ["select", "auto"],
       },
     });
 
     expect(config).toHaveProperty("mixed-port");
-    expect(config["proxy-groups"]?.[0]).toMatchObject({ name: "⚡ 自动选择" });
+    expect(config["proxy-groups"]?.[0]).toMatchObject({ name: "自动选择" });
     expect(config["proxy-groups"]?.some((group) => Object.is((group as { name: unknown }).name, 123))).toBe(false);
   });
 
@@ -639,7 +639,7 @@ describe("generateClashConfig", () => {
     });
     expect(config["proxy-groups"]?.slice(0, 2).map((group) => group.name)).toEqual([
       "Messy Chain",
-      "⚡ 自动选择",
+      "自动选择",
     ]);
   });
 

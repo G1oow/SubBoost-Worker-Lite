@@ -284,8 +284,9 @@ describe("generateSubscription", () => {
       parseErrors: [],
     });
     await h.store.putConfig({
-      enabledGroups: ["select", "auto", "final"],
-      proxyGroupAdvanced: { final: { sourceIds: [sources[0].id] } },
+      enabledGroups: ["select", "auto"],
+      // 按源过滤节点成员：挂到含节点全集的内置组「自动选择」上
+      proxyGroupAdvanced: { auto: { sourceIds: [sources[0].id] } },
     });
 
     const { dto } = await h.store.createSubscription({ name: "all", sourceIds: [] });
@@ -300,7 +301,7 @@ describe("generateSubscription", () => {
     const parsed = yaml.load(result.cache.yaml) as {
       "proxy-groups": Array<{ name: string; proxies: string[] }>;
     };
-    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "🐟 漏网之鱼");
+    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "自动选择");
     expect(finalGroup?.proxies).toContain("a");
     expect(finalGroup?.proxies).not.toContain("b");
   });
@@ -351,7 +352,7 @@ describe("previewConfig", () => {
     const before = await dumpKv(h.kv);
 
     const result = await previewConfig(h.deps, {
-      enabledGroups: ["select", "auto", "final"],
+      enabledGroups: ["select", "auto"],
       customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.org", target: "DIRECT" }],
     });
 
@@ -362,9 +363,21 @@ describe("previewConfig", () => {
         sourceCount: 2,
         snapshotCount: 1,
         nodeCount: 1,
-        proxyGroupCount: 3,
+        proxyGroupCount: 2,
         ruleProviderCount: 0,
-        rules: ["DOMAIN-SUFFIX,example.org,DIRECT", "MATCH,🐟 漏网之鱼"],
+        rules: [
+          // 本地回环与进程直连接始终生成
+          "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+          "IP-CIDR,::1/128,DIRECT,no-resolve",
+          "PROCESS-PATH-REGEX,(?i)leigod,DIRECT",
+          "PROCESS-NAME,r5apex_dx12.exe,DIRECT",
+          "PROCESS-NAME,start_protected_game.exe,DIRECT",
+          "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
+          "DOMAIN-SUFFIX,example.org,DIRECT",
+          "GEOSITE,geolocation-!cn,自动选择",
+          "GEOIP,telegram,自动选择",
+          "MATCH,手动选择",
+        ],
         chains: [],
       },
     });

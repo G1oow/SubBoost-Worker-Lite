@@ -444,8 +444,6 @@ export function generateClashConfig(
       })),
     },
     builtinRuleEdits,
-    cnIpNoResolve: config.cnIpNoResolve,
-    experimentalCnUseCnRuleSet: config.experimentalCnUseCnRuleSet,
     proxyGroupNameOverrides,
   };
 
@@ -573,8 +571,14 @@ export function generateClashConfig(
     ...proxyGroups.map((group) => group.name),
     ...finalOutputNodes.filter((node) => !isSubscriptionInfoNodeName(node.name)).map((node) => node.name),
   ]);
+  // 兜底出口与 MATCH 保持一致：「手动选择」，其次才是第一个分组 / 第一个节点 / DIRECT
+  const selectModule = PROXY_GROUP_MODULES.find((module) => module.id === "select");
+  const selectGroupName = selectModule
+    ? resolveProxyGroupModuleName(selectModule, proxyGroupNameOverrides?.select)
+    : "";
   const fallbackPolicyTarget = chooseFallbackPolicyTarget(
     [
+      selectGroupName,
       proxyGroups[0]?.name,
       finalOutputNodes.find((node) => !isSubscriptionInfoNodeName(node.name))?.name,
       "DIRECT",
@@ -688,6 +692,10 @@ export function generateClashConfig(
     rules: generateRules({
       ...generateOpts,
       customRules: config.customRules,
+      manualDomains: config.manualDomains,
+      manualProcessRules: config.manualProcessRules,
+      steamViaProxy: config.steamViaProxy,
+      steamDownloadViaProxy: config.steamDownloadViaProxy,
       ruleOrder: config.ruleOrder,
       availablePolicyTargets,
       fallbackPolicyTarget,

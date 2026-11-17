@@ -3,9 +3,21 @@ import type { CustomProxyGroup } from "@subboost/core/types/config";
 import { getCustomRuleOrderKey } from "@subboost/core/rules/custom-rule-utils";
 import { resolveProxyGroupModuleName } from "@subboost/core/proxy-group-name";
 import { resolveProxyGroupTargetName, type ChainGroupRef } from "@subboost/core/proxy-group-targets";
-import { PROXY_GROUP_MODULES, type ProxyGroupModule, type ProxyGroupRule } from "./proxy-group-modules";
+import {
+  BUILTIN_CUSTOM_RULE_ANCHOR,
+  BUILTIN_EXTRA_RULES,
+  BUILTIN_RULE_ORDER,
+  PROXY_GROUP_MODULES,
+  type ProxyGroupModule,
+  type ProxyGroupRule,
+} from "./proxy-group-modules";
 import { getEffectiveModuleRules, getModuleRuleOrderKey } from "./module-rules";
 import { createPolicyTargetResolver } from "./policy-targets";
+import {
+  buildManualDomainRuleTexts,
+  buildManualProcessRuleTexts,
+  type ManualDomains,
+} from "@subboost/core/rules/manual-domains";
 
 type CustomRuleLike = Pick<CustomRule, "id" | "type" | "value" | "target" | "noResolve">;
 type CustomRuleSetLike = Pick<CustomRuleSet, "id" | "name" | "behavior" | "path" | "target" | "noResolve">;
@@ -33,65 +45,31 @@ export interface RulesGenerateOptions {
   chainGroups?: ChainGroupRef[];
   builtinRuleEdits?: BuiltinRuleEdits;
   proxyGroupNameOverrides?: Record<string, string>;
-  experimentalCnUseCnRuleSet?: boolean;
-  cnIpNoResolve?: boolean;
   ruleOrder?: string[];
   availablePolicyTargets?: string[];
   fallbackPolicyTarget?: string;
+  /** 手动域名三表（直连 / 代理 / 拦截），目标分别是 国内直连 / 自动选择 / 广告拦截 */
+  manualDomains?: ManualDomains;
+  /** 手动进程规则：进程名或完整 Clash 规则，默认目标 DIRECT */
+  manualProcessRules?: string[];
+  /** Steam 流量是否走「Steam 代理」（关掉即全部 DIRECT） */
+  steamViaProxy?: boolean;
+  /** Steam 下载 CDN 是否也走代理 */
+  steamDownloadViaProxy?: boolean;
 }
 
-export const EXPERIMENTAL_CN_RULE: ProxyGroupRule = {
-  id: "cn",
-  name: "国内域名 (完整)",
-  behavior: "domain",
-  path: "geosite/cn.mrs",
-};
-
 /**
- * 规则生成顺序（按自上而下、首次命中即停原则）
+ * 内置分组（= 分流规则目标）的固定 id
  *
- * ⚠️ 顺序非常重要！子域名/特定服务必须在通用服务之前：
- * - 私有网络和高置信国内规则在服务父规则前，避免国内子服务被父规则抢先命中
- * - Gemini 在 AI/谷歌前（Gemini 用谷歌域名）
- * - 油管视频在谷歌前（YouTube 是谷歌子域名）
- * - 谷歌学术在谷歌前（谷歌学术属于谷歌域名）
- * - cn 完整域名规则是低置信补充，仍通过 special:experimental-cn 后置到 geolocation-!cn 之后
+ * 「手动选择」既是兜底出口（MATCH），也是脚本里 `steamGroup` 之外的默认选择组。
  */
-const RULE_ORDER: string[] = [
-  "ad",
-  "private",
-  "gemini",
-  "ai",
-  "cn",
-  "youtube",
-  "google-scholar",
-  "education",
-  "cloud",
-  "google",
-  "telegram",
-  "github",
-  "microsoft",
-  "apple",
-  "twitter",
-  "meta",
-  "discord",
-  "social-other",
-  "netflix",
-  "disney",
-  "streaming-west",
-  "streaming-asia",
-  "steam",
-  "gaming-pc",
-  "gaming-console",
-  "dev-tools",
-  "storage",
-  "payment",
-  "crypto",
-  "news",
-  "shopping",
-  "adult",
-  "global",
-];
+export const BUILTIN_MODULE_IDS = {
+  select: "select",
+  auto: "auto",
+  cn: "cn",
+  ad: "ad",
+  steam: "steam",
+} as const;
 
 export function resolveModuleName(moduleId: string, overrides?: Record<string, string>): string {
   const mod = PROXY_GROUP_MODULES.find((m) => m.id === moduleId);
@@ -131,11 +109,10 @@ function customTargetIsDisabled(
   return false;
 }
 
-const PRESET_MODULE_RULE_ORDER_KEYS = PROXY_GROUP_MODULES.flatMap((module) =>
-  module.rules.map((rule) => getModuleRuleOrderKey(module.id, rule.id))
-);
+const PRESET_MODULE_RULE_ORDER_KEYS = BUILTIN_RULE_ORDER.map((key) => `module:${key}`);
 const PRESET_MODULE_RULE_ORDER_KEY_SET = new Set(PRESET_MODULE_RULE_ORDER_KEYS);
 const ALL_MODULE_IDS = PROXY_GROUP_MODULES.map((module) => module.id);
+const MODULE_BY_ID = new Map(PROXY_GROUP_MODULES.map((module) => [module.id, module]));
 
 let canonicalPresetRuleIndex: Map<string, number> | null = null;
 
@@ -157,39 +134,41 @@ function getCanonicalPresetRuleIndex(): Map<string, number> {
   return canonicalPresetRuleIndex;
 }
 
+/** 组装一条内置规则的文本：`<文字规则前半段>,<目标>[,no-resolve]` */
+function buildBuiltinRuleText(rule: ProxyGroupRule, target: string, noResolve: boolean): string {
+  const head = rule.text ?? "";
+  return `${head},${target}${noResolve ? ",no-resolve" : ""}`;
+}
+
 function buildModuleRuleEntry(
   module: ProxyGroupModule,
   rule: ProxyGroupRule,
   builtinRuleEdits?: BuiltinRuleEdits,
   proxyGroupNameOverrides?: Record<string, string>,
-  cnIpNoResolve?: boolean,
   customProxyGroups: CustomProxyGroup[] = [],
   chainGroups: ChainGroupRef[] = [],
-  resolvePolicyTarget: (target: string) => string = (target) => target
+  resolvePolicyTarget: (target: string) => string = (target) => target,
+  /** 目标覆盖：Steam 路由开关把整组规则的目标改成 DIRECT / Steam 代理 */
+  targetOverride?: string
 ): GeneratedRuleEntry {
   const key = getModuleRuleOrderKey(module.id, rule.id);
   const edit = builtinRuleEdits?.[key];
-  const defaultTarget = resolveModuleNameFromModule(module, proxyGroupNameOverrides);
-  const moduleNames = buildModuleNameMap(proxyGroupNameOverrides);
+  const moduleName = resolveModuleNameFromModule(module, proxyGroupNameOverrides);
+  const defaultTarget = targetOverride ?? rule.policyTarget ?? moduleName;
   const targetName = resolveProxyGroupTargetName(edit?.target || defaultTarget, {
-    moduleNames,
+    moduleNames: buildModuleNameMap(proxyGroupNameOverrides),
     customProxyGroups,
     chainGroups,
     fallbackTarget: defaultTarget,
   });
   const target = resolvePolicyTarget(targetName);
-  const noResolve =
-    module.id === "cn" && rule.id === "cn-ip" && typeof cnIpNoResolve === "boolean"
-      ? cnIpNoResolve
-      : Boolean(rule.noResolve);
-  let text = `RULE-SET,${rule.id},${target}`;
-  if (noResolve) text += ",no-resolve";
+  const noResolve = Boolean(rule.noResolve);
 
   return {
     key,
-    text,
+    text: buildBuiltinRuleText(rule, target, noResolve),
     kind: "module",
-    sourceLabel: defaultTarget,
+    sourceLabel: moduleName,
     summary: rule.name,
     target,
     noResolve,
@@ -359,7 +338,7 @@ function getLegacyEditableRuleKeys(entries: GeneratedRuleEntry[]): string[] {
 }
 
 function usesFullRuleOrder(ruleOrder: string[] | undefined, editableRuleKeys: string[], allRuleKeys: string[]): boolean {
-  const allSet = new Set([...allRuleKeys, ...PRESET_MODULE_RULE_ORDER_KEYS]);
+  const allSet = new Set([...allRuleKeys, ...PRESET_MODULE_RULE_ORDER_KEY_SET]);
   const editableSet = new Set(editableRuleKeys);
   return normalizeRuleOrderInput(ruleOrder).some((key) => allSet.has(key) && !editableSet.has(key));
 }
@@ -367,8 +346,8 @@ function usesFullRuleOrder(ruleOrder: string[] | undefined, editableRuleKeys: st
 /**
  * 把持久化顺序里缺失的内置规则插回规范位置：紧贴在它之后第一条已在顺序里的内置规则前面。
  *
- * 不能追加到末尾：末尾在 `geolocation-!cn` 之后，那条规则会先吃掉所有境外域名，
- * 后开启模块的规则（或新版本新增的预设规则）就永远命中不到。
+ * 不能追加到末尾：末尾在 `GEOSITE,cn` 之后，那条规则会先吃掉所有国内域名，
+ * 插回去的内置规则就永远命中不到。
  * 只认内置规则作锚点、插在后继之前，用户自己排好的自定义规则相对它们的先后不变。
  */
 function insertPresetRuleAtCanonicalAnchor(orderedKeys: string[], presentKeys: Set<string>, key: string): boolean {
@@ -425,6 +404,9 @@ type CanonicalRuleEntries = {
   matchEntry: GeneratedRuleEntry;
 };
 
+/** 未挂在分组对象上的内置规则（GEO 兜底段的两条） */
+const EXTRA_RULES_BY_KEY = new Map(BUILTIN_EXTRA_RULES.map((rule) => [rule.key, rule]));
+
 function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrder">): CanonicalRuleEntries {
   const {
     enabledModules,
@@ -434,10 +416,12 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     chainGroups = [],
     builtinRuleEdits,
     proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet,
-    cnIpNoResolve,
     availablePolicyTargets,
     fallbackPolicyTarget,
+    manualDomains,
+    manualProcessRules = [],
+    steamViaProxy = true,
+    steamDownloadViaProxy = false,
   } = options;
   const entries: GeneratedRuleEntry[] = [];
   const enabledSet = new Set(enabledModules);
@@ -453,88 +437,83 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
     chainGroups,
     resolvePolicyTarget
   );
+  // Steam 路由开关：整组 Steam 规则的目标在「Steam 代理」和 DIRECT 之间切换
+  const steamModuleName = moduleNames["steam"] ?? "";
+  const steamRouteTarget = steamViaProxy ? steamModuleName : "DIRECT";
+  const steamDownloadTarget = steamViaProxy && steamDownloadViaProxy ? steamModuleName : "DIRECT";
   const emittedRuleKeys = new Set<string>();
   let insertedEditableEntries = false;
 
   const pushEditableEntries = () => {
-    if (insertedEditableEntries || editableEntries.length === 0) return;
+    if (insertedEditableEntries) return;
     insertedEditableEntries = true;
+    // 脚本顺序：手动进程规则 → 手动域名三表 → 自定义完整规则/规则集
+    for (const text of buildManualProcessRuleTexts(manualProcessRules)) {
+      const target = "DIRECT";
+      entries.push(
+        buildSpecialRuleEntry(`manual-process:${text}`, text, text, resolvePolicyTarget(target))
+      );
+    }
+    if (manualDomains) {
+      const { texts } = buildManualDomainRuleTexts(manualDomains, {
+        direct: moduleNames["cn"] ?? "国内直连",
+        proxy: moduleNames["auto"] ?? "自动选择",
+        reject: moduleNames["ad"] ?? "广告拦截",
+      });
+      for (const text of texts) {
+        entries.push(buildSpecialRuleEntry(`manual-domain:${text}`, text, text, text.split(",")[2] ?? ""));
+      }
+    }
+    if (editableEntries.length === 0) return;
     entries.push(...editableEntries);
   };
+  for (const builtinKey of BUILTIN_RULE_ORDER) {
+    // 自定义规则/规则集插在内置规则的「手动域名」位置（广告规则集之前）
+    if (builtinKey === BUILTIN_CUSTOM_RULE_ANCHOR) pushEditableEntries();
 
-  const pushModuleRuleEntry = (module: ProxyGroupModule, rule: ProxyGroupRule) => {
+    const [moduleId = "", ruleId = ""] = builtinKey.split(":");
+    const module = MODULE_BY_ID.get(moduleId);
+    if (!module) continue;
+
+    // GEO 兜底段的两条规则不在分组对象上，用同一套键与目标解析规则补齐
+    const extra = EXTRA_RULES_BY_KEY.get(builtinKey);
+    const rule: ProxyGroupRule | undefined = extra
+      ? { id: ruleId, name: extra.name, text: extra.text, noResolve: extra.noResolve }
+      : module.rules.find((item) => item.id === ruleId);
+    if (!rule) continue;
+
+    // 分组关闭时它的规则不再生成；进程直连/本地回环这类「必须存在」的规则仍然保留
+    const alwaysOn = rule.always === true;
+    if (!alwaysOn && !enabledSet.has(moduleId)) continue;
+
+    // Steam 规则的目标跟着两个开关走；其它分组用规则自身的 policyTarget / 组名
+    const steamTarget =
+      moduleId === BUILTIN_MODULE_IDS.steam
+        ? rule.downloadCdn
+          ? steamDownloadTarget
+          : steamRouteTarget
+        : undefined;
     const entry = buildModuleRuleEntry(
       module,
       rule,
       builtinRuleEdits,
       proxyGroupNameOverrides,
-      cnIpNoResolve,
       activeCustomProxyGroups,
       chainGroups,
-      resolvePolicyTarget
+      resolvePolicyTarget,
+      steamTarget
     );
-    if (emittedRuleKeys.has(entry.key)) return;
+    if (emittedRuleKeys.has(entry.key)) continue;
     emittedRuleKeys.add(entry.key);
     entries.push(entry);
-  };
-
-  const pushAppleTvPlusAtCanonicalPosition = () => {
-    if (!enabledSet.has("streaming-west")) return;
-    const streamingWestModule = PROXY_GROUP_MODULES.find((item) => item.id === "streaming-west");
-    if (!streamingWestModule) return;
-
-    const appleTvPlusRule = streamingWestModule.rules.find((rule) => rule.id === "apple-tvplus");
-    if (!appleTvPlusRule) return;
-
-    // Keep the existing generated order without turning Apple TV+ into a special system rule.
-    pushModuleRuleEntry(streamingWestModule, appleTvPlusRule);
-  };
-
-  const processedModules = new Set<string>();
-
-  for (const moduleId of RULE_ORDER) {
-    if (!insertedEditableEntries && moduleId === "gemini") {
-      pushEditableEntries();
-    }
-
-    if (moduleId === "apple") {
-      pushAppleTvPlusAtCanonicalPosition();
-    }
-
-    if (!enabledSet.has(moduleId)) continue;
-    processedModules.add(moduleId);
-
-    const ruleModule = PROXY_GROUP_MODULES.find((item) => item.id === moduleId);
-    if (!ruleModule) continue;
-
-    for (const rule of ruleModule.rules) {
-      pushModuleRuleEntry(ruleModule, rule);
-    }
-  }
-
-  for (const ruleModule of PROXY_GROUP_MODULES) {
-    if (!enabledSet.has(ruleModule.id)) continue;
-    if (processedModules.has(ruleModule.id)) continue;
-    if (ruleModule.id === "final") continue;
-
-    for (const rule of ruleModule.rules) {
-      pushModuleRuleEntry(ruleModule, rule);
-    }
   }
 
   pushEditableEntries();
 
-  if (Boolean(experimentalCnUseCnRuleSet) && enabledSet.has("cn")) {
-    const target = resolvePolicyTarget(resolveModuleName("cn", proxyGroupNameOverrides));
-    entries.push(
-      buildSpecialRuleEntry("special:experimental-cn", `RULE-SET,${EXPERIMENTAL_CN_RULE.id},${target}`, EXPERIMENTAL_CN_RULE.name, target)
-    );
-  }
-
+  // 兜底出口固定是「手动选择」：只有它没开启/被筛掉时才退回生成期兜底目标
+  const selectTarget = resolveModuleName(BUILTIN_MODULE_IDS.select, proxyGroupNameOverrides);
   const finalTarget = resolvePolicyTarget(
-    enabledSet.has("final")
-      ? resolveModuleName("final", proxyGroupNameOverrides)
-      : fallbackPolicyTarget ?? resolveModuleName("select", proxyGroupNameOverrides)
+    enabledSet.has(BUILTIN_MODULE_IDS.select) ? selectTarget : fallbackPolicyTarget ?? selectTarget
   );
   return {
     preMatchEntries: entries,
@@ -550,13 +529,15 @@ export function normalizePersistedRuleOrder(options: RulesGenerateOptions): stri
     customProxyGroups: options.customProxyGroups,
     builtinRuleEdits: options.builtinRuleEdits,
     proxyGroupNameOverrides: options.proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet: options.experimentalCnUseCnRuleSet,
-    cnIpNoResolve: options.cnIpNoResolve,
     availablePolicyTargets: options.availablePolicyTargets,
     fallbackPolicyTarget: options.fallbackPolicyTarget,
+    manualDomains: options.manualDomains,
+    manualProcessRules: options.manualProcessRules,
+    steamViaProxy: options.steamViaProxy,
+    steamDownloadViaProxy: options.steamDownloadViaProxy,
   });
 
-  const allRuleKeys = preMatchEntries.map((entry) => entry.key);
+  const allRuleKeys = preMatchEntries.map((entry) => entry.key).filter((key) => !key.startsWith("manual-"));
   const editableRuleKeys = getLegacyEditableRuleKeys(preMatchEntries);
   const cleaned = normalizeRuleOrderInput(options.ruleOrder);
   if (cleaned.length === 0) return [];
@@ -571,25 +552,36 @@ export function normalizePersistedRuleOrder(options: RulesGenerateOptions): stri
 /**
  * 覆盖全部模块的完整规则顺序：所有内置规则（含未开启模块与已停用的）+ 自定义规则/规则集 + 系统规则。
  *
- * 结果与开启了哪些模块无关（实验性 cn 规则除外），所以在界面上开关模块不会打乱其他规则的位置；
- * 可视化编辑保存时整体写回 `ruleOrder`，之后再开启的模块直接落在自己的位置上。
+ * 结果与哪些分组开启无关，所以在界面上开关分组不会打乱其他规则的位置；
+ * 可视化编辑保存时整体写回 `ruleOrder`，之后再开启的分组直接落在自己的位置上。
  * 实际生效的顺序是它按当前开启状态过滤后的子序列（见 `resolveAppliedRuleOrder`）。
  */
 export function resolveFullRuleOrder(options: RulesGenerateOptions): string[] {
   const { preMatchEntries } = buildCanonicalRuleEntries({ ...options, enabledModules: ALL_MODULE_IDS });
-  const universeKeys = preMatchEntries.map((entry) => entry.key);
+  const manualKeys = preMatchEntries.map((entry) => entry.key).filter((key) => key.startsWith("manual-"));
+  const universeKeys = preMatchEntries.map((entry) => entry.key).filter((key) => !key.startsWith("manual-"));
   const editableRuleKeys = getLegacyEditableRuleKeys(preMatchEntries);
   const persistedOrder = normalizePersistedRuleOrder(options);
 
+  const withManualKeys = (keys: string[]) => {
+    if (manualKeys.length === 0) return keys;
+    const anchorIndex = keys.indexOf("module:ad:ad-set");
+    const next = [...keys];
+    next.splice(anchorIndex >= 0 ? anchorIndex : next.length, 0, ...manualKeys);
+    return next;
+  };
+
   if (persistedOrder.length === 0) {
-    return universeKeys;
+    return withManualKeys(universeKeys);
   }
 
   if (!usesFullRuleOrder(persistedOrder, editableRuleKeys, universeKeys)) {
-    return applyEditableOnlyOrder(
-      editableRuleKeys,
-      universeKeys,
-      normalizeEditableRuleOrderKeys(persistedOrder, editableRuleKeys)
+    return withManualKeys(
+      applyEditableOnlyOrder(
+        editableRuleKeys,
+        universeKeys,
+        normalizeEditableRuleOrderKeys(persistedOrder, editableRuleKeys)
+      )
     );
   }
 
@@ -607,6 +599,11 @@ export function resolveFullRuleOrder(options: RulesGenerateOptions): string[] {
     if (present.has(key)) continue;
     if (!insertPresetRuleAtCanonicalAnchor(next, present, key)) next.push(key);
     present.add(key);
+  }
+  // 手动域名/进程规则位置由生成器固定（广告规则集之前），不参与可视化排序
+  if (manualKeys.length > 0) {
+    const anchorIndex = next.indexOf("module:ad:ad-set");
+    next.splice(anchorIndex >= 0 ? anchorIndex : next.length, 0, ...manualKeys);
   }
 
   return next;
@@ -648,10 +645,12 @@ export function buildGeneratedRuleEntries(options: RulesGenerateOptions): Genera
     chainGroups: options.chainGroups,
     builtinRuleEdits: options.builtinRuleEdits,
     proxyGroupNameOverrides: options.proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet: options.experimentalCnUseCnRuleSet,
-    cnIpNoResolve: options.cnIpNoResolve,
     availablePolicyTargets: options.availablePolicyTargets,
     fallbackPolicyTarget: options.fallbackPolicyTarget,
+    manualDomains: options.manualDomains,
+    manualProcessRules: options.manualProcessRules,
+    steamViaProxy: options.steamViaProxy,
+    steamDownloadViaProxy: options.steamDownloadViaProxy,
   });
   const orderKeys = resolveAppliedRuleOrder(options);
   const byKey = new Map(preMatchEntries.map((entry) => [entry.key, entry]));
@@ -664,4 +663,9 @@ export function buildGeneratedRuleEntries(options: RulesGenerateOptions): Genera
 
 export function generateRules(options: RulesGenerateOptions): string[] {
   return buildGeneratedRuleEntries(options).map((entry) => entry.text);
+}
+
+/** 供 index.ts 判断内置规则键是否仍然存在（未知键在解析配置时被拒绝） */
+export function isBuiltinRuleKey(key: string): boolean {
+  return PRESET_MODULE_RULE_ORDER_KEY_SET.has(key) || EXTRA_RULES_BY_KEY.has(key.replace(/^module:/, ""));
 }

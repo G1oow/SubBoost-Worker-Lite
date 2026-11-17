@@ -1,4 +1,4 @@
-import { PROXY_GROUP_MODULES } from "@subboost/core/generator/proxy-groups";
+import { BUILTIN_RULE_KEYS as BUILTIN_RULE_KEY_LIST, PROXY_GROUP_MODULES } from "@subboost/core/generator/proxy-groups";
 import { normalizePersistedRuleOrder } from "@subboost/core/generator/rules";
 import { ensureCustomRuleId, isCustomRuleType } from "@subboost/core/rules/custom-rule-utils";
 import { resolveProxyGroupAdvancedModeEnabled } from "@subboost/core/proxy-group-advanced-mode";
@@ -29,9 +29,7 @@ type ValidationResult =
   | { ok: false; error: string };
 
 const BUILTIN_MODULE_IDS = new Set(PROXY_GROUP_MODULES.map((module) => module.id));
-const BUILTIN_RULE_KEYS = new Set(
-  PROXY_GROUP_MODULES.flatMap((module) => module.rules.map((rule) => `module:${module.id}:${rule.id}`))
-);
+const BUILTIN_RULE_KEYS = new Set(BUILTIN_RULE_KEY_LIST);
 const REMOVED_TEMPLATE_FIELDS = new Set([
   "moduleRuleOverrides",
   "moduleRuleExclusions",
@@ -103,7 +101,14 @@ export function validateSubBoostTemplateConfig(value: unknown): ValidationResult
     "experimentalCnUseCnRuleSet"
   );
   if (!experimentalCnUseCnRuleSet.ok) return experimentalCnUseCnRuleSet;
-
+  const manualDomains = parseManualDomains(value.manualDomains);
+  if (!manualDomains.ok) return manualDomains;
+  const manualProcessRules = parseStringList(value.manualProcessRules, "manualProcessRules");
+  if (!manualProcessRules.ok) return manualProcessRules;
+  const steamViaProxy = parseOptionalBoolean(value.steamViaProxy, "steamViaProxy");
+  if (!steamViaProxy.ok) return steamViaProxy;
+  const steamDownloadViaProxy = parseOptionalBoolean(value.steamDownloadViaProxy, "steamDownloadViaProxy");
+  if (!steamDownloadViaProxy.ok) return steamDownloadViaProxy;
   const normalizedRuleOrder = normalizePersistedRuleOrder({
     enabledModules: enabledProxyGroups.value.filter((id) => !hiddenSet.has(id)),
     customRules: customRules.value,
@@ -111,8 +116,6 @@ export function validateSubBoostTemplateConfig(value: unknown): ValidationResult
     customRuleSets: ruleModel.customRuleSets,
     builtinRuleEdits: ruleModel.builtinRuleEdits,
     proxyGroupNameOverrides: proxyGroupNameOverrides.value,
-    experimentalCnUseCnRuleSet: experimentalCnUseCnRuleSet.value,
-    cnIpNoResolve: cnIpNoResolve.value,
     ruleOrder: ruleOrder.value,
   });
 
@@ -133,6 +136,10 @@ export function validateSubBoostTemplateConfig(value: unknown): ValidationResult
       customRuleSets: ruleModel.customRuleSets,
       builtinRuleEdits: ruleModel.builtinRuleEdits,
       customRules: customRules.value,
+      manualDomains: manualDomains.value,
+      manualProcessRules: manualProcessRules.value,
+      steamViaProxy: steamViaProxy.value ?? true,
+      steamDownloadViaProxy: steamDownloadViaProxy.value ?? false,
       ruleOrder: normalizedRuleOrder,
       ...(cnIpNoResolve.value !== undefined ? { cnIpNoResolve: cnIpNoResolve.value } : {}),
       ...(experimentalCnUseCnRuleSet.value !== undefined
@@ -474,4 +481,40 @@ function parseOptionalLoadBalanceStrategy(
   if (value === undefined) return { ok: true, value: undefined };
   if (!isLoadBalanceStrategy(value)) return invalid(`${field} 无效`);
   return { ok: true, value };
+}
+
+const MANUAL_DOMAIN_GROUPS = ["direct", "proxy", "reject"] as const;
+
+/** 手动域名三表：只收字符串数组，条目按原样保存（归一化在生成期做，便于界面回显原文） */
+function parseManualDomains(
+  value: unknown
+): { ok: true; value: { direct: string[]; proxy: string[]; reject: string[] } } | { ok: false; error: string } {
+  const empty = { direct: [] as string[], proxy: [] as string[], reject: [] as string[] };
+  if (value === undefined) return { ok: true, value: empty };
+  if (!isRecord(value)) return invalid("manualDomains 必须是对象");
+
+  const out = { ...empty };
+  for (const group of MANUAL_DOMAIN_GROUPS) {
+    const list = value[group];
+    if (list === undefined) continue;
+    const parsed = parseStringList(list, `manualDomains.${group}`);
+    if (!parsed.ok) return parsed;
+    out[group] = parsed.value;
+  }
+  return { ok: true, value: out };
+}
+
+function parseStringList(
+  value: unknown,
+  field: string
+): { ok: true; value: string[] } | { ok: false; error: string } {
+  if (value === undefined) return { ok: true, value: [] };
+  if (!Array.isArray(value)) return invalid(`${field} 必须是数组`);
+  const out: string[] = [];
+  for (const item of value) {
+    if (typeof item !== "string") return invalid(`${field} 只能包含字符串`);
+    const trimmed = item.trim();
+    if (trimmed) out.push(trimmed);
+  }
+  return { ok: true, value: out };
 }

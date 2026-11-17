@@ -1,3 +1,4 @@
+import { normalizeManualDomainList, normalizeManualProcessList } from "@subboost/core/rules/manual-domains";
 import type { GenerateOptions } from "@subboost/core/generator";
 import { normalizePersistedRuleOrder } from "@subboost/core/generator/rules";
 import type { DialerProxyGroup } from "@subboost/core/types/template-config";
@@ -372,15 +373,12 @@ export function buildGenerateOptionsFromConfig(
   const proxyGroupNameOverrides = normalizeProxyGroupNameOverrides(config.proxyGroupNameOverrides);
   const listenerPorts = normalizeListenerPorts(config.listenerPorts);
   const ruleOrder = normalizePersistedRuleOrder({
-    // 与生成时一致：没写的开关按模板默认值，否则依赖它们的 key（实验性 cn 规则）会被当成无效 key 丢掉
     enabledModules: enabledGroups ?? buildDefaultUserConfig(template).enabledGroups,
     customProxyGroups,
     customRules: customRules || [],
     customRuleSets,
     builtinRuleEdits,
     proxyGroupNameOverrides,
-    experimentalCnUseCnRuleSet: experimentalCnUseCnRuleSet ?? DEFAULT_SUBBOOST_CONFIG.experimentalCnUseCnRuleSet,
-    cnIpNoResolve,
     ruleOrder: normalizeProxyGroupOrder(config.ruleOrder),
   });
 
@@ -388,6 +386,22 @@ export function buildGenerateOptionsFromConfig(
     ...(enabledGroups ? { enabledGroups } : {}),
     ...(enabledRules ? { enabledRules } : {}),
     ...(customRules ? { customRules } : {}),
+    ...(isRecord(config.manualDomains)
+      ? {
+          manualDomains: {
+            direct: normalizeManualDomainList(config.manualDomains.direct),
+            proxy: normalizeManualDomainList(config.manualDomains.proxy),
+            reject: normalizeManualDomainList(config.manualDomains.reject),
+          },
+        }
+      : {}),
+    ...(Array.isArray(config.manualProcessRules)
+      ? { manualProcessRules: normalizeManualProcessList(config.manualProcessRules) }
+      : {}),
+    ...(typeof config.steamViaProxy === "boolean" ? { steamViaProxy: config.steamViaProxy } : {}),
+    ...(typeof config.steamDownloadViaProxy === "boolean"
+      ? { steamDownloadViaProxy: config.steamDownloadViaProxy }
+      : {}),
     ...(ruleOrder.length > 0 ? { ruleOrder } : {}),
     ...(dnsYaml !== undefined ? { dnsYaml } : {}),
     ...(ruleProviderBaseUrl ? { ruleProviderBaseUrl } : {}),

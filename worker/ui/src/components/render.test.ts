@@ -19,7 +19,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.20.0" },
+  app: { name: "SubBoost Lite", version: "0.23.0" },
   sources: [
     {
       id: "s1",
@@ -90,7 +90,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.20.0");
+    expect(html).toContain("v0.23.0");
     expect(html).toContain("content");
   });
 
@@ -460,7 +460,7 @@ describe("admin UI rendering", () => {
     expect(html).not.toContain("https://worker.example.com/sub/tokenvalue");
   });
 
-  it("renders the config rules section as the final rule list", () => {
+  it("renders the config rules section as script-style sections", () => {
     const html = renderToStaticMarkup(
       React.createElement(ConfigPanel, {
         state: STATE,
@@ -475,12 +475,20 @@ describe("admin UI rendering", () => {
     // 规则与高级 JSON 是同一页上的两个子页
     expect(html).toContain('aria-label="生成配置分区"');
     expect(html).toContain("高级 JSON");
-    expect(html).toContain("分流组");
-    expect(html).toContain("规则顺序");
-    // 列表就是最终规则：带行号、生成文本，MATCH 固定在最后
-    expect(html).toContain("RULE-SET,category-ads-all,🛑 广告拦截");
-    expect(html).toContain("MATCH,🐟 漏网之鱼");
-    expect(html).toContain('aria-label="启用 广告域名"');
+    // 覆写脚本分区：三份手动域名清单 + 进程规则 + Steam 开关 + 自定义规则 + 规则集
+    expect(html).toContain("手动域名规则");
+    expect(html).toContain("直连域名");
+    expect(html).toContain("代理域名");
+    expect(html).toContain("拦截域名");
+    expect(html).toContain('aria-label="添加直连域名"');
+    expect(html).toContain("手动进程规则");
+    expect(html).toContain("Steam 路由");
+    expect(html).toContain('aria-label="自定义完整规则"');
+    expect(html).toContain("RULE-SET,广告集合_rules");
+    expect(html).toContain("内置 · 只读");
+    // 最终规则预览默认收起，不渲染规则行
+    expect(html).toContain("最终规则预览");
+    expect(html).not.toContain("MATCH,手动选择");
     // 没有修改时不挂载保存条
     expect(html).not.toContain("data-config-save-bar");
   });
@@ -497,7 +505,7 @@ describe("admin UI rendering", () => {
     );
     expect(html).toContain('aria-label="生成配置 JSON"');
     expect(html).toContain("mixedPort");
-    expect(html).not.toContain("规则顺序");
+    expect(html).not.toContain("手动域名规则");
   });
 });
 

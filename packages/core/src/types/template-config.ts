@@ -1,3 +1,4 @@
+import type { ManualDomains } from "@subboost/core/rules/manual-domains";
 import type {
   BuiltinRuleEdits,
   CustomProxyGroup,
@@ -33,6 +34,10 @@ export type SubBoostTemplateConfig = {
   customRuleSets: CustomRuleSet[];
   builtinRuleEdits?: BuiltinRuleEdits;
   customRules: CustomRule[];
+  manualDomains?: ManualDomains;
+  manualProcessRules?: string[];
+  steamViaProxy?: boolean;
+  steamDownloadViaProxy?: boolean;
   ruleOrder?: string[];
   cnIpNoResolve?: boolean;
   experimentalCnUseCnRuleSet?: boolean;

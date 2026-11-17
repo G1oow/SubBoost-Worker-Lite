@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.20.0" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.23.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -230,7 +230,7 @@ describe("router config", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           config: {
-            enabledGroups: ["select", "auto", "final"],
+            enabledGroups: ["select", "auto"],
             customRules: [{ id: "r1", type: "DOMAIN-SUFFIX", value: "example.org", target: "DIRECT" }],
           },
         }),
@@ -242,7 +242,18 @@ describe("router config", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.json()).toMatchObject({
       nodeCount: 0,
-      rules: ["DOMAIN-SUFFIX,example.org,DIRECT", "MATCH,🐟 漏网之鱼"],
+      rules: [
+        "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve",
+        "IP-CIDR,::1/128,DIRECT,no-resolve",
+        "PROCESS-PATH-REGEX,(?i)leigod,DIRECT",
+        "PROCESS-NAME,r5apex_dx12.exe,DIRECT",
+        "PROCESS-NAME,start_protected_game.exe,DIRECT",
+        "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
+        "DOMAIN-SUFFIX,example.org,DIRECT",
+        "GEOSITE,geolocation-!cn,自动选择",
+        "GEOIP,telegram,自动选择",
+        "MATCH,手动选择",
+      ],
     });
 
     const state = (await (await route(apiRequest("/api/state"), h.env, h.deps)).json()) as {
