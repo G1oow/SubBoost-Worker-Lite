@@ -3,7 +3,8 @@
  *
  * 各客户端公开使用的自定义 scheme 并不统一，这里只放经过实际使用的形态：
  * 管理端页面直接把这里的深链放进 `<a href>`（点击本身就是用户手势）；服务端的
- * `/sub/<token>?target=…` 也会 302 到同一份深链，供分享出去的链接使用。
+ * `/sub/<token>?target=…` 给浏览器一个带按钮的落地页（见 `./import-landing`），
+ * 只对非浏览器请求 302 到同一份深链。
  *
  * 编码约定（踩过的坑，改之前先读）：
  * - 需要带 URL 的客户端一律 `encodeURIComponent`；订阅名走 fragment（`#name`）时同样编码，
@@ -47,8 +48,14 @@ export function parseImportTarget(value: string | null | undefined): ImportTarge
   const normalized = value.trim().toLowerCase();
   return IMPORT_TARGET_IDS.has(normalized) ? (normalized as ImportTargetId) : null;
 }
-/** 订阅名来自用户输入：先剥掉 CR/LF（防 Location 头注入），再交给 encodeURIComponent */
-function sanitizeName(name: string): string {
+
+/** 客户端展示名；未知 id 回退成 id 本身，调用方不必再判空 */
+export function importTargetLabel(id: ImportTargetId): string {
+  return IMPORT_TARGETS.find((target) => target.id === id)?.label ?? id;
+}
+
+/** 订阅名来自用户输入：先剥掉 CR/LF（防 Location 头注入与 HTML 注入），再交给编码 */
+export function sanitizeName(name: string): string {
   return name.replace(/[\r\n]+/g, " ").trim().slice(0, MAX_NAME_LENGTH);
 }
 

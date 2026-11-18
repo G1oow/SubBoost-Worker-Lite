@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.23.0" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.23.1" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -992,6 +992,73 @@ describe("router one-click import", () => {
     expect(location.startsWith("sing-box://import-remote-profile?url=")).toBe(true);
     expect(decodeURIComponent(location)).toContain(`https://worker.example.com/s/${code}`);
     expect(decodeURIComponent(location)).toContain("#ageprofile");
+  });
+
+  it("浏览器请求给可点击的落地页，而不是跨 scheme 的 302（issue #60）", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?target=clash`, {
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,*/*;q=0.8",
+        },
+      }),
+      h.env,
+      h.deps
+    );
+
+    const plain = `https://worker.example.com/sub/${token}`;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("location")).toBeNull();
+    expect(response.headers.get("content-type")).toBe("text/html;charset=utf-8");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(response.headers.get("x-robots-tag")).toBe("noindex");
+
+    const html = await response.text();
+    // 主按钮必须是客户端深链（用户手势），明文链接要自动去掉 target
+    expect(html).toContain(
+      `<a class="open" href="clash://install-config?url=${encodeURIComponent(plain)}"`
+    );
+    expect(html).toContain(`<code>${plain}</code>`);
+    expect(html).not.toContain("target=");
+    expect(html).toContain("ageprofile");
+  });
+
+  it("落地页对 HEAD 只回头部，不带 body", async () => {
+    const h = createHarness();
+    const { token } = await seedSubscription(h);
+    const response = await route(
+      new Request(`https://worker.example.com/sub/${token}?target=stash`, {
+        method: "HEAD",
+        headers: { accept: "text/html" },
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toBe("text/html;charset=utf-8");
+    expect(await response.text()).toBe("");
+  });
+
+  it("短链的落地页把短链本身交给客户端", async () => {
+    const h = createHarness();
+    const { dto } = await seedSubscription(h);
+    const withShort = await h.store.createShortLink(dto.id, "https://worker.example.com");
+    const code = withShort?.shortLink?.split("/s/")[1] as string;
+
+    const response = await route(
+      new Request(`https://worker.example.com/s/${code}?target=hiddify`, {
+        headers: { accept: "text/html" },
+      }),
+      h.env,
+      h.deps
+    );
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain(
+      `href="hiddify://import/${encodeURIComponent(`https://worker.example.com/s/${code}`)}#ageprofile"`
+    );
+    expect(html).toContain(`<code>https://worker.example.com/s/${code}</code>`);
   });
 
   it("falls back to the normal subscription output for an unknown target", async () => {
