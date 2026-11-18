@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   IMPORT_TARGETS,
   buildImportDeepLink,
+  importTargetLabel,
   parseImportTarget,
   type ImportTargetId,
 } from "./import-targets";
@@ -29,6 +30,14 @@ describe("parseImportTarget", () => {
     for (const target of IMPORT_TARGETS) {
       expect(target.label.length).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("importTargetLabel", () => {
+  it("每个客户端都返回中文之外的展示名，未知 id 回退成 id", () => {
+    expect(importTargetLabel("clash")).toBe("Clash / Mihomo");
+    expect(importTargetLabel("v2rayng")).toBe("v2rayNG");
+    expect(importTargetLabel("unknown" as ImportTargetId)).toBe("unknown");
   });
 });
 

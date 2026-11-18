@@ -7,6 +7,7 @@ import {
   parseImportTarget,
   type ImportTargetId,
 } from "@subboost/server-core/subscription/import-targets";
+import { buildImportLandingPage } from "@subboost/server-core/subscription/import-landing";
 import pkg from "../package.json";
 import { ageCapabilities, resolveAgeConfig, type AgeResolution } from "./age";
 import { requireAdmin } from "./auth";
@@ -500,6 +501,23 @@ function textResponse(
   return withSecurityHeaders(new Response(omitBody ? null : body, { status, headers }));
 }
 
+/** 落地页用：`noindex` + 不缓存，避免分享链接被中间层或搜索引擎留存 */
+function htmlResponse(body: string, omitBody = false): Response {
+  const headers = new Headers({
+    "content-type": "text/html;charset=utf-8",
+    "x-robots-tag": "noindex",
+  });
+  return withSecurityHeaders(new Response(omitBody ? null : body, { status: 200, headers }));
+}
+
+/**
+ * 只有浏览器会带 `text/html` 的 Accept：这类请求要的是能点的页面。
+ * 订阅客户端与 curl 的 Accept 里没有 text/html，继续走 302 深链，保持原有行为。
+ */
+function prefersHtml(request: Request): boolean {
+  return (request.headers.get("accept") ?? "").includes("text/html");
+}
+
 /**
  * If-None-Match 匹配：支持弱校验前缀（W/）、逗号分隔的多值与 "*"。
  */
@@ -520,6 +538,8 @@ function parseSubscriptionFormat(value: string | null): SubscriptionFormat {
 }
 
 type SubscriptionEntry = {
+  /** 应用名（`env.APP_NAME`），落地页页头用 */
+  appName: string;
   age: AgeResolution;
   format: SubscriptionFormat;
   target: ImportTargetId | null;
@@ -546,8 +566,7 @@ async function handleSubscription(request: Request, entry: SubscriptionEntry): P
 
   if (entry.target) {
     // 一键导入只做「订阅存在 + 拼深链」，不生成 YAML、不做加密。
-    // 管理端的一键导入按钮直接给客户端 scheme，不走这里；这条 302 是给分享出去
-    // 的 `?target=` 链接用的，浏览器对「跨 scheme 重定向」这一跳并不总是放行。
+    // 管理端的一键导入按钮直接给客户端 scheme，不走这里；这里服务分享出去的 `?target=` 链接。
     let stored: StoredSubscription | null;
     try {
       stored = await entry.findStored();
@@ -558,10 +577,23 @@ async function handleSubscription(request: Request, entry: SubscriptionEntry): P
 
     const plainUrl = new URL(request.url);
     plainUrl.searchParams.delete("target");
-    const location = buildImportDeepLink(entry.target, {
-      url: plainUrl.toString(),
-      name: stored.name,
-    });
+    const link = plainUrl.toString();
+
+    // 浏览器直接打开这条链接时不能 302：跨 scheme 的导航必须有用户手势，否则被静默拦掉，
+    // 页面停在空白（issue #60）。给浏览器一个可点击的落地页，302 只留给非浏览器请求。
+    if (prefersHtml(request)) {
+      return htmlResponse(
+        buildImportLandingPage({
+          appName: entry.appName,
+          link,
+          name: stored.name,
+          target: entry.target,
+        }),
+        isHead
+      );
+    }
+
+    const location = buildImportDeepLink(entry.target, { url: link, name: stored.name });
     return withSecurityHeaders(
       new Response(null, {
         status: 302,
@@ -683,6 +715,7 @@ export async function route(
       const pipelineDeps = buildPipelineDeps(env, deps);
       return await handleSubscription(request, {
         age: resolveAgeConfig(env),
+        appName: appName(env),
         format: parseSubscriptionFormat(url.searchParams.get("format")),
         target: parseImportTarget(url.searchParams.get("target")),
         resolve: () => getOrGenerateSubscription(pipelineDeps, token),
@@ -704,6 +737,7 @@ export async function route(
       const pipelineDeps = buildPipelineDeps(env, deps);
       return await handleSubscription(request, {
         age: resolveAgeConfig(env),
+        appName: appName(env),
         format: parseSubscriptionFormat(url.searchParams.get("format")),
         target: parseImportTarget(url.searchParams.get("target")),
         resolve: () => getOrGenerateSubscriptionByShortCode(pipelineDeps, code),
