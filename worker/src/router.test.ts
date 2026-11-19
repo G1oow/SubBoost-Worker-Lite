@@ -82,10 +82,74 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "0.25.0" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "1.4.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+});
+
+describe("router update check", () => {
+  /**
+   * 换掉 pipeline 里的 fetchText，模拟上游 package.json 的不同回应。
+   *
+   * 上游版本号固定用 99.x：`check-version.cjs` 会按根 package.json 改写
+   * `version: "x.y.z"` 形式的字面量，写成当前版本号的话每次发版这条用例都会翻红。
+   */
+  const UPSTREAM_VERSION = "99.0.0";
+
+  function harnessWithUpstream(body: string, status = 200) {
+    const h = createHarness();
+    const pipeline: PipelineDeps = {
+      ...h.deps.pipeline,
+      fetchText: (async () => ({ status, headers: {}, text: body, finalUrl: "" })) as unknown as PipelineDeps["fetchText"],
+    };
+    return { ...h, deps: { pipeline } };
+  }
+
+  it("reports the upstream version when it is newer", async () => {
+    const h = harnessWithUpstream(JSON.stringify({ version: UPSTREAM_VERSION }));
+    const response = await route(apiRequest("/api/update-check"), h.env, h.deps);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    // 当前版本号直接来自 package.json，这里只断言形状，避免发版时跟着改字面量
+    expect(String(body.currentVersion)).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(body).toMatchObject({ latestVersion: UPSTREAM_VERSION, updateAvailable: true });
+    expect(String(body.releaseUrl)).toContain("/releases");
+    expect(body.checkedAt).toBe("2026-10-12T00:00:00.000Z");
+    expect(response.headers.get("cache-control")).toBe("no-store");
+  });
+
+  it("caches the result so a second request does not refetch", async () => {
+    const h = harnessWithUpstream(JSON.stringify({ version: UPSTREAM_VERSION }));
+    await route(apiRequest("/api/update-check"), h.env, h.deps);
+    // 第二次把上游换成会抛错的实现：命中缓存时结果不受影响
+    const failing: PipelineDeps = {
+      ...h.deps.pipeline,
+      fetchText: (async () => {
+        throw new Error("upstream down");
+      }) as unknown as PipelineDeps["fetchText"],
+    };
+    const response = await route(apiRequest("/api/update-check"), h.env, { pipeline: failing });
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body.latestVersion).toBe(UPSTREAM_VERSION);
+    expect(h.kv.has("meta:update-check")).toBe(true);
+    expect(h.kv.expirationTtls.get("meta:update-check")).toBe(21600);
+  });
+
+  it("stays quiet when upstream cannot be read", async () => {
+    const h = harnessWithUpstream("", 503);
+    const response = await route(apiRequest("/api/update-check"), h.env, h.deps);
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ latestVersion: null, updateAvailable: false, checkedAt: null });
+    expect(h.kv.has("meta:update-check")).toBe(false);
+  });
+
+  it("requires the admin token", async () => {
+    const h = harnessWithUpstream(JSON.stringify({ version: UPSTREAM_VERSION }));
+    const response = await route(apiRequest("/api/update-check", {}, null), h.env, h.deps);
+    expect(response.status).toBe(401);
   });
 });
 

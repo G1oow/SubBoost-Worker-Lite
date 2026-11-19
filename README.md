@@ -13,7 +13,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/platform-Cloudflare%20Workers%20%2B%20KV-4B5563?style=flat-square" alt="平台：Cloudflare Workers + KV">
-  <img src="https://img.shields.io/badge/version-0.25.0-F59E0B?style=flat-square" alt="Version 0.25.0">
+  <img src="https://img.shields.io/badge/version-1.4.0-F59E0B?style=flat-square" alt="Version 1.4.0">
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0--only-22C55E?style=flat-square" alt="License: AGPL-3.0-only"></a>
   <img src="https://img.shields.io/badge/Node-%3E%3D22.23.4-3776AB?style=flat-square" alt="Node 版本要求">
 </p>
@@ -31,6 +31,7 @@
 | 抓取上游有防护 | 协议与凭据校验、私网网段拦截、重定向逐跳复核（默认上限 3 跳、超时 15 秒、单次最多 10 MB） |
 | 交付形态可选 | 明文 YAML、age 密文（`?format=age`、`age-armor`）、客户端深链（`?target=`），或 8 字符短链 `/s/<code>` |
 | 管理端就在 Worker 里 | token 保护的 SPA：源与订阅管理、刷新状态；分流组、链式代理、规则与规则集可视化编辑，也能直接改 JSON |
+| 版本更新提示 | 页头版本徽章会比对仓库主干上的版本，有新版本时点红点；点 Logo 直达 GitHub 仓库 |
 
 ## 架构
 
