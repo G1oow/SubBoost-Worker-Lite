@@ -13,6 +13,9 @@
   "main": "worker/src/index.ts",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  // 默认以本文件为 vars 的唯一事实来源：deploy 时会覆盖/删除 Dashboard 上未在此声明的纯文本 var。
+  // 置 true 保留 Dashboard 手配的纯文本 var，仅作用于 plain_text / json 绑定。
+  // 不影响 Secret：wrangler deploy 会自动继承既有 Secret 绑定，ADMIN_TOKEN / ENCRYPTION_KEY 不依赖此项。
   "keep_vars": true,
   "assets": {
     "directory": "./worker/dist",
