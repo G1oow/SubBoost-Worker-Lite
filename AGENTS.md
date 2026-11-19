@@ -175,6 +175,40 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 - `0.x.y` 阶段：新功能升 `x`，缺陷修复升 `y`，破坏性变更升 `x` 并写进说明。
 - 不允许把版本号留在一个提交里不变而声称"已完成本次变更"。
 
+### 发布公告（大版本强制）
+
+功能版本必须发布 GitHub Release 公告，tag 与正文一起落地，缺了视为本次任务未完成。
+
+- **大版本** = 版本号最后一段为 `0` 的功能发布（`0.x.0` 与 `1.x.0` 同构，都算）。
+  这类版本必须发 Release。
+- 纯缺陷修复版本（`x.y.z`，`z > 0`）按需，不必每次发。
+- 破坏性变更即使落在修复版本上，也必须发公告，并在正文里单列「升级注意」。
+
+公告正文用中文，按「新增 / 修复 / 变更 / 升级注意」分类，只写用户可见的影响，
+不写内部重构细节。正文同样受下文「脱敏红线」约束。
+
+发布方式（tag 名统一 `v<version>`，与 README 徽章、`package.json` 保持同一版本）：
+
+```powershell
+$version = '1.5.0'
+$notes   = "$env:PI_SCRATCH_DIR\notes\v$version.md"   # 先写成 UTF-8 无 BOM 文件
+
+# --target 必须是完整 SHA：7 位短 SHA 会被 GitHub 以 422 target_commitish invalid 拒绝
+$sha = (git rev-parse 'HEAD^{commit}').Trim()
+
+gh release create "v$version" --target $sha --title "v$version — 一句话主题" --notes-file $notes
+```
+
+两个坑：
+
+- `gh release create` 把**最新创建的那个**标成 Latest。补发历史公告时必须按版本号
+  从旧到新依次创建，否则 Latest 会落在旧版本上。
+- 管理端页头的「新版本提示」比对的是仓库主干 `main` 的 `package.json` 版本
+  （`worker/src/update-check.ts`）。版本号、tag 与 Release 三者漂移时，用户会看到
+  错误的新版本提示，所以公告要和版本号提交一起落。
+
+发布完成后在回复里给出 Release 链接，方便直接核对。
+
 ## 提交规范
 
 - 提交信息用中文，采用 Conventional Commits 前缀：`feat:`、`fix:`、`refactor:`、`docs:`、`test:`、`chore:`。
@@ -348,7 +382,9 @@ node scripts/check-version.cjs --set 0.2.0 --dry-run   # 只预览
 2. 管理端在 `worker/ui/src` 增加组件，复用 `packages/ui` 组件与主题令牌。
 3. 更新类型（`worker/ui/src/lib/types.ts`）。
 4. `npm run version:set -- <新版本>`，再跑必跑校验四项。
-5. 需要时同步 README 截图与文档。
+5. 落到 `x.y.0` 功能版本时，按「版本号规范 → 发布公告」发 Release（缺了不算完成）；
+   修复版本按需。
+6. 需要时同步 README 截图与文档。
 
 只改文档或注释：至少跑 `npm run lint`（含版本与仓库卫生检查）。
 
