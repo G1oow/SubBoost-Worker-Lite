@@ -29,6 +29,9 @@
     /* 仪表板背景光斑：用 radial-gradient 画出柔边，避免 blur 滤镜把绘制面积撑大 */
     --glow-primary: color-mix(in oklab, var(--color-primary-500) 15%, transparent);
     --glow-indigo: color-mix(in oklab, var(--color-indigo-500) 10%, transparent);
+    /* 告警卡（「提醒」）的聚光灯：跟卡片描边、徽标、提示条同属琥珀色系，
+       用品牌蓝紫去打光会和整卡的告警语义打架。 */
+    --glow-warning: color-mix(in oklab, var(--color-amber-500) 20%, transparent);
     --surface: #141414;
     --surface-subtle: #151515;
     --surface-raised: #1a1a1a;
@@ -311,6 +314,8 @@
     --page-glow: radial-gradient(640px 240px at 46% 0%, rgba(37, 99, 235, 0.14), transparent 72%),
       radial-gradient(460px 220px at 62% 6%, rgba(16, 185, 129, 0.1), transparent 70%);
     --page-pattern: radial-gradient(rgba(37, 99, 235, 0.14) 1px, transparent 1.3px);
+    /* 白底上琥珀色的可见度低，浓度比深色块高一档，否则光斑几乎看不见 */
+    --glow-warning: color-mix(in oklab, var(--color-amber-500) 26%, transparent);
     --surface: #fff;
     --surface-subtle: #fff;
     --surface-raised: #fff;

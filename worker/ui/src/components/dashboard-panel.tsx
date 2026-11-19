@@ -314,7 +314,7 @@ export function DashboardPanel({
       </div>
 
       <div className="grid gap-4 sm:gap-6 lg:grid-cols-2">
-        <Card className="animate-rise">
+        <SpotlightCard className="animate-rise p-4 sm:p-6">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2 text-base">
@@ -356,9 +356,9 @@ export function DashboardPanel({
               </MotionList>
             )}
           </CardContent>
-        </Card>
+        </SpotlightCard>
 
-        <Card className="animate-rise">
+        <SpotlightCard className="animate-rise p-4 sm:p-6">
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <div className="space-y-1">
               <CardTitle className="flex items-center gap-2 text-base">
@@ -467,11 +467,14 @@ export function DashboardPanel({
               </Button>
             ) : null}
           </CardContent>
-        </Card>
+        </SpotlightCard>
       </div>
 
       {warnings.length > 0 ? (
-        <Card className="animate-rise border-amber-500/30">
+        <SpotlightCard
+          className="animate-rise border-amber-500/30 p-4 hover:border-warning-note-border sm:p-6"
+          glowColor="var(--glow-warning)"
+        >
           <CardHeader className="flex flex-row items-center justify-between gap-4">
             <CardTitle className="flex items-center gap-2 text-base">
               <Icon icon={TriangleAlert} size="md" className="text-warning-note-fg" />
@@ -498,10 +501,10 @@ export function DashboardPanel({
               ))}
             </MotionList>
           </CardContent>
-        </Card>
+        </SpotlightCard>
       ) : null}
 
-      <Card className="animate-rise">
+      <SpotlightCard className="animate-rise p-4 sm:p-6">
         <CardHeader className="flex flex-row items-center justify-between gap-4">
           <CardTitle className="flex items-center gap-2 text-base">
             <Icon icon={Activity} size="md" className="text-primary-300" />
@@ -522,7 +525,7 @@ export function DashboardPanel({
             调整生成配置
           </Button>
         </CardContent>
-      </Card>
+      </SpotlightCard>
     </div>
   );
 }
