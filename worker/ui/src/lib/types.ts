@@ -1,8 +1,9 @@
 // 管理页与 Worker API 之间的 DTO 形状（对应 worker/src/types.ts 与 worker/src/dashboard.ts）
-export type SourceKind = "remote" | "manual";
-
 /** 节点显示名覆盖表：key 是节点内容指纹，value 是用户设置的显示名 */
 export type NodeRenames = Record<string, string>;
+
+
+export type SourceKind = "remote" | "manual";
 
 export type SourceDto = {
   id: string;
@@ -13,6 +14,8 @@ export type SourceDto = {
   enabled: boolean;
   userAgent?: string;
   nodeRenames?: NodeRenames;
+  /** 批量改名规则（源级）：生成时求值，优先级低于 nodeRenames */
+  nodeNameTemplate?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -95,6 +98,7 @@ export type SourceInput = {
   enabled?: boolean;
   userAgent?: string;
   nodeRenames?: NodeRenames;
+  nodeNameTemplate?: string;
 };
 
 /** 解析出的节点摘要（名称 + 协议 + 身份字段） */
@@ -106,6 +110,8 @@ export type NodeSummary = {
   server?: string;
   port?: number;
   renamed: boolean;
+  /** 名字是谁改的：手动逐节点改名，还是命名模板 */
+  renameSource?: "manual" | "template";
 };
 
 export type ParseNodesResponse = {
@@ -122,6 +128,7 @@ export type SourceNodesResponse = {
     kind: SourceKind;
     enabled: boolean;
     nodeRenames: NodeRenames;
+    nodeNameTemplate?: string;
   };
   fetchedAt: string | null;
   nodeCount: number;

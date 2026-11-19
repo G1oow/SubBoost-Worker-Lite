@@ -313,6 +313,29 @@ describe("generateSubscription", () => {
     const result = await generateSubscription(h.deps, sub!, { onDemand: false });
     expect(result).toEqual({ kind: "no-nodes" });
   });
+
+  it("writes rename-rule output into the generated proxies", async () => {
+    h.deps.fetchText = (async () =>
+      okResponse(base64Subscription([ssNode("NodeA", 8388), ssNode("NodeB", 8389)]))) as unknown as PipelineDeps["fetchText"];
+
+    await h.store.saveSources([
+      {
+        name: "a",
+        kind: "remote",
+        url: "https://a.example.com/sub",
+        nodeNameTemplate: "{name} · {port}",
+      },
+    ]);
+    const { dto } = await h.store.createSubscription({ name: "all", sourceIds: [] });
+    const sub = await h.store.findSubscriptionByToken(dto.link.split("/sub/")[1]);
+    const result = await generateSubscription(h.deps, sub!, { onDemand: true });
+    expect(result.kind).toBe("ok");
+    if (result.kind !== "ok") return;
+    expect(proxiesFrom(result.cache.yaml).map((proxy) => proxy.name)).toEqual([
+      "NodeA · 8388",
+      "NodeB · 8389",
+    ]);
+  });
 });
 
 describe("previewConfig", () => {

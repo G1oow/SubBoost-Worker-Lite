@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppShell } from "./app-shell";
 import { ConfigPanel } from "./config-panel";
 import { DashboardPanel } from "./dashboard-panel";
+import { NodeNameTemplateEditor } from "./node-name-template-editor";
 import { NodeRenameEditor } from "./node-rename-editor";
 import { SourcesPanel } from "./sources-panel";
 import { SourceNodesInline } from "./source-nodes-inline";
@@ -19,7 +20,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.23.2" },
+  app: { name: "SubBoost Lite", version: "0.24.0" },
   sources: [
     {
       id: "s1",
@@ -90,7 +91,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.23.2");
+    expect(html).toContain("v0.24.0");
     expect(html).toContain("content");
   });
 
@@ -586,6 +587,23 @@ describe("dashboard and node rename rendering", () => {
     expect(html).toContain("运行正常");
   });
 
+  it("puts every dashboard card on the spotlight surface", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DashboardPanel, {
+        state: STATE,
+        stats: STATS,
+        onRefresh: noopAsync,
+        onNavigate: () => {},
+      })
+    );
+    // 概览卡 + 4 张指标卡 + 协议分布 + 源健康 + 快捷操作，每张卡一个光斑层。
+    // 只数 spotlight 层不够精确，先按卡片标题定位再核对总数，避免漏掉新加的卡。
+    expect(html.match(/data-testid="spotlight-layer"/g) ?? []).toHaveLength(8);
+    for (const title of ["协议分布", "源健康", "快捷操作"]) {
+      expect(html).toContain(title);
+    }
+  });
+
   it("falls back to the state data when dashboard stats are unavailable", () => {
     const html = renderToStaticMarkup(
       React.createElement(DashboardPanel, {
@@ -628,6 +646,83 @@ describe("dashboard and node rename rendering", () => {
     );
     expect(html).toContain("已改名 1 个");
     expect(html).toContain("原名 香港 01");
+  });
+
+  it("marks rule-renamed nodes with a source badge", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeRenameEditor, {
+        nodes: [
+          {
+            key: "0123456789abcdef",
+            name: "[ss] 香港 01",
+            originName: "香港 01",
+            type: "ss",
+            renamed: true,
+            renameSource: "template",
+          },
+        ],
+        renames: {},
+        onChange: () => {},
+      })
+    );
+    expect(html).toContain("模板");
+    expect(html).toContain("原名 香港 01");
+  });
+
+  it("renders the naming template editor with variable buttons and a live preview", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeNameTemplateEditor, {
+        template: "{protocol}-{port} {name}",
+        onChange: () => {},
+        nodes: [
+          { key: "0123456789abcdef", name: "香港 01", originName: "香港 01", type: "ss", port: 8388, renamed: false },
+          { key: "fedcba9876543210", name: "日本 02", originName: "日本 02", type: "vless", port: 443, renamed: false },
+        ],
+      })
+    );
+    expect(html).toContain("命名模板");
+    // 七个变量按钮
+    expect(html).toContain("代理协议");
+    expect(html).toContain("IP");
+    expect(html).toContain("端口");
+    expect(html).toContain("服务器");
+    expect(html).toContain("节点名");
+    expect(html).toContain("源名称");
+    expect(html).toContain("地区国旗");
+    // 内联预览：所有节点都改名，并显示前后对比
+    expect(html).toContain("改名 2 个节点");
+    expect(html).toContain("ss-8388 香港 01");
+  });
+
+  it("renders an empty state when the template is blank", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeNameTemplateEditor, { template: "", onChange: () => {} })
+    );
+    expect(html).toContain("还没有命名模板");
+  });
+
+  it("flags an unknown template variable inline", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeNameTemplateEditor, {
+        template: "{protocol} {protocl}",
+        onChange: () => {},
+      })
+    );
+    expect(html).toContain("{protocl}");
+    expect(html).toContain("可用变量");
+  });
+
+  it("tells which nodes have an empty template variable", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeNameTemplateEditor, {
+        template: "{ip} {name}",
+        onChange: () => {},
+        nodes: [
+          { key: "0123456789abcdef", name: "香港 01", originName: "香港 01", type: "ss", server: "example.org", renamed: false },
+        ],
+      })
+    );
+    expect(html).toContain("{ip} 为空");
   });
 });
 
@@ -733,5 +828,19 @@ describe("dashboard source nodes expansion", () => {
     expect(html).toContain("再显示 5 个");
     expect(html).toContain("节点 29");
     expect(html).not.toContain("节点 30");
+  });
+
+  it("renders the source name and flag through the template preview", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(NodeNameTemplateEditor, {
+        template: "{flag} {sourceName} {name}",
+        onChange: () => {},
+        sourceName: "机场 A",
+        nodes: [
+          { key: "fedcba9876543210", name: "JP 东京 01", originName: "JP 东京 01", type: "vless", renamed: false },
+        ],
+      })
+    );
+    expect(html).toContain("🇯🇵 机场 A JP 东京 01");
   });
 });

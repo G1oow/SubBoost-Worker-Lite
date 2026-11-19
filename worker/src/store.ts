@@ -93,10 +93,14 @@ export function createStore(env: Env) {
     const stored = await listStoredSources();
     return stored.map((item) => ({
       id: item.id,
+      name: item.name,
       kind: item.kind,
       enabled: item.enabled,
       ...(item.nodeRenames && Object.keys(item.nodeRenames).length > 0
         ? { nodeRenames: item.nodeRenames }
+        : {}),
+      ...(item.nodeNameTemplate && item.nodeNameTemplate.length > 0
+        ? { nodeNameTemplate: item.nodeNameTemplate }
         : {}),
     }));
   }
@@ -122,6 +126,9 @@ export function createStore(env: Env) {
       ...(stored.userAgent ? { userAgent: stored.userAgent } : {}),
       ...(stored.nodeRenames && Object.keys(stored.nodeRenames).length > 0
         ? { nodeRenames: stored.nodeRenames }
+        : {}),
+      ...(stored.nodeNameTemplate && stored.nodeNameTemplate.length > 0
+        ? { nodeNameTemplate: stored.nodeNameTemplate }
         : {}),
       createdAt: stored.createdAt,
       updatedAt: stored.updatedAt,
@@ -150,6 +157,8 @@ export function createStore(env: Env) {
       const payload = input.kind === "remote" ? input.url ?? "" : input.manualText ?? "";
       const nodeRenames =
         input.nodeRenames && Object.keys(input.nodeRenames).length > 0 ? input.nodeRenames : undefined;
+      const nodeNameTemplate =
+        input.nodeNameTemplate && input.nodeNameTemplate.length > 0 ? input.nodeNameTemplate : undefined;
       stored.push({
         id,
         name: input.name,
@@ -158,6 +167,7 @@ export function createStore(env: Env) {
         enabled: input.enabled ?? true,
         ...(input.userAgent ? { userAgent: input.userAgent } : {}),
         ...(nodeRenames ? { nodeRenames } : {}),
+        ...(nodeNameTemplate ? { nodeNameTemplate } : {}),
         createdAt: previous?.createdAt ?? now,
         updatedAt: now,
       });

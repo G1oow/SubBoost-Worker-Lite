@@ -10,6 +10,7 @@ import {
   protocolBreakdown,
   sanitizeNodeRenames,
   toNodeSummary,
+  resolveNodeNames,
 } from "./node-renames";
 import { MAX_NODE_RENAMES } from "./types";
 
@@ -93,7 +94,7 @@ describe("node summaries", () => {
 
   it("limits the number of returned summaries", () => {
     const nodes = Array.from({ length: 5 }, (_, index) => ssNode(`n${index}`, { port: 8000 + index }));
-    expect(collectNodeSummaries(nodes, undefined, 2)).toHaveLength(2);
+    expect(collectNodeSummaries(nodes, undefined, undefined, undefined, 2)).toHaveLength(2);
   });
 
   it("counts renamed nodes and ignores identity mismatches", () => {
@@ -152,5 +153,54 @@ describe("protocolBreakdown", () => {
 
   it("returns an empty list for no nodes", () => {
     expect(protocolBreakdown([])).toEqual([]);
+  });
+});
+
+describe("resolveNodeNames / 命名模板", () => {
+  const template = "{protocol}-{port} {name}";
+
+  it("applies the template when there are no manual renames", () => {
+    const node = { ...ssNode("香港 01"), type: "vless" } as unknown as ParsedNode;
+    const resolved = resolveNodeNames([node], undefined, template);
+    expect(resolved.get(nodeRenameKey(node))).toEqual({
+      name: "vless-8388 香港 01",
+      source: "template",
+    });
+  });
+
+  it("lets a manual rename win over the template", () => {
+    const node = { ...ssNode("香港 01"), type: "vless" } as unknown as ParsedNode;
+    const resolved = resolveNodeNames([node], { [nodeRenameKey(node)]: "我起的名" }, template);
+    expect(resolved.get(nodeRenameKey(node))).toEqual({ name: "我起的名", source: "manual" });
+  });
+
+  it("keeps template output from colliding with a manual name", () => {
+    const a = { ...ssNode("A"), type: "vless" } as unknown as ParsedNode;
+    const b = { ...ssNode("B", { port: 9001 }), type: "vless" } as unknown as ParsedNode;
+    const resolved = resolveNodeNames([a, b], { [nodeRenameKey(a)]: "vless" }, "{protocol}");
+    expect(resolved.get(nodeRenameKey(a))).toEqual({ name: "vless", source: "manual" });
+    expect(resolved.get(nodeRenameKey(b))).toEqual({ name: "vless (2)", source: "template" });
+  });
+
+  it("ignores a template that renders the original name", () => {
+    const node = ssNode("香港 01");
+    // `{name}` 只回填原名，结果与原名相同，不该算作已改名
+    expect(resolveNodeNames([node], undefined, "{name}").size).toBe(0);
+  });
+
+  it("exposes the rename source in node summaries", () => {
+    const node = { ...ssNode("香港 01"), type: "vless" } as unknown as ParsedNode;
+    const summary = toNodeSummary(node, undefined, template);
+    expect(summary).toMatchObject({
+      name: "vless-8388 香港 01",
+      originName: "香港 01",
+      renamed: true,
+      renameSource: "template",
+    });
+  });
+
+  it("counts template renames in countRenamedNodes", () => {
+    const node = { ...ssNode("香港 01"), type: "vless" } as unknown as ParsedNode;
+    expect(countRenamedNodes([node], undefined, template)).toBe(1);
   });
 });
