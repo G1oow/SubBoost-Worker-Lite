@@ -25,6 +25,7 @@ import {
 } from "./pipeline";
 import { buildDashboardStats } from "./dashboard";
 import { collectNodeSummaries, countRenamedNodes, sanitizeNodeRenames } from "./node-renames";
+import { validateNodeNameTemplate } from "@subboost/core/node-name-template";
 import { fetchText } from "./safe-fetch";
 import { resolveDefaultUserAgent } from "./sources";
 import { validatePublicHttpUrl } from "./ssrf";
@@ -148,6 +149,7 @@ async function validateSources(input: unknown): Promise<SourceInput[]> {
     }
 
     const nodeRenames = sanitizeNodeRenames(item.nodeRenames);
+    const nodeNameTemplate = readNodeNameTemplate(item.nodeNameTemplate, prefix);
     if (kind === "remote") {
       const url = stringField(item.url).trim();
       const validation = validatePublicHttpUrl(url);
@@ -162,6 +164,7 @@ async function validateSources(input: unknown): Promise<SourceInput[]> {
         enabled: item.enabled !== false,
         ...(userAgent ? { userAgent } : {}),
         ...(nodeRenames ? { nodeRenames } : {}),
+        ...(nodeNameTemplate ? { nodeNameTemplate } : {}),
       });
       continue;
     }
@@ -189,10 +192,24 @@ async function validateSources(input: unknown): Promise<SourceInput[]> {
       enabled: item.enabled !== false,
       ...(userAgent ? { userAgent } : {}),
       ...(nodeRenames ? { nodeRenames } : {}),
+      ...(nodeNameTemplate ? { nodeNameTemplate } : {}),
     });
   }
 
   return sources;
+}
+
+
+/**
+ * 读取并校验客户端提交的命名模板。
+ *
+ * 与 `sanitizeNodeRenames` 的区别：模板里可能拼错变量名，写坏了不能静默吞掉——
+ * 否则用户以为保存成功、生成出来的名字却不对。这里把校验错误翻成 400 并指出哪个变量。
+ */
+function readNodeNameTemplate(input: unknown, prefix: string): string | undefined {
+  const result = validateNodeNameTemplate(input);
+  if (!result.ok) throw new ApiError(400, "VALIDATION_ERROR", `${prefix}${result.message}`);
+  return result.template;
 }
 
 function requireObjectBody(body: unknown): Record<string, unknown> {
@@ -324,11 +341,12 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
         kind: source.kind,
         enabled: source.enabled,
         nodeRenames: source.nodeRenames ?? {},
+        nodeNameTemplate: source.nodeNameTemplate ?? "",
       },
       fetchedAt: snapshot?.fetchedAt ?? null,
       nodeCount: nodes.length,
-      renamedCount: countRenamedNodes(nodes, source.nodeRenames),
-      nodes: collectNodeSummaries(nodes, source.nodeRenames),
+      renamedCount: countRenamedNodes(nodes, source.nodeRenames, source.nodeNameTemplate, source.name),
+      nodes: collectNodeSummaries(nodes, source.nodeRenames, source.nodeNameTemplate, source.name),
       parseErrors,
     });
   }

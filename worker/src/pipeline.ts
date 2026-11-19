@@ -13,7 +13,8 @@ import type { ProxyChain } from "@subboost/core/types/config";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { sha256Hex } from "./crypto";
 import { refreshSource, sanitizeErrorMessage, type RefreshSourceResult } from "./sources";
-import { applyNodeRenames, toCanvasNodeSummary } from "./node-renames";
+import { nodeRenameKey } from "@subboost/core/node-rename-key";
+import { resolveNodeNames, toCanvasNodeSummary } from "./node-renames";
 import type { fetchText } from "./safe-fetch";
 import type { Store } from "./store";
 import {
@@ -180,7 +181,13 @@ function targetSources<T extends SourceLike>(
  * 链的节点引用是 (源, 指纹)，只在首个源里记名会让「引用第二个源」永远解析不到。
  */
 function mergeSnapshotNodes(
-  targets: ReadonlyArray<{ id: string; nodeRenames?: NodeRenames }>,
+  targets: ReadonlyArray<{
+    id: string;
+    /** 源名称，供模板的 `{sourceName}` 使用 */
+    name?: string;
+    nodeRenames?: NodeRenames;
+    nodeNameTemplate?: string;
+  }>,
   snapshots: ReadonlyArray<SnapshotRecord | null>
 ): ParsedNode[] {
   const seen = new Map<string, ParsedNode>();
@@ -190,6 +197,10 @@ function mergeSnapshotNodes(
     if (!snapshot) continue;
     // 同一份快照的节点数不超过源上限，重命名只影响展示名，不影响去重身份
     const renames = targets[index]?.nodeRenames;
+    // 模板按整源求值（去重是源内的），再逐节点套用；手动改名在 resolveNodeNames 里已优先
+    const template = targets[index]?.nodeNameTemplate;
+    // 源名按源传入：`{sourceName}` 取的是这条源的名字，而不是节点自己的名字
+    const resolved = resolveNodeNames(snapshot.nodes, renames, template, targets[index]?.name);
     for (const node of snapshot.nodes) {
       const key = buildNodeContentKey(node);
       const existing = seen.get(key);
@@ -202,16 +213,18 @@ function mergeSnapshotNodes(
         continue;
       }
       // 先记源再改名：_originName 记的是源里的原始名，展示名随改名走
-      const merged = applyNodeRenames(withNodeSourceId(node, targets[index].id), renames);
+      const withSource = withNodeSourceId(node, targets[index].id);
+      const display = resolved.get(nodeRenameKey(node));
+      const merged = display
+        ? ({ ...(withSource as unknown as Record<string, unknown>), name: display.name } as unknown as ParsedNode)
+        : withSource;
       seen.set(key, merged);
       nodes.push(merged);
     }
   }
   return nodes;
 }
-
 /**
- * 应用配置里的「节点排序」（`config.nodeOrder`）。
  *
  * 语义见 `@subboost/core/subscription/node-order`：已排好的节点在前，其余按源顺序追加在末尾。
  * 输出顺序同时决定 `proxies:` 段与各组内节点的先后——这正是客户端「排序=默认」看到的东西。

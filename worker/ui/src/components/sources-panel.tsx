@@ -22,6 +22,7 @@ import { SortableHandle, SortableItem, SortableList } from "@subboost/ui/compone
 import { SwitchField } from "@subboost/ui/components/ui/switch-field";
 import { Textarea } from "@subboost/ui/components/ui/textarea";
 import { useToast } from "@subboost/ui/components/ui/toaster";
+import { NodeNameTemplateEditor } from "./node-name-template-editor";
 import { NodeRenameEditor } from "./node-rename-editor";
 import type {
   AppState,
@@ -53,6 +54,7 @@ type Draft = {
   userAgent: string;
   enabled: boolean;
   nodeRenames: NodeRenames;
+  nodeNameTemplate: string;
 };
 
 type ParseState = {
@@ -74,6 +76,7 @@ function emptyDraft(): Draft {
     userAgent: "",
     enabled: true,
     nodeRenames: {},
+    nodeNameTemplate: "",
   };
 }
 
@@ -87,6 +90,7 @@ function toDraft(source: SourceDto): Draft {
     userAgent: source.userAgent ?? "",
     enabled: source.enabled,
     nodeRenames: { ...(source.nodeRenames ?? {}) },
+    nodeNameTemplate: source.nodeNameTemplate ?? "",
   };
 }
 
@@ -101,6 +105,7 @@ function toInput(source: SourceDto): SourceInput {
     ...(source.nodeRenames && Object.keys(source.nodeRenames).length > 0
       ? { nodeRenames: source.nodeRenames }
       : {}),
+    ...(source.nodeNameTemplate ? { nodeNameTemplate: source.nodeNameTemplate } : {}),
   };
 }
 
@@ -118,6 +123,7 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
     loading: boolean;
     data: SourceNodesResponse | null;
     renames: NodeRenames;
+    template: string;
     error: string;
   } | null>(null);
 
@@ -201,6 +207,7 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
       enabled: draft.enabled,
       ...(draft.userAgent.trim() ? { userAgent: draft.userAgent.trim() } : {}),
       ...(renames ? { nodeRenames: renames } : {}),
+      ...(draft.nodeNameTemplate.trim() ? { nodeNameTemplate: draft.nodeNameTemplate.trim() } : {}),
       ...(draft.kind === "remote" ? { url: draft.url.trim() } : { manualText: draft.manualText }),
     };
 
@@ -242,7 +249,14 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
   };
 
   const openNodes = async (source: SourceDto) => {
-    setNodesDialog({ source, loading: true, data: null, renames: { ...(source.nodeRenames ?? {}) }, error: "" });
+    setNodesDialog({
+      source,
+      loading: true,
+      data: null,
+      renames: { ...(source.nodeRenames ?? {}) },
+      template: source.nodeNameTemplate ?? "",
+      error: "",
+    });
     if (!onLoadNodes) {
       setNodesDialog((current) =>
         current ? { ...current, loading: false, error: "当前版本不支持读取节点列表。" } : current
@@ -261,17 +275,21 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
     }
   };
 
-  const saveNodeRenames = async () => {
+  const saveNodeEditing = async () => {
     if (!nodesDialog) return;
-    const { source, renames } = nodesDialog;
+    const { source, renames, template } = nodesDialog;
     const next = state.sources.map((item) => {
       if (item.id !== source.id) return toInput(item);
       const base = toInput(item);
       const cleaned: NodeRenames = Object.fromEntries(
         Object.entries(renames).filter(([, value]) => value.trim().length > 0)
       );
-      const { nodeRenames: _ignored, ...rest } = base;
-      return Object.keys(cleaned).length > 0 ? { ...rest, nodeRenames: cleaned } : rest;
+      const { nodeRenames: _ignoredRenames, nodeNameTemplate: _ignoredTemplate, ...rest } = base;
+      return {
+        ...rest,
+        ...(Object.keys(cleaned).length > 0 ? { nodeRenames: cleaned } : {}),
+        ...(template.trim() ? { nodeNameTemplate: template.trim() } : {}),
+      };
     });
     setSaving(true);
     try {
@@ -521,6 +539,12 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
                   {nodesDialog.error}
                 </p>
               ) : null}
+              <NodeNameTemplateEditor
+                template={nodesDialog.template}
+                onChange={(next) => setNodesDialog({ ...nodesDialog, template: next })}
+                sourceName={nodesDialog.source.name}
+                nodes={nodesDialog.data?.nodes ?? []}
+              />
               <NodeRenameEditor
                 nodes={nodesDialog.data?.nodes ?? []}
                 renames={nodesDialog.renames}
@@ -545,7 +569,7 @@ export function SourcesPanel({ state, onSave, onReorder, onParseNodes, onLoadNod
                 </Button>
                 <LoadingButton
                   type="button"
-                  onClick={() => void saveNodeRenames()}
+                  onClick={() => void saveNodeEditing()}
                   disabled={nodesDialog.loading}
                   loading={saving}
                   loadingLabel="保存中…"

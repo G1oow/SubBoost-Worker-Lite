@@ -196,6 +196,144 @@ describe("source node renames", () => {
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ code: "NOT_FOUND" });
   });
+
+  it("applies the stored naming template and marks it as template-sourced", async () => {
+    const h = createHarness();
+    const saved = await saveSources(h, [
+      {
+        name: "手动节点",
+        kind: "manual",
+        manualText: SS,
+        nodeNameTemplate: "{protocol}-{port} {name}",
+      },
+    ]);
+    const savedBody = (await saved.json()) as {
+      sources: Array<{ id: string; nodeNameTemplate?: string }>;
+    };
+    expect(savedBody.sources[0].nodeNameTemplate).toBe("{protocol}-{port} {name}");
+
+    const response = await route(
+      apiRequest(`/api/sources/${savedBody.sources[0].id}/nodes`),
+      h.env,
+      h.deps
+    );
+    const body = (await response.json()) as {
+      renamedCount: number;
+      nodes: Array<{ name: string; originName: string; renamed: boolean; renameSource?: string }>;
+      source: { nodeNameTemplate: string };
+    };
+    expect(body.renamedCount).toBe(1);
+    expect(body.nodes[0]).toMatchObject({
+      name: "ss-8388 NodeA",
+      originName: "NodeA",
+      renamed: true,
+      renameSource: "template",
+    });
+    expect(body.source.nodeNameTemplate).toBe("{protocol}-{port} {name}");
+  });
+
+  it("renames every node with the template, not just the matching ones", async () => {
+    const h = createHarness();
+    const saved = await saveSources(h, [
+      { name: "手动节点", kind: "manual", manualText: `${SS}\n${SS_SECOND}` },
+    ]);
+    const sourceId = ((await saved.json()) as { sources: Array<{ id: string }> }).sources[0].id;
+
+    await saveSources(h, [
+      {
+        id: sourceId,
+        name: "手动节点",
+        kind: "manual",
+        manualText: `${SS}\n${SS_SECOND}`,
+        nodeNameTemplate: "{name} · {port}",
+      },
+    ]);
+
+    const response = await route(apiRequest(`/api/sources/${sourceId}/nodes`), h.env, h.deps);
+    const body = (await response.json()) as {
+      renamedCount: number;
+      nodes: Array<{ name: string }>;
+    };
+    expect(body.renamedCount).toBe(2);
+    expect(body.nodes.map((item) => item.name)).toEqual(["NodeA · 8388", "NodeB · 8389"]);
+  });
+
+  it("lets a manual rename override the naming template", async () => {
+    const h = createHarness();
+    const saved = await saveSources(h, [{ name: "手动节点", kind: "manual", manualText: SS }]);
+    const sourceId = ((await saved.json()) as { sources: Array<{ id: string }> }).sources[0].id;
+    const preview = await route(apiRequest(`/api/sources/${sourceId}/nodes`), h.env, h.deps);
+    const key = ((await preview.json()) as { nodes: Array<{ key: string }> }).nodes[0].key;
+
+    await saveSources(h, [
+      {
+        id: sourceId,
+        name: "手动节点",
+        kind: "manual",
+        manualText: SS,
+        nodeRenames: { [key]: "我起的名字" },
+        nodeNameTemplate: "{name} · {port}",
+      },
+    ]);
+
+    const response = await route(apiRequest(`/api/sources/${sourceId}/nodes`), h.env, h.deps);
+    const body = (await response.json()) as {
+      nodes: Array<{ name: string; renameSource?: string }>;
+    };
+    expect(body.nodes[0]).toMatchObject({ name: "我起的名字", renameSource: "manual" });
+  });
+
+  it("rejects a template with an unknown variable", async () => {
+    const h = createHarness();
+    const response = await saveSources(h, [
+      {
+        name: "手动节点",
+        kind: "manual",
+        manualText: SS,
+        nodeNameTemplate: "{protocol} {protocl}",
+      },
+    ]);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      code: "VALIDATION_ERROR",
+      error: expect.stringContaining("{protocl}"),
+    });
+  });
+
+
+  it("renders {sourceName} from the source record and {flag} from the node name", async () => {
+    const h = createHarness();
+    const saved = await saveSources(h, [
+      {
+        name: "机场 A",
+        kind: "manual",
+        manualText: SS,
+        nodeNameTemplate: "{flag}{sourceName}-{protocol}",
+      },
+    ]);
+    const sourceId = ((await saved.json()) as { sources: Array<{ id: string }> }).sources[0].id;
+
+    const response = await route(apiRequest(`/api/sources/${sourceId}/nodes`), h.env, h.deps);
+    const body = (await response.json()) as { nodes: Array<{ name: string }> };
+    // NodeA 没有地区码，{flag} 为空；{sourceName} 取源名
+    expect(body.nodes[0].name).toBe("机场 A-ss");
+  });
+
+  it("rejects a template that is too long", async () => {
+    const h = createHarness();
+    const response = await saveSources(h, [
+      {
+        name: "手动节点",
+        kind: "manual",
+        manualText: SS,
+        nodeNameTemplate: "{name}".repeat(50),
+      },
+    ]);
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringContaining("最多 200 个字符"),
+    });
+  });
 });
 
 describe("PATCH /api/subscriptions/:id", () => {

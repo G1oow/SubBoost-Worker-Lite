@@ -1,6 +1,7 @@
 import * as React from "react";
 import { RotateCcw, Search } from "lucide-react";
 import { Icon } from "@subboost/ui/components/ui/icon";
+import { Badge } from "@subboost/ui/components/ui/badge";
 import { EmptyState } from "@subboost/ui/components/ui/empty-state";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
@@ -103,6 +104,9 @@ export function NodeRenameEditor({
         >
           {visible.map((node) => {
             const renamed = Boolean(renames[node.key]);
+            // 服务端的 renamed 也包含规则改名：规则命中的节点同样要显示「原名」，
+            // 否则用户在列表里只看到一个空输入框，不知道当前生效的是什么名字。
+            const showsOrigin = node.renamed || renamed;
             return (
               <MotionItem
                 key={node.key}
@@ -116,15 +120,23 @@ export function NodeRenameEditor({
                 <ProtocolBadge type={node.type} className="shrink-0" />
                 <div className="min-w-0 flex-1">
                   {/* 原名（含服务器）在上作为说明，输入框（节点名）在下作为主体 */}
-                  <p className="mb-1 truncate text-2xs text-fg-45">
-                    {renamed ? `原名 ${node.originName || "—"}` : node.originName || "—"}
-                    {node.server ? ` · ${node.server}${node.port ? `:${node.port}` : ""}` : ""}
-                  </p>
-                  {/* 输入框窄屏 16px：iOS 对小于 16px 的字段会在聚焦时自动放大整页 */}
+                  <div className="mb-1 flex items-baseline gap-1.5">
+                    <p className="min-w-0 truncate text-2xs text-fg-45">
+                      {showsOrigin ? `原名 ${node.originName || "—"}` : node.originName || "—"}
+                      {node.server ? ` · ${node.server}${node.port ? `:${node.port}` : ""}` : ""}
+                    </p>
+                    {node.renameSource === "template" ? (
+                      <Badge variant="outline" className="shrink-0">
+                        模板
+                      </Badge>
+                    ) : null}
+                  </div>
                   <Input
                     value={renames[node.key] ?? ""}
                     onChange={(event) => setName(node, event.target.value)}
-                    placeholder="填入新名称"
+                    placeholder={
+                      node.renameSource === "template" && !renamed ? node.name : "填入新名称"
+                    }
                     aria-label={`重命名节点 ${node.originName || node.key}`}
                     className="h-9 text-base sm:h-8 sm:text-sm"
                   />

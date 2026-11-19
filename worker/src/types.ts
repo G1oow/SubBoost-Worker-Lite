@@ -1,6 +1,7 @@
 import type { ParsedNode } from "@subboost/core/types/node";
 import type { SubscriptionResponseInfo } from "@subboost/core/subscription/subscription-response-info";
 
+
 // KV key 常量
 export const KEY_SOURCES = "meta:sources";
 export const KEY_SUBS = "meta:subs";
@@ -61,6 +62,8 @@ export type SourceInput = {
   userAgent?: string;
   // 节点显示名覆盖表（key 见 nodeRenameKey）
   nodeRenames?: NodeRenames;
+  // 命名模板（源级）：一条模板套给该源全部节点，优先级低于 nodeRenames
+  nodeNameTemplate?: string;
 };
 
 export type SourceDto = {
@@ -72,6 +75,7 @@ export type SourceDto = {
   enabled: boolean;
   userAgent?: string;
   nodeRenames?: NodeRenames;
+  nodeNameTemplate?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -82,11 +86,18 @@ export type SourceDto = {
  */
 export type SourceSummary = {
   id: string;
+  /** 源名称：订阅生成时供命名模板的 {sourceName} 使用 */
+  name: string;
   kind: SourceKind;
   enabled: boolean;
   nodeRenames?: NodeRenames;
+  nodeNameTemplate?: string;
 };
 
+/**
+ * 存储形态：payload 加密，其余为明文元数据。
+ * `nodeNameTemplate` 与 `nodeRenames` 一样是明文（都是用户输入的名称规则，不含节点凭据）。
+ */
 export type StoredSource = {
   id: string;
   name: string;
@@ -95,6 +106,7 @@ export type StoredSource = {
   enabled: boolean;
   userAgent?: string;
   nodeRenames?: NodeRenames;
+  nodeNameTemplate?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -187,6 +199,11 @@ export type NodeSummary = {
   server?: string;
   port?: number;
   renamed: boolean;
+  /**
+   * 名字是谁改的：`manual` = 逐节点手动改名，`template` = 命名模板，缺省表示没改名。
+   * 界面据此区分「我手输的名字」和「模板算出来的名字」。
+   */
+  renameSource?: "manual" | "template";
 };
 
 
