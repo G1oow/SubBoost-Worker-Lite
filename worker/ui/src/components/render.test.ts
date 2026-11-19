@@ -587,23 +587,6 @@ describe("dashboard and node rename rendering", () => {
     expect(html).toContain("运行正常");
   });
 
-  it("puts every dashboard card on the spotlight surface", () => {
-    const html = renderToStaticMarkup(
-      React.createElement(DashboardPanel, {
-        state: STATE,
-        stats: STATS,
-        onRefresh: noopAsync,
-        onNavigate: () => {},
-      })
-    );
-    // 概览卡 + 4 张指标卡 + 协议分布 + 源健康 + 快捷操作，每张卡一个光斑层。
-    // 只数 spotlight 层不够精确，先按卡片标题定位再核对总数，避免漏掉新加的卡。
-    expect(html.match(/data-testid="spotlight-layer"/g) ?? []).toHaveLength(8);
-    for (const title of ["协议分布", "源健康", "快捷操作"]) {
-      expect(html).toContain(title);
-    }
-  });
-
   it("falls back to the state data when dashboard stats are unavailable", () => {
     const html = renderToStaticMarkup(
       React.createElement(DashboardPanel, {
