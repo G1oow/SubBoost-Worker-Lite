@@ -20,7 +20,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "0.24.0" },
+  app: { name: "SubBoost Lite", version: "0.25.0" },
   sources: [
     {
       id: "s1",
@@ -91,7 +91,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v0.24.0");
+    expect(html).toContain("v0.25.0");
     expect(html).toContain("content");
   });
 
@@ -585,6 +585,40 @@ describe("dashboard and node rename rendering", () => {
     expect(html).toContain("12");
     expect(html).toContain("机场 A");
     expect(html).toContain("运行正常");
+  });
+
+  it("puts every dashboard card on the spotlight surface", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DashboardPanel, {
+        state: STATE,
+        stats: STATS,
+        onRefresh: noopAsync,
+        onNavigate: () => {},
+      })
+    );
+    // 概览卡 + 4 张指标卡 + 协议分布 + 源健康 + 快捷操作，每张卡一个光斑层
+    expect(html.match(/data-testid="spotlight-layer"/g) ?? []).toHaveLength(8);
+    for (const title of ["协议分布", "源健康", "快捷操作"]) {
+      expect(html).toContain(title);
+    }
+  });
+
+  it("lights the warning card with the amber glow instead of the brand glow", () => {
+    const html = renderToStaticMarkup(
+      React.createElement(DashboardPanel, {
+        state: STATE,
+        stats: {
+          ...STATS,
+          warnings: [{ level: "warning", message: "还没有添加任何源。" }],
+        },
+        onRefresh: noopAsync,
+        onNavigate: () => {},
+      })
+    );
+    // 提醒卡是琥珀语义卡，套品牌蓝紫光斑会和描边、徽标、提示条打架
+    expect(html.match(/data-testid="spotlight-layer"/g) ?? []).toHaveLength(9);
+    expect(html).toContain("var(--glow-warning)");
+    expect(html).toContain("hover:border-warning-note-border");
   });
 
   it("falls back to the state data when dashboard stats are unavailable", () => {
