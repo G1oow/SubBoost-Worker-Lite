@@ -32,6 +32,13 @@ import type {
   SubscriptionNodesResponse,
   StatusRecord,
 } from "./lib/types";
+import {
+  readDismissedVersion,
+  resolveUpdateNotice,
+  writeDismissedVersion,
+  type UpdateCheckResponse,
+  type UpdateNotice,
+} from "./lib/update-notice";
 import { runPageTransition } from "./lib/view-transition";
 
 // 构建期常量（由 vite.config.ts 的 define 注入）。写成模块内的本地常量而
@@ -87,6 +94,15 @@ export function App() {
   const routeRef = React.useRef(route);
   /** 由生成配置页上报；只在事件回调里读取，不触发重渲染 */
   const configDirtyRef = React.useRef(false);
+  /**
+   * 新版本检测结果与「已忽略版本」。
+   * 检测只在登录后跑一次：它考的是部署版本，不会因为页内操作变化。
+   */
+  const [updateCheck, setUpdateCheck] = React.useState<UpdateCheckResponse | null>(null);
+  const [dismissedVersion, setDismissedVersion] = React.useState<string | null>(() =>
+    readDismissedVersion()
+  );
+  const updateCheckedRef = React.useRef(false);
 
   React.useEffect(() => {
     routeRef.current = route;
@@ -149,6 +165,39 @@ export function App() {
   React.useEffect(() => {
     if (state) void loadStats();
   }, [state, loadStats]);
+
+  /**
+   * 登录后问一次「仓库上有没有更新的版本」。
+   *
+   * 失败一律静默：检测只是锦上添花，网络或上游出问题时不能让页头变成报错现场。
+   * 用 ref 兜住重复执行（React 严格模式会跑两遍 effect），一轮会话只问一次。
+   */
+  React.useEffect(() => {
+    if (!state || updateCheckedRef.current) return;
+    updateCheckedRef.current = true;
+    let cancelled = false;
+    void client
+      .get<UpdateCheckResponse>("/api/update-check")
+      .then((result) => {
+        if (!cancelled) setUpdateCheck(result);
+      })
+      .catch(() => {
+        // 抓不到上游版本就不提示，不打扰用户
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [client, state]);
+
+  const updateNotice: UpdateNotice | null = React.useMemo(
+    () => resolveUpdateNotice(updateCheck, dismissedVersion),
+    [updateCheck, dismissedVersion]
+  );
+
+  const handleDismissUpdate = React.useCallback((latestVersion: string) => {
+    writeDismissedVersion(latestVersion);
+    setDismissedVersion(latestVersion);
+  }, []);
 
   // 用 hash 保存当前页面，刷新/前进后退都能回到同一页
   React.useEffect(() => {
@@ -479,6 +528,8 @@ export function App() {
         onNavigate={navigate}
         onRefresh={state ? () => void handleRefresh() : undefined}
         refreshing={refreshing}
+        updateNotice={updateNotice}
+        onDismissUpdate={handleDismissUpdate}
       >
         {loading && !state ? (
           <div className="space-y-4">

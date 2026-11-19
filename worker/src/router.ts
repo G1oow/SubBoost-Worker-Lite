@@ -31,6 +31,9 @@ import { resolveDefaultUserAgent } from "./sources";
 import { validatePublicHttpUrl } from "./ssrf";
 import { createStore, type Store } from "./store";
 import { normalizeProxyChains } from "@subboost/core/subscription/config-utils";
+import { isNewerVersion } from "@subboost/server-core/update/latest-version";
+import { REPOSITORY_RELEASES_URL } from "@subboost/server-core/repository";
+import { checkForUpdate } from "./update-check";
 import {
   MAX_MANUAL_TEXT_BYTES,
   MAX_PARSE_ERRORS,
@@ -248,6 +251,29 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       status,
       // 管理端据此决定是否显示 age 加密链接与一键导入按钮
       capabilities: { age: ageCapabilities(resolveAgeConfig(env)) },
+    });
+  }
+
+  /**
+   * 新版本检测。
+   *
+   * 检测在 Worker 侧做而不是浏览器直连 GitHub：出口不受用户网络影响，也不需要在
+   * 浏览器里跨域拉第三方域名。结果按 6 小时缓存，前端每次打开页面问一次即可。
+   */
+  if (path === "/api/update-check" && method === "GET") {
+    const result = await checkForUpdate({
+      fetchText: pipelineDeps.fetchText,
+      readCache: () => store.getUpdateCheck(),
+      writeCache: (record) => store.putUpdateCheck(record),
+      userAgent: pipelineDeps.defaultUserAgent,
+      now: pipelineDeps.now,
+    });
+    return json({
+      currentVersion: pkg.version,
+      latestVersion: result.latestVersion,
+      updateAvailable: isNewerVersion(result.latestVersion, pkg.version),
+      checkedAt: result.checkedAt,
+      releaseUrl: REPOSITORY_RELEASES_URL,
     });
   }
 

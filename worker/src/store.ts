@@ -7,10 +7,12 @@ import {
   KEY_SOURCES,
   KEY_STATUS,
   KEY_SUBS,
+  KEY_UPDATE_CHECK,
   SHORT_CODE_PATTERN,
   TTL_CACHE,
   TTL_LOCK,
   TTL_SNAPSHOT,
+  TTL_UPDATE_CHECK,
   type CacheRecord,
   type SnapshotRecord,
   type SourceDto,
@@ -20,6 +22,7 @@ import {
   type StoredSource,
   type StoredSubscription,
   type SubscriptionDto,
+  type UpdateCheckRecord,
 } from "./types";
 
 export function tokenIndexKey(tokenHash: string): string {
@@ -514,6 +517,18 @@ export function createStore(env: Env) {
     await kv.put(KEY_STATUS, JSON.stringify(status));
   }
 
+  /**
+   * 新版本检测缓存（`meta:update-check`）。
+   * 只缓存版本号本身，TTL 6 小时；过期或缺失都按未命中处理，由调用方决定是否重新抓。
+   */
+  async function getUpdateCheck(): Promise<UpdateCheckRecord | null> {
+    return readJson<UpdateCheckRecord>(kv, KEY_UPDATE_CHECK);
+  }
+
+  async function putUpdateCheck(record: UpdateCheckRecord): Promise<void> {
+    await kv.put(KEY_UPDATE_CHECK, JSON.stringify(record), { expirationTtl: TTL_UPDATE_CHECK });
+  }
+
   async function acquireLock(owner: string): Promise<boolean> {
     const existing = await kv.get(KEY_LOCK, "text");
     if (existing) return false;
@@ -557,6 +572,8 @@ export function createStore(env: Env) {
     putStatus,
     acquireLock,
     releaseLock,
+    getUpdateCheck,
+    putUpdateCheck,
   };
 }
 

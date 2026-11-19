@@ -58,6 +58,8 @@
     --date-input-scheme: dark;
     --badge-mode-fg: color-mix(in oklab, var(--color-sky-100) 80%, transparent);
     --badge-new-fg: color-mix(in oklab, var(--color-emerald-100) 90%, transparent);
+    /* 版本徽章上的「有新版本」红点：深色下用亮一档的红，才不至于在灰底上糊掉 */
+    --update-dot: var(--color-red-400);
     --focus-ring: color-mix(in oklab, var(--color-indigo-500) 50%, transparent);
     --focus-ring-inset: color-mix(in oklab, var(--color-indigo-500) 60%, transparent);
     --privileged-nav-fg: color-mix(in oklab, var(--color-indigo-300) 75%, transparent);
@@ -338,6 +340,8 @@
     --date-input-scheme: light;
     --badge-mode-fg: oklch(44.3% 0.11 240.79);
     --badge-new-fg: oklch(43.2% 0.095 166.913);
+    /* 白底上用深一档的红，与深色主题的红点视觉重量一致 */
+    --update-dot: var(--color-red-500);
     --focus-ring: #1d4ed8;
     --focus-ring-inset: #1d4ed8;
     --privileged-nav-fg: #1d4ed8;
@@ -629,6 +633,7 @@
   --color-popover-arrow: var(--popover-arrow);
   --color-badge-mode-fg: var(--badge-mode-fg);
   --color-badge-new-fg: var(--badge-new-fg);
+  --color-update-dot: var(--update-dot);
   --color-focus-ring: var(--focus-ring);
   --color-focus-ring-inset: var(--focus-ring-inset);
   --color-privileged-nav-fg: var(--privileged-nav-fg);

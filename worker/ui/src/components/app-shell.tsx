@@ -10,6 +10,9 @@ import { cn } from "@subboost/ui/lib/utils";
 import { applyTheme, getCurrentTheme, persistTheme, type ThemeName } from "@subboost/ui/theme/theme";
 import { useScrollHeaderPinned } from "../lib/scroll-header";
 import { prefersReducedMotion } from "../lib/view-transition";
+import { REPOSITORY_URL } from "../lib/docs-links";
+import type { UpdateNotice } from "../lib/update-notice";
+import { VersionBadge } from "./version-badge";
 
 export type AppNavItem = {
   id: string;
@@ -31,6 +34,10 @@ export type AppShellProps = {
   onNavigate?: (id: string) => void | boolean | Promise<boolean>;
   onRefresh?: () => void;
   refreshing?: boolean;
+  /** 检测到新版本时传入；页头版本徽章据此点红点 */
+  updateNotice?: UpdateNotice | null;
+  /** 用户在版本徽章的弹窗里点了「忽略此版本」 */
+  onDismissUpdate?: (latestVersion: string) => void;
 };
 
 /** 页头导航滑块共享布局的命名空间，全局唯一即可 */
@@ -52,18 +59,40 @@ type HeaderBrandProps = {
    * 版本号在这里既读不清也挤位。
    */
   compact?: boolean;
+  updateNotice?: UpdateNotice | null;
+  onDismissUpdate?: (latestVersion: string) => void;
 };
 
-/** 品牌块：页头与吸顶工具条共用，避免两处各写一份、改一处忘一处 */
-function HeaderBrand({ title, version, compact = false }: HeaderBrandProps) {
+/**
+ * 品牌块：页头与吸顶工具条共用，避免两处各写一份、改一处忘一处。
+ *
+ * Logo 是通往仓库的入口：点一下在新标签打开 GitHub。用真正的 `<a>` 而不是
+ * onClick + window.open —— 前者能被中键/右键/长按识别成链接，读屏也会念出目标。
+ */
+function HeaderBrand({
+  title,
+  version,
+  compact = false,
+  updateNotice,
+  onDismissUpdate,
+}: HeaderBrandProps) {
   return (
     <div className="flex min-w-0 items-center gap-2 sm:gap-3">
-      <BrandMark
-        className={cn(
-          "shrink-0 shadow-(--btn-primary-shadow) transition-transform duration-300 hover:rotate-6",
-          compact ? "h-7 w-7" : "h-8 w-8 sm:h-9 sm:w-9"
-        )}
-      />
+      <a
+        href={REPOSITORY_URL}
+        target="_blank"
+        rel="noreferrer noopener"
+        title="在 GitHub 上打开仓库"
+        aria-label="在 GitHub 上打开 SubBoost Worker Lite 仓库"
+        className="shrink-0 rounded-lg transition-colors hover:bg-ink/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+      >
+        <BrandMark
+          className={cn(
+            "shadow-(--btn-primary-shadow) transition-transform duration-300 hover:rotate-6",
+            compact ? "h-7 w-7" : "h-8 w-8 sm:h-9 sm:w-9"
+          )}
+        />
+      </a>
       <div className={cn("flex min-w-0 gap-2", compact ? "items-center" : "items-baseline")}>
         {compact ? (
           <span className="max-w-[10rem] truncate text-sm font-semibold text-fg">{title}</span>
@@ -71,9 +100,7 @@ function HeaderBrand({ title, version, compact = false }: HeaderBrandProps) {
           <h1 className="truncate text-base font-semibold text-fg sm:text-lg">{title}</h1>
         )}
         {!compact && version ? (
-          <span className="hidden shrink-0 rounded-full border border-ink/10 bg-ink/5 px-2 py-0.5 text-2xs text-fg-45 sm:inline-block">
-            v{version}
-          </span>
+          <VersionBadge version={version} update={updateNotice} onDismiss={onDismissUpdate} />
         ) : null}
       </div>
     </div>
@@ -165,6 +192,8 @@ export function AppShell({
   onNavigate,
   onRefresh,
   refreshing = false,
+  updateNotice,
+  onDismissUpdate,
 }: AppShellProps) {
   const [theme, setTheme] = React.useState<ThemeName>(() => getCurrentTheme());
   /** 滚过阈值后切到吸顶工具条（订阅细节见 lib/scroll-header.ts） */
@@ -243,7 +272,12 @@ export function AppShell({
       */}
       <header>
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-2 px-3 py-2.5 sm:gap-4 sm:px-6 sm:py-3">
-          <HeaderBrand title={title} version={version} />
+          <HeaderBrand
+            title={title}
+            version={version}
+            updateNotice={updateNotice}
+            onDismissUpdate={onDismissUpdate}
+          />
           {actions}
         </div>
 

@@ -7,11 +7,13 @@ export const KEY_SOURCES = "meta:sources";
 export const KEY_SUBS = "meta:subs";
 export const KEY_CONFIG = "meta:config";
 export const KEY_STATUS = "meta:status";
+export const KEY_UPDATE_CHECK = "meta:update-check";
 export const KEY_LOCK = "meta:refresh-lock";
 
 // TTL（秒）
 export const TTL_SNAPSHOT = 604800; // 7 天
 export const TTL_CACHE = 172800; // 48 小时
+export const TTL_UPDATE_CHECK = 21600; // 6 小时
 export const TTL_LOCK = 600; // 10 分钟
 
 // 业务上限
@@ -180,6 +182,17 @@ export type StatusRecord = {
   durationMs: number;
   sources: SourceRefreshStatus[];
   subscriptions: SubscriptionRefreshStatus[];
+};
+
+/**
+ * 「发现新版本」的缓存记录。
+ *
+ * 上游版本号是公开信息，缓存 6 小时只为省掉重复抓取：管理端每次打开都会问一次，
+ * 不缓存就等于每次页面加载都往 GitHub 打一条请求。
+ */
+export type UpdateCheckRecord = {
+  latestVersion: string;
+  checkedAt: string;
 };
 
 /**
