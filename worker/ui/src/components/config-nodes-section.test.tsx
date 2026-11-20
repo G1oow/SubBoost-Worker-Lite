@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmDialogHost } from "@subboost/ui/components/ui/confirm-dialog";
 import type { CanvasNodeSummary, SubscriptionDto, SubscriptionNodesResponse } from "../lib/types";
+import { AUTO_FILL_STORAGE_KEY } from "../lib/node-order-editor";
 import { ConfigNodesSection } from "./config-nodes-section";
 
 /**
@@ -197,6 +198,44 @@ describe("节点排序画布", () => {
 
     fireEvent.click(within(alert).getByRole("button", { name: "重试" }));
     await screen.findByText("香港 01");
+  });
+
+  it("画布右上角的自动补位按钮默认按下，点掉后记住并切成交换语义", async () => {
+    renderSection({});
+    await screen.findByText("香港 01");
+
+    const toggle = screen.getByRole("button", { name: "自动补位" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    // 默认补位语义一路传到画布容器上
+    expect(document.querySelector('ul[data-drop-mode="insert"]')).toBeTruthy();
+    // 首次进入不写本地偏好，只有用户动过才写
+    expect(window.localStorage.getItem(AUTO_FILL_STORAGE_KEY)).toBeNull();
+
+    fireEvent.click(toggle);
+
+    expect(window.localStorage.getItem(AUTO_FILL_STORAGE_KEY)).toBe("0");
+    expect(screen.getByRole("button", { name: "自动补位" }).getAttribute("aria-pressed")).toBe("false");
+    // 关掉后画布换成交换语义（不再位移预览），提示文案也跟着走
+    expect(document.querySelector('ul[data-drop-mode="swap"]')).toBeTruthy();
+    expect(screen.getByText(/拖到另一张卡片上直接交换位置/)).toBeTruthy();
+  });
+
+  it("点击卡片锁定位置：锁定后不可拖，再点一次或按 L 解锁", async () => {
+    renderSection({});
+    await screen.findByText("香港 01");
+
+    const item = screen.getAllByRole("listitem")[0];
+    fireEvent.click(within(item).getByRole("button", { name: /香港 01/ }));
+
+    // 锁定标记 + 拖拽把手被禁用（dnd-kit 的 aria-disabled）
+    expect(within(item).getByText("锁定")).toBeTruthy();
+    expect(item.querySelector('[data-locked="true"]')).toBeTruthy();
+    expect(within(item).getByRole("button", { name: /香港 01/ }).getAttribute("aria-disabled")).toBe("true");
+
+    // 键盘路径：L 键解锁
+    fireEvent.keyDown(within(item).getByRole("button", { name: /香港 01/ }), { key: "l" });
+    expect(within(item).queryByText("锁定")).toBeNull();
+    expect(within(item).getByRole("button", { name: /香港 01/ }).getAttribute("aria-disabled")).toBe("false");
   });
 
   it("没有订阅时给出空状态而不是空白画布", () => {
