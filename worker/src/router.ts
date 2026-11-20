@@ -12,7 +12,9 @@ import pkg from "../package.json";
 import { ageCapabilities, resolveAgeConfig, type AgeResolution } from "./age";
 import { requireAdmin } from "./auth";
 import { ApiError, BODY_LIMITS } from "./errors";
-import { error, json, readJsonBody, withSecurityHeaders } from "./http";
+import { buildApiErrorBody } from "@subboost/server-core/http";
+import { error, json, readJsonBody, withSecurityHeaders, WORKER_DOCUMENT_CSP } from "./http";
+import { API_RATE_LIMIT_POLICY, consumeRateLimit, resolveClientIp } from "./rate-limit";
 import {
   buildCacheETag,
   getOrGenerateSubscription,
@@ -222,6 +224,37 @@ function requireObjectBody(body: unknown): Record<string, unknown> {
   return body;
 }
 
+/**
+ * `/api/*` 限流：按客户端 IP 计固定窗口，放在鉴权之前。
+ *
+ * 放在 `requireAdmin` 之前是有意的：错误的 Bearer token 也要消耗配额，
+ * 否则猜 token 的脚本可以无限次尝试而不触发任何计数。
+ *
+ * 拿不到可信客户端 IP 时直接放行——Cloudflare 边缘一定会带 `CF-Connecting-IP`；
+ * 缺它说明是本地 `wrangler dev` 或浏览器内演示后端，不该被限流干扰。
+ */
+async function enforceApiRateLimit(
+  request: Request,
+  env: Env,
+  deps: RouterDeps
+): Promise<Response | null> {
+  const ip = resolveClientIp(request);
+  if (!ip) return null;
+
+  const now = (deps.now ?? (() => new Date()))();
+  const outcome = await consumeRateLimit(env.SUBBOOST_KV, {
+    bucket: "api",
+    ip,
+    policy: API_RATE_LIMIT_POLICY,
+    now,
+  });
+  if (outcome.allowed) return null;
+
+  return json(buildApiErrorBody("请求过于频繁，请稍后重试", "RATE_LIMITED"), 429, {
+    "retry-after": String(outcome.retryAfterSeconds),
+  });
+}
+
 async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<Response> {
   const url = new URL(request.url);
   const path = url.pathname;
@@ -232,6 +265,9 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
   if (path === "/api/health" && method === "GET") {
     return json({ ok: true });
   }
+
+  const limited = await enforceApiRateLimit(request, env, deps);
+  if (limited) return limited;
 
   await requireAdmin(request, env);
 
@@ -549,6 +585,7 @@ function textResponse(
 function htmlResponse(body: string, omitBody = false): Response {
   const headers = new Headers({
     "content-type": "text/html;charset=utf-8",
+    "content-security-policy": WORKER_DOCUMENT_CSP,
     "x-robots-tag": "noindex",
   });
   return withSecurityHeaders(new Response(omitBody ? null : body, { status: 200, headers }));
@@ -744,6 +781,25 @@ export async function route(
   const path = url.pathname;
 
   try {
+    // 边缘显式说明这次是明文 HTTP 时立刻跳 HTTPS（308 保留方法与 body）。
+    // 同时要求请求 URL 自身就是 http:：某些环境边缘已终止 TLS、URL 是 https，
+    // 只按 x-forwarded-proto 跳会在两者之间来回重定向。
+    // 只认 `x-forwarded-proto`：本地 wrangler dev 不带这个头，预览不会被踢去 https。
+    // 静态页面由 Assets 层直接返回、不经过这里，所以页面本身仍需边缘的 Always Use HTTPS。
+    const edgeProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+    if (edgeProto === "http" && url.protocol === "http:") {
+      const secureLocation = `https://${url.host}${url.pathname}${url.search}`;
+      return withSecurityHeaders(
+        new Response(null, {
+          status: 308,
+          headers: {
+            location: secureLocation,
+            "cache-control": "no-store",
+          },
+        })
+      );
+    }
+
     const isHead = request.method.toUpperCase() === "HEAD";
 
     if (path.startsWith("/sub/")) {
