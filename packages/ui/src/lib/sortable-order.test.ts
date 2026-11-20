@@ -158,4 +158,10 @@ describe("resolveDropWithLocked", () => {
       resolveDrop(ids, { id: "a" }, { id: "c" }, false, "swap")
     );
   });
+
+  it("拖拽结果来自过期数据时不动作", () => {
+    // id 不在当前列表里（切换订阅后残留的拖拽结果）
+    expect(resolveDropWithLocked(ids, { id: "missing" }, { id: "a" }, false, "insert", locked)).toBeNull();
+    expect(resolveDropWithLocked(ids, { id: "a" }, { id: "missing" }, false, "insert", locked)).toBeNull();
+  });
 });
