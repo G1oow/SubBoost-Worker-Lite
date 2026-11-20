@@ -17,6 +17,11 @@ export const NODE_ORDER_CONFIG_KEY = "nodeOrder";
 /** 列数是纯显示偏好，跟浏览器走，不进配置 */
 export const GRID_COLUMNS_STORAGE_KEY = "subboost-node-grid-columns";
 export const SELECTED_SUBSCRIPTIONS_STORAGE_KEY = "subboost-node-grid-subscriptions";
+/**
+ * 「自动补位」也是交互偏好，跟浏览器走、不进配置：
+ * 开启（默认）时拖到某个位置会让沿途节点依次后移；关闭时拖到另一张卡片上直接互换位置。
+ */
+export const AUTO_FILL_STORAGE_KEY = "subboost-node-auto-fill";
 
 export const GRID_COLUMN_PRESETS = [3, 4, 5] as const;
 export type GridColumns = (typeof GRID_COLUMN_PRESETS)[number];
@@ -228,6 +233,21 @@ export function saveGridColumns(value: GridColumns, storage: Storage | null = sa
     storage?.setItem(GRID_COLUMNS_STORAGE_KEY, String(value));
   } catch {
     // 隐私模式下写不进去：只是显示偏好，丢了不影响功能
+  }
+}
+
+/** 读「自动补位」开关：没存过（首次使用）按开启处理，与升级前的拖拽行为一致 */
+export function readAutoFill(storage: Storage | null = safeStorage()): boolean {
+  const raw = (storage?.getItem(AUTO_FILL_STORAGE_KEY) ?? "").trim().toLowerCase();
+  if (!raw) return true;
+  return raw !== "0" && raw !== "false" && raw !== "off";
+}
+
+export function saveAutoFill(enabled: boolean, storage: Storage | null = safeStorage()): void {
+  try {
+    storage?.setItem(AUTO_FILL_STORAGE_KEY, enabled ? "1" : "0");
+  } catch {
+    // 隐私模式下写不进去：只是交互偏好，丢了不影响功能
   }
 }
 

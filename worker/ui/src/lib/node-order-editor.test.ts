@@ -1,16 +1,19 @@
 import { describe, expect, it } from "vitest";
 import type { CanvasNodeSummary } from "./types";
 import {
+  AUTO_FILL_STORAGE_KEY,
   DEFAULT_GRID_COLUMNS,
   GRID_COLUMNS_STORAGE_KEY,
   applyVisibleOrder,
   autoOrderByRegion,
   filterCanvasNodes,
   mergeOrderWithCanvas,
+  readAutoFill,
   readGridColumns,
   readNodeOrder,
   readSelectedSubscription,
   rebuildCanvasOrder,
+  saveAutoFill,
   saveGridColumns,
   saveSelectedSubscription,
   summarizeCanvasCoverage,
@@ -171,5 +174,22 @@ describe("本地偏好", () => {
 
     saveSelectedSubscription(null, store);
     expect(store.getItem("subboost-node-grid-subscriptions")).toBeNull();
+  });
+
+  it("「自动补位」默认开启，关闭后能记住，坏值按开启处理", () => {
+    const store = storage();
+    // 升级上来的用户没有这条记录：保持原本的补位行为
+    expect(readAutoFill(store)).toBe(true);
+
+    saveAutoFill(false, store);
+    expect(store.getItem(AUTO_FILL_STORAGE_KEY)).toBe("0");
+    expect(readAutoFill(store)).toBe(false);
+
+    saveAutoFill(true, store);
+    expect(readAutoFill(store)).toBe(true);
+
+    expect(readAutoFill(storage({ [AUTO_FILL_STORAGE_KEY]: "off" }))).toBe(false);
+    expect(readAutoFill(storage({ [AUTO_FILL_STORAGE_KEY]: "on" }))).toBe(true);
+    expect(readAutoFill(storage({ [AUTO_FILL_STORAGE_KEY]: "??" }))).toBe(true);
   });
 });

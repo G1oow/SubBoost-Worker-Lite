@@ -23,6 +23,15 @@ import { Icon } from "@subboost/ui/components/ui/icon";
 import { cn } from "@subboost/ui/lib/utils";
 import { defaultItemLabel, resolveReorder, sortableAnnouncements } from "@subboost/ui/lib/sortable-order";
 
+/**
+ * 落位动画开关（默认开）：网格容器的落点语义是「交换」时由 `SortableGrid` 置为 false。
+ *
+ * 交换模式松手就该直接换位。dnd-kit 默认会在 `items` 换序后给位置变了的卡片补一段
+ * 布局动画，但被拖的那张卡片的位移是当场撤掉的 —— 一对卡片里一张瞬移、另一张滑过去，
+ * 看着像松手后又自己走了一段。
+ */
+export const SortableLayoutAnimationContext = React.createContext(true);
+
 export type SortableListProps = {
   ids: string[];
   onReorder: (ids: string[]) => void;
@@ -95,6 +104,11 @@ export type SortableItemProps = {
    * - `card`：按住整张卡片就能拖，适合网格画布这类卡片本身没有交互的场合。
    */
   activator?: SortableActivator;
+  /**
+   * 整卡拖拽时的「轻点」回调：按下后没有明显移动就松手才触发。
+   * 不能直接用 `onClick` 判断 —— 拖完再松手同样会派发 click，位置还落在原卡片上。
+   */
+  onTap?: () => void;
   children: React.ReactNode;
 };
 
@@ -104,9 +118,30 @@ export type SortableItemProps = {
  * 默认由卡片自己渲染手柄（见 `SortableHandle`）；`activator="card"` 时把监听与可访问属性
  * 挂到条目本身，整张卡片就是拖拽把手，不再需要（也不应再渲染）手柄。
  */
-export function SortableItem({ id, label, disabled = false, activator = "handle", children }: SortableItemProps) {
+export function SortableItem({
+  id,
+  label,
+  disabled = false,
+  activator = "handle",
+  onTap,
+  children,
+}: SortableItemProps) {
+  const animateLayout = React.useContext(SortableLayoutAnimationContext);
   const { setNodeRef, transform, transition, isDragging, attributes, listeners, setActivatorNodeRef } =
-    useSortable({ id, disabled });
+    useSortable({ id, disabled, animateLayoutChanges: animateLayout ? undefined : () => false });
+  const pressRef = React.useRef<{ x: number; y: number } | null>(null);
+
+  /**
+   * 轻点判定：指针按下点与 click 落点差在 4px 内才算点击（拖拽激活阈值是 5px）。
+   * 没有 pointerdown 记录时（键盘、读屏的 click 合成）直接算轻点。
+   */
+  const handleTap = (event: React.MouseEvent) => {
+    const start = pressRef.current;
+    pressRef.current = null;
+    if (!onTap) return;
+    if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 4) return;
+    onTap();
+  };
 
   const value = React.useMemo<SortableItemContextValue>(
     () => ({ label, disabled, activator, attributes, listeners, setActivatorNodeRef }),
@@ -140,11 +175,35 @@ export function SortableItem({ id, label, disabled = false, activator = "handle"
          * 整卡拖拽：监听与可访问属性（role=button、tabIndex、aria-roledescription）挂在卡片外层，
          * `<li>` 保留列表语义，读屏仍能按列表浏览。
          * `touch-pan-y` 让竖向滑动继续滚动页面，长按 220ms 才进入拖拽（见 SortableGrid 的传感器）。
+         *
+         * 轻点/按 L 走 `onTap`：把手自己的 Space 与 Enter 被 KeyboardSensor 占用（拾起与放下），
+         * 所以锁定这类附加动作只能用另一个键，并把快捷键写进 aria-keyshortcuts 供读屏播报。
          */
+        // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- 见上：把手本身是 role=button，键盘路径是 L 键，不是缺失键盘监听
         <div
           ref={setActivatorNodeRef}
           {...attributes}
+          aria-keyshortcuts={onTap ? "L" : undefined}
           {...listeners}
+          // 只记录按下点：真正的判定在 handleTap 里做，不拦截 dnd-kit 的指针监听
+          onPointerDownCapture={
+            onTap
+              ? (event) => {
+                  pressRef.current = { x: event.clientX, y: event.clientY };
+                }
+              : undefined
+          }
+          onKeyDownCapture={
+            onTap
+              ? (event) => {
+                  if (event.key !== "l" && event.key !== "L") return;
+                  event.preventDefault();
+                  event.stopPropagation();
+                  onTap();
+                }
+              : undefined
+          }
+          onClick={onTap ? handleTap : undefined}
           className="h-full cursor-grab touch-pan-y active:cursor-grabbing"
         >
           <SortableItemContext.Provider value={value}>{children}</SortableItemContext.Provider>

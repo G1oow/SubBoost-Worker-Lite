@@ -200,3 +200,81 @@ describe("sortable card activator", () => {
     await waitFor(() => expect(liveText()).toBe("「条目 a」已放在「条目 b」的位置"));
   });
 });
+
+/**
+ * 整卡拖拽的「轻点」（`onTap`）：锁定这类附加动作走它。
+ * 指针路径要区分「点一下」和「拖完松手」，键盘路径是 L —— 把手的 Space/Enter 已被拖拽占用。
+ */
+function renderTappableCard(onTap: () => void) {
+  return render(
+    React.createElement(
+      SortableList,
+      { ids: ["a"], onReorder: vi.fn(), labelOf: (id: string) => `条目 ${id}` },
+      React.createElement(
+        SortableItem,
+        { id: "a", label: "a", activator: "card" as const, onTap },
+        React.createElement("div", { className: "card" }, "a")
+      )
+    )
+  );
+}
+
+/** jsdom 没有 PointerEvent：用同名的 MouseEvent 派发，React 按事件类型照样接得住 */
+function pointerDown(node: HTMLElement, x: number, y: number) {
+  node.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, clientX: x, clientY: y }));
+}
+
+describe("sortable card tap", () => {
+  it("按下后没移动就松手算轻点", () => {
+    const onTap = vi.fn();
+    renderTappableCard(onTap);
+    const card = screen.getByRole("button", { name: "a" });
+
+    pointerDown(card, 10, 10);
+    fireEvent.click(card, { clientX: 12, clientY: 11 });
+
+    expect(onTap).toHaveBeenCalledTimes(1);
+    expect(card.getAttribute("aria-keyshortcuts")).toBe("L");
+  });
+
+  it("拖完再松手不触发轻点", () => {
+    const onTap = vi.fn();
+    renderTappableCard(onTap);
+    const card = screen.getByRole("button", { name: "a" });
+
+    pointerDown(card, 10, 10);
+    fireEvent.click(card, { clientX: 120, clientY: 10 });
+
+    expect(onTap).not.toHaveBeenCalled();
+  });
+
+  it("没有 pointerdown 记录的 click 也算轻点（键盘与读屏的合成点击）", () => {
+    const onTap = vi.fn();
+    renderTappableCard(onTap);
+
+    fireEvent.click(screen.getByRole("button", { name: "a" }));
+
+    expect(onTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("键盘用 L 触发，其它键不抢", () => {
+    const onTap = vi.fn();
+    renderTappableCard(onTap);
+    const card = screen.getByRole("button", { name: "a" });
+
+    fireEvent.keyDown(card, { key: "a" });
+    expect(onTap).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(card, { key: "l" });
+    expect(onTap).toHaveBeenCalledTimes(1);
+  });
+
+  it("没传 onTap 时不挂点击与快捷键", () => {
+    renderCardList({ onReorder: vi.fn() });
+    const card = screen.getByRole("button", { name: "a" });
+
+    expect(card.getAttribute("aria-keyshortcuts")).toBeNull();
+    fireEvent.click(card, { clientX: 10, clientY: 10 });
+    expect(screen.getAllByRole("listitem")).toHaveLength(IDS.length);
+  });
+});

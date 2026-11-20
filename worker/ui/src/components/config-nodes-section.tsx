@@ -1,5 +1,5 @@
 import * as React from "react";
-import { ArrowDownWideNarrow, RotateCcw, Search, Sparkles } from "lucide-react";
+import { ArrowDownWideNarrow, ArrowLeftRight, Lock, RotateCcw, Search, Sparkles } from "lucide-react";
 import { Badge } from "@subboost/ui/components/ui/badge";
 import { Button } from "@subboost/ui/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@subboost/ui/components/ui/card";
@@ -21,10 +21,12 @@ import {
   filterCanvasNodes,
   mergeOrderWithCanvas,
   readGridColumns,
+  readAutoFill,
   readNodeOrder,
   readSelectedSubscription,
   rebuildCanvasOrder,
   saveGridColumns,
+  saveAutoFill,
   saveSelectedSubscription,
   summarizeCanvasCoverage,
   writeNodeOrder,
@@ -95,6 +97,20 @@ export function ConfigNodesSection({
 
   const [selectedId, setSelectedId] = React.useState<string | null>(() => initialSelection(subscriptions));
   const [columns, setColumns] = React.useState<GridColumns>(() => readGridColumns());
+  // 「自动补位」是交互偏好，跟浏览器走、不进配置；没存过按开启处理
+  const [autoFill, setAutoFill] = React.useState(() => readAutoFill());
+  // 交换模式没有位移预览，靠这条状态给落点卡片描边
+  const [swapTargetKey, setSwapTargetKey] = React.useState<string | null>(null);
+  // 锁定是画布内的临时编辑辅助：不写进配置，只在本次会话里挡住重排
+  const [lockedKeys, setLockedKeys] = React.useState<ReadonlySet<string>>(() => new Set<string>());
+  const toggleLock = (key: string) => {
+    setLockedKeys((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  };
   const [query, setQuery] = React.useState("");
   const [highlightSourceId, setHighlightSourceId] = React.useState<string | null>(null);
   const [loads, setLoads] = React.useState<Record<string, LoadState>>({});
@@ -203,6 +219,13 @@ export function ConfigNodesSection({
     saveGridColumns(next);
   };
 
+  const changeAutoFill = (checked: boolean) => {
+    setAutoFill(checked);
+    saveAutoFill(checked);
+    // 切语义时上一轮的落点高亮必须清掉，否则会留在一个已经交换过的卡片上
+    setSwapTargetKey(null);
+  };
+
   /** 单选但仍是 roving 语义：方向键在订阅之间移动选择，Tab 只落一次 */
   const handleRadioKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
     if (subscriptions.length === 0) return;
@@ -288,11 +311,25 @@ export function ConfigNodesSection({
                   className="h-9 pl-8 text-xs sm:h-9"
                 />
               </div>
-              <Button type="button" variant="ghost" size="sm" onClick={handleAutoRegion} disabled={displayNodes.length === 0}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={handleAutoRegion}
+                disabled={displayNodes.length === 0 || lockedKeys.size > 0}
+                title={lockedKeys.size > 0 ? "已锁定节点的位置，先点开锁再整批排序" : undefined}
+              >
                 <Icon icon={Sparkles} />
                 按地区排序
               </Button>
-              <Button type="button" variant="ghost" size="sm" onClick={() => void handleReset()} disabled={displayNodes.length === 0}>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => void handleReset()}
+                disabled={displayNodes.length === 0 || lockedKeys.size > 0}
+                title={lockedKeys.size > 0 ? "已锁定节点的位置，先点开锁再重置" : undefined}
+              >
                 <Icon icon={RotateCcw} />
                 重置为源顺序
               </Button>
@@ -369,7 +406,29 @@ export function ConfigNodesSection({
           <CardTitle className="text-sm">
             画布{selectedSubscription ? ` · ${selectedSubscription.name}` : ""}
           </CardTitle>
-          <p className="text-2xs text-fg-35">按住卡片拖动排序；也可用空格拾起、方向键移动</p>
+          <div className="flex shrink-0 items-center gap-2">
+            <p className="hidden text-2xs text-fg-35 sm:block">
+              {autoFill
+                ? "拖到某个位置时沿途卡片依次让位；点击卡片锁定位置"
+                : "拖到另一张卡片上直接交换位置；点击卡片锁定位置"}
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant={autoFill ? "secondary" : "ghost"}
+              aria-pressed={autoFill}
+              title={
+                autoFill
+                  ? "自动补位已开启：拖到某个位置时沿途卡片依次让位"
+                  : "自动补位已关闭：拖到另一张卡片上直接交换位置"
+              }
+              onClick={() => changeAutoFill(!autoFill)}
+              className="h-7 gap-1.5 px-2"
+            >
+              <Icon icon={ArrowLeftRight} />
+              自动补位
+            </Button>
+          </div>
         </CardHeader>
         <CardContent>
           {!selectedId ? (
@@ -386,6 +445,9 @@ export function ConfigNodesSection({
             <SortableGrid
               ids={visibleKeys}
               onReorder={handleReorder}
+              mode={autoFill ? "insert" : "swap"}
+              locked={lockedKeys}
+              onOverChange={autoFill ? undefined : setSwapTargetKey}
               labelOf={(key) => nodeByKey.get(key)?.name ?? key}
               className="gap-2.5"
               style={{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }}
@@ -393,13 +455,31 @@ export function ConfigNodesSection({
               {visibleNodes.map((node) => {
                 const index = canvasOrder.indexOf(node.key);
                 const highlighted = highlightSourceId !== null && highlightSourceId === node.sourceId;
+                const locked = lockedKeys.has(node.key);
+                // 锁定的卡片不参与交换，别用落点描边暗示它能换
+                const swapTarget = !autoFill && !locked && swapTargetKey === node.key;
                 return (
-                  <SortableItem key={node.key} id={node.key} label={node.name} activator="card">
+                  <SortableItem
+                    key={node.key}
+                    id={node.key}
+                    label={node.name}
+                    activator="card"
+                    disabled={locked}
+                    onTap={() => toggleLock(node.key)}
+                  >
                     <div
+                      data-locked={locked ? "true" : undefined}
+                      title={locked ? "已锁定位置：点击解锁" : "点击锁定位置（按住拖动仍是排序）"}
                       className={cn(
                         "group relative flex h-full flex-col gap-1.5 rounded-xl border bg-surface px-3 py-2.5",
                         "transition-colors duration-200 hover:border-card-border-hover",
-                        highlighted ? "border-card-border-hover bg-ink/5" : "border-card-border"
+                        swapTarget
+                          ? "border-focus-ring bg-ink/5"
+                          : locked
+                            ? "border-dashed border-card-border-hover bg-ink/5"
+                            : highlighted
+                              ? "border-card-border-hover bg-ink/5"
+                              : "border-card-border"
                       )}
                     >
                       <div className="flex items-start gap-1.5">
@@ -409,11 +489,17 @@ export function ConfigNodesSection({
                         >
                           {node.name}
                         </span>
+                        {locked ? (
+                          <span className="shrink-0 text-fg-45" aria-hidden="true">
+                            <Icon icon={Lock} size="xs" />
+                          </span>
+                        ) : null}
                         <span className="shrink-0 text-2xs tabular-nums text-fg-35">{index + 1}</span>
                       </div>
                       <div className="flex flex-wrap items-center gap-1">
                         <ProtocolBadge type={node.type} />
                         {node.sourceName ? <span className="truncate text-2xs text-fg-45">{node.sourceName}</span> : null}
+                        {locked ? <Badge variant="secondary">锁定</Badge> : null}
                         {node.renamed ? <Badge variant="secondary">改名</Badge> : null}
                         {node.infoNode ? <Badge variant="outline">信息</Badge> : null}
                         {node.chainLanding ? <Badge variant="outline">链落地</Badge> : null}
