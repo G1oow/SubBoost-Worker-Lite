@@ -3,6 +3,20 @@ import { ApiError, BODY_LIMITS } from "./errors";
 
 export { BODY_LIMITS };
 
+/**
+ * HSTS：一年，含子域。不加 `preload`——一旦进了浏览器内置名单就极难回滚。
+ * 只对 https 响应生效；明文 HTTP 的强制跳转由边缘（Cloudflare Always Use HTTPS）负责，
+ * Worker 只能对 `/api/*`、`/sub/*`、`/s/*` 这些自己处理的路径补 308。
+ */
+export const HSTS_VALUE = "max-age=31536000; includeSubDomains";
+
+/**
+ * Worker 直接渲染的 HTML 文档（目前只有 `?target=` 落地页）用的 CSP。
+ * 这些页面没有任何脚本，所以 `default-src 'none'`；内联 `<style>` 仍需 `style-src 'unsafe-inline'`。
+ */
+export const WORKER_DOCUMENT_CSP =
+  "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; style-src 'unsafe-inline'";
+
 export function json(
   data: unknown,
   status = 200,
@@ -73,6 +87,8 @@ export function withSecurityHeaders(response: Response): Response {
   if (!headers.has("cache-control")) headers.set("cache-control", "no-store");
   headers.set("x-content-type-options", "nosniff");
   headers.set("referrer-policy", "no-referrer");
+  // HSTS 只对 https 响应有意义；http 响应带它会被浏览器忽略，加了也无害
+  if (!headers.has("strict-transport-security")) headers.set("strict-transport-security", HSTS_VALUE);
   return new Response(response.body, {
     status: response.status,
     statusText: response.statusText,
