@@ -31,18 +31,18 @@ describe("内置配置：分组与规则", () => {
     const groups = (config["proxy-groups"] ?? []) as Array<{ name: string; type: string; proxies: string[] }>;
 
     expect(groups.map((group) => group.name)).toEqual([
-      "自动选择",
-      "手动选择",
+      "节点选择",
+      "默认分流",
       "国内直连",
       "广告拦截",
       "Steam 代理",
     ]);
     expect(groups.every((group) => group.type === "select")).toBe(true);
     expect(groups[0].proxies).toEqual(["Node A", "Node B"]);
-    expect(groups[1].proxies).toEqual(["自动选择", "DIRECT"]);
+    expect(groups[1].proxies).toEqual(["节点选择", "DIRECT"]);
     expect(groups[2].proxies).toEqual(["DIRECT"]);
     expect(groups[3].proxies).toEqual(["REJECT"]);
-    expect(groups[4].proxies).toEqual(["自动选择", "手动选择", "DIRECT"]);
+    expect(groups[4].proxies).toEqual(["节点选择", "默认分流", "DIRECT"]);
   });
 
   it("规则集只剩广告域名集合一个 provider", () => {
@@ -67,8 +67,8 @@ describe("内置配置：分组与规则", () => {
     expect(yaml).toContain("- IP-CIDR,127.0.0.0/8,DIRECT,no-resolve");
     expect(yaml).toContain("- PROCESS-NAME,steam.exe,Steam 代理");
     expect(yaml).toContain("- RULE-SET,广告集合_rules,广告拦截");
-    expect(yaml).toContain("- GEOSITE,geolocation-!cn,自动选择");
-    expect(yaml).toContain("- MATCH,手动选择");
+    expect(yaml).toContain("- GEOSITE,geolocation-!cn,节点选择");
+    expect(yaml).toContain("- MATCH,默认分流");
     expect(yaml).toContain("find-process-mode: strict");
     expect(yaml).toContain("tcp-concurrent: true");
     expect(yaml).toContain("geox-url:");
@@ -109,7 +109,7 @@ describe("手动域名 / 进程规则 / Steam 开关", () => {
     const adIndex = rules.indexOf("RULE-SET,广告集合_rules,广告拦截");
     expect(rules.slice(adIndex - 5, adIndex)).toEqual([
       "DOMAIN-SUFFIX,cdn.example.com,国内直连",
-      "DOMAIN-SUFFIX,api.example.org,自动选择",
+      "DOMAIN-SUFFIX,api.example.org,节点选择",
       "DOMAIN-SUFFIX,ads.example.net,广告拦截",
       "DOMAIN-SUFFIX,example.net,国内直连",
       "IP-CIDR,192.0.2.10/32,国内直连,no-resolve",

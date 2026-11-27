@@ -566,7 +566,7 @@ describe("状态文案", () => {
 
   it("链名撞上内置分组名时本地就报占用", () => {
     const { container } = renderSection({
-      config: { proxyChains: [{ id: "c1", name: "手动选择", relayNodes: [], landingNodes: [] }] },
+      config: { proxyChains: [{ id: "c1", name: "默认分流", relayNodes: [], landingNodes: [] }] },
       previewChains: undefined,
     });
     expect(within(cards(container)[0]).getByText(/已被内置分组/)).toBeTruthy();

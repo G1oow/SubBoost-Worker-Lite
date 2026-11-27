@@ -574,8 +574,8 @@ describe("subscription config utils", () => {
       "DOMAIN-SUFFIX,example.com,DIRECT",
       "RULE-SET,广告集合_rules,广告拦截",
     ]);
-    // 兜底出口固定是「手动选择」
-    expect(rules.at(-1)).toBe("MATCH,手动选择");
+    // 兜底出口固定是「默认分流」
+    expect(rules.at(-1)).toBe("MATCH,默认分流");
   });
 
   it("restores persisted group listeners with stable targets and drops malformed entries", () => {

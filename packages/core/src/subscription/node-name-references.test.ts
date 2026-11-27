@@ -129,7 +129,7 @@ describe("node name references", () => {
   it("keeps only references to builtin group names, independent of the template", () => {
     const dialerProxyGroups = [
       {
-        relayNodes: ["自动选择", "手动选择", "🤖 AI 服务"],
+        relayNodes: ["节点选择", "默认分流", "🤖 AI 服务"],
         targetNodes: [],
       },
     ];
@@ -139,7 +139,7 @@ describe("node name references", () => {
       expect(
         reconcileNodeNameReferences({ template, dialerProxyGroups }, { nodes: [] })
           .dialerProxyGroups[0].relayNodes
-      ).toEqual(["自动选择", "手动选择"]);
+      ).toEqual(["节点选择", "默认分流"]);
     }
   });
 

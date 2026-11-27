@@ -463,7 +463,7 @@ export function generateClashConfig(
       const insertGroups = [...chainOutputGroups, ...dialerGroups];
       if (insertGroups.length === 0) return allGroups;
 
-      // 插在「节点选择 / 自动选择」之后：出口组按链的顺序排在旧中转组之前
+      // 插在「节点选择 / 默认分流」之后：出口组按链的顺序排在旧中转组之前
       const moduleNameOf = (id: string) => {
         const mod = PROXY_GROUP_MODULES.find((m) => m.id === id);
         return mod ? resolveProxyGroupModuleName(mod, proxyGroupNameOverrides?.[id]) : "";
@@ -571,7 +571,7 @@ export function generateClashConfig(
     ...proxyGroups.map((group) => group.name),
     ...finalOutputNodes.filter((node) => !isSubscriptionInfoNodeName(node.name)).map((node) => node.name),
   ]);
-  // 兜底出口与 MATCH 保持一致：「手动选择」，其次才是第一个分组 / 第一个节点 / DIRECT
+  // 兜底出口与 MATCH 保持一致：「默认分流」，其次才是第一个分组 / 第一个节点 / DIRECT
   const selectModule = PROXY_GROUP_MODULES.find((module) => module.id === "select");
   const selectGroupName = selectModule
     ? resolveProxyGroupModuleName(selectModule, proxyGroupNameOverrides?.select)
@@ -680,7 +680,7 @@ export function generateClashConfig(
 
     ...(mergedProxyProviders !== undefined ? { "proxy-providers": mergedProxyProviders } : {}),
     
-    // 代理组（按顺序：节点选择→自动选择→中转组→广告→服务→直连→非中国→漏网之鱼）
+    // 代理组（按顺序：节点选择→默认分流→中转组→广告→服务→直连→非中国→漏网之鱼）
     "proxy-groups": proxyGroups,
     
     // 规则提供者（包含自定义分流组的规则）

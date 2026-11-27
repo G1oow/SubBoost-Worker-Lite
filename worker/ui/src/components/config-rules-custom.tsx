@@ -131,7 +131,7 @@ export function CustomRulesCard({ config, onApply, onDelete }: CustomRulesCardPr
       <CardHeader>
         <CardTitle>自定义完整规则</CardTitle>
         <p className="text-xs leading-relaxed text-fg-45">
-          {`每行一条完整 Clash 规则，例如 DOMAIN-SUFFIX,example.net,自动选择；目标写分流组名称或 DIRECT / REJECT。空行与注释（# 或 //）会跳过；应用时用这些行整段替换现有的自定义规则，排序仍由系统决定。`}
+          {`每行一条完整 Clash 规则，例如 DOMAIN-SUFFIX,example.net,节点选择；目标写分流组名称或 DIRECT / REJECT。空行与注释（# 或 //）会跳过；应用时用这些行整段替换现有的自定义规则，排序仍由系统决定。`}
         </p>
       </CardHeader>
       <CardContent className="space-y-3">
@@ -139,7 +139,7 @@ export function CustomRulesCard({ config, onApply, onDelete }: CustomRulesCardPr
           value={text}
           onChange={(event) => setText(event.target.value)}
           aria-label="自定义完整规则"
-          placeholder={"DOMAIN-SUFFIX,example.net,自动选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve"}
+          placeholder={"DOMAIN-SUFFIX,example.net,节点选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve"}
           spellCheck={false}
           className="min-h-[132px] resize-y font-mono text-xs"
         />

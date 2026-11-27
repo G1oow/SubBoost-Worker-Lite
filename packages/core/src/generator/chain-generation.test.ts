@@ -106,7 +106,7 @@ describe("链式代理生成", () => {
 
   it("落地节点退出各分组，出口组顶替它原来的坑位", () => {
     const config = generate([chainEntry()]);
-    const autoGroup = membersOf(config, "自动选择");
+    const autoGroup = membersOf(config, "节点选择");
 
     expect(autoGroup).toContain(EXIT_GROUP);
     expect(autoGroup).not.toContain("美国落地-1");
@@ -118,9 +118,9 @@ describe("链式代理生成", () => {
     expect(autoGroup.indexOf(EXIT_GROUP)).toBeLessThan(autoGroup.indexOf("香港节点"));
   });
 
-  it("自动选择把落地节点原地替换成出口组", () => {
+  it("节点选择把落地节点原地替换成出口组", () => {
     const config = generate([chainEntry()]);
-    const autoGroup = membersOf(config, "自动选择");
+    const autoGroup = membersOf(config, "节点选择");
 
     expect(autoGroup).toEqual(["日本中转", EXIT_GROUP, "香港节点"]);
     expect(autoGroup).not.toContain("美国落地-1");
@@ -138,15 +138,15 @@ describe("链式代理生成", () => {
     }
   });
 
-  it("出口组排在前置组之前，二者都紧跟在自动选择之后", () => {
+  it("出口组排在前置组之前，二者都紧跟在节点选择之后", () => {
     const config = generate([chainEntry()]);
     const names = groupNames(config);
 
-    expect(names.indexOf("自动选择")).toBeLessThan(names.indexOf(EXIT_GROUP));
+    expect(names.indexOf("节点选择")).toBeLessThan(names.indexOf(EXIT_GROUP));
     expect(names.indexOf(EXIT_GROUP)).toBeLessThan(names.indexOf(RELAY_GROUP));
     // 其它内置分组仍在链的组之后
     expect(names.indexOf(RELAY_GROUP)).toBeLessThan(names.indexOf("国内直连"));
-    expect(names.slice(0, 4)).toEqual(["自动选择", "手动选择", EXIT_GROUP, RELAY_GROUP]);
+    expect(names.slice(0, 4)).toEqual(["节点选择", "默认分流", EXIT_GROUP, RELAY_GROUP]);
   });
 
   it("前置为空时前置组只放 REJECT，落地仍然生成", () => {
@@ -166,23 +166,23 @@ describe("链式代理生成", () => {
 
     expect(findGroup(config, EXIT_GROUP)).toBeUndefined();
     expect(findGroup(config, RELAY_GROUP)).toBeUndefined();
-    expect(membersOf(config, "自动选择")).toContain("美国落地-1");
+    expect(membersOf(config, "节点选择")).toContain("美国落地-1");
     expect(nodeByName(config, "美国落地-1")).not.toHaveProperty("dialer-proxy");
   });
 
   it("与内置分组重名时跳过该链", () => {
-    const config = generate([chainEntry({ name: "手动选择" })]);
+    const config = generate([chainEntry({ name: "默认分流" })]);
     const names = groupNames(config);
 
-    expect(names.filter((name) => name === "手动选择")).toHaveLength(1);
-    expect(findGroup(config, "手动选择 · 前置")).toBeUndefined();
+    expect(names.filter((name) => name === "默认分流")).toHaveLength(1);
+    expect(findGroup(config, "默认分流 · 前置")).toBeUndefined();
     expect(nodeByName(config, "美国落地-1")).not.toHaveProperty("dialer-proxy");
   });
 
   it("停用的链不生成分组", () => {
     const config = generate([chainEntry({ enabled: false })]);
     expect(findGroup(config, EXIT_GROUP)).toBeUndefined();
-    expect(membersOf(config, "自动选择")).toContain("美国落地-1");
+    expect(membersOf(config, "节点选择")).toContain("美国落地-1");
   });
 
   it("出口组类型可配，url-test 带 url 与 interval", () => {
@@ -260,8 +260,8 @@ describe("链作为规则目标", () => {
     const rule = rulesOf(config).find((item) => item.startsWith("DOMAIN-SUFFIX,chat.example.com,"));
     expect(rule).toBeDefined();
     expect(rule).not.toContain(EXIT_GROUP);
-    // 回退到与 MATCH 一致的兜底出口「手动选择」
-    expect(rule?.endsWith(",手动选择")).toBe(true);
+    // 回退到与 MATCH 一致的兜底出口「默认分流」
+    expect(rule?.endsWith(",默认分流")).toBe(true);
   });
 
   it("链出口组可以当成分组的高级成员引用", () => {
