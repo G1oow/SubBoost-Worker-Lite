@@ -192,7 +192,8 @@ export function DashboardPanel({
   const manualSources = stats?.sources.manual ?? state.sources.filter((item) => item.kind === "manual").length;
   const totalSubscriptions = stats?.subscriptions.total ?? state.subscriptions.length;
   const allSourceSubscriptions =
-    stats?.subscriptions.allSources ?? state.subscriptions.filter((item) => item.sourceIds.length === 0).length;
+    stats?.subscriptions.allSources ??
+    state.subscriptions.filter((item) => item.sourceMode === "all").length;
   const totalNodes =
     stats?.nodes.total ??
     (state.status?.sources.reduce((sum, item) => sum + (item.nodeCount ?? 0), 0) ?? 0);

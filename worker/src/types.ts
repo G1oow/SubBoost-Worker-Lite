@@ -113,12 +113,30 @@ export type StoredSource = {
   updatedAt: string;
 };
 
+/**
+ * 订阅的源绑定方式。
+ *
+ * - `all`：聚合全部启用源（此时 `sourceIds` 恒为空）；
+ * - `explicit`：只聚合 `sourceIds` 点名的源。点名的源全被删除后也保持 `explicit`，
+ *   不会退回 `all`——退回等于把用户没勾选过的源悄悄塞进订阅。
+ */
+export type SubscriptionSourceMode = "all" | "explicit";
+
+/** 历史上没有 `sourceMode` 的记录：空 `sourceIds` 即「全部启用源」 */
+export function resolveSourceMode(
+  subscription: Pick<StoredSubscription, "sourceIds"> & { sourceMode?: SubscriptionSourceMode }
+): SubscriptionSourceMode {
+  return subscription.sourceMode ?? (subscription.sourceIds.length === 0 ? "all" : "explicit");
+}
+
 export type StoredSubscription = {
   id: string;
   name: string;
   tokenHash: string;
   tokenEnc: string;
   sourceIds: string[];
+  /** 源绑定方式；早期记录没有该字段，按 `resolveSourceMode` 推断 */
+  sourceMode?: SubscriptionSourceMode;
   /** 勾选的链（链在这条订阅里充当「一个源」）：只有点名的链才会生成 */
   chainIds: string[];
   createdAt: string;
@@ -131,6 +149,7 @@ export type SubscriptionDto = {
   id: string;
   name: string;
   sourceIds: string[];
+  sourceMode: SubscriptionSourceMode;
   chainIds: string[];
   link: string;
   // 已生成短链时才有值：`${origin}/s/${shortCode}`

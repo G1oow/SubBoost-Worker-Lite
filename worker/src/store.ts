@@ -22,6 +22,8 @@ import {
   type StoredSource,
   type StoredSubscription,
   type SubscriptionDto,
+  type SubscriptionSourceMode,
+  resolveSourceMode,
   type UpdateCheckRecord,
 } from "./types";
 
@@ -188,9 +190,21 @@ export function createStore(env: Env) {
       }
     }
 
-    // 源集合或节点改名都会影响已生成的 YAML：清掉订阅缓存，下次访问重新生成
+    // 源集合或节点改名都会影响已生成的 YAML：清掉订阅缓存，下次访问重新生成。
+    // 顺带把「指向已删除源」的绑定剔掉：删掉一个源不需要逐条重存订阅，刷新后自然
+    // 只聚合仍然存在的源。剔空也保持 explicit——绝不退回「全部启用源」，否则用户没
+    // 勾选过的源会悄悄进订阅（详见 `SubscriptionSourceMode`）。
     const subs = await listStoredSubscriptions();
-    for (const sub of subs) {
+    let bindingsChanged = false;
+    const nextSubs = subs.map((sub) => {
+      if (resolveSourceMode(sub) !== "explicit") return sub;
+      const sourceIds = sub.sourceIds.filter((id) => nextIds.has(id));
+      if (sourceIds.length === sub.sourceIds.length) return sub;
+      bindingsChanged = true;
+      return { ...sub, sourceIds, sourceMode: "explicit" as SubscriptionSourceMode };
+    });
+    if (bindingsChanged) await writeSubscriptions(nextSubs);
+    for (const sub of nextSubs) {
       try {
         await kv.delete(cacheKey(sub.id));
       } catch {
@@ -232,6 +246,7 @@ export function createStore(env: Env) {
       id: stored.id,
       name: stored.name,
       sourceIds: stored.sourceIds,
+      sourceMode: resolveSourceMode(stored),
       chainIds: stored.chainIds ?? [],
       link: `${origin}/sub/${token}`,
       // 创建订阅时 origin 为空，此时不产出半截短链
@@ -262,6 +277,7 @@ export function createStore(env: Env) {
   async function createSubscription(input: {
     name: string;
     sourceIds: string[];
+    sourceMode?: SubscriptionSourceMode;
     chainIds?: string[];
   }): Promise<{ dto: SubscriptionDto; token: string }> {
     const secret = requireEncryptionKey(env);
@@ -274,7 +290,8 @@ export function createStore(env: Env) {
       name: input.name,
       tokenHash,
       tokenEnc: await encryptString(token, secret),
-      sourceIds: input.sourceIds,
+      sourceIds: resolveSourceMode(input) === "all" ? [] : input.sourceIds,
+      sourceMode: resolveSourceMode(input),
       chainIds: input.chainIds ?? [],
       createdAt: now,
       updatedAt: now,
@@ -334,7 +351,12 @@ export function createStore(env: Env) {
    */
   async function updateSubscription(
     id: string,
-    patch: { name?: string; sourceIds?: string[]; chainIds?: string[] },
+    patch: {
+      name?: string;
+      sourceIds?: string[];
+      sourceMode?: SubscriptionSourceMode;
+      chainIds?: string[];
+    },
     origin: string
   ): Promise<SubscriptionDto | null> {
 
@@ -343,10 +365,14 @@ export function createStore(env: Env) {
     if (index < 0) return null;
 
     const previous = subs[index];
+    // 只传 sourceIds 的老客户端没有模式概念：沿用当前模式，别把 explicit 的空绑定
+    // 解释成「全部启用源」——那等于悄悄扩大订阅范围
+    const sourceMode = patch.sourceMode ?? resolveSourceMode(previous);
     const updated: StoredSubscription = {
       ...previous,
+      sourceMode,
+      sourceIds: sourceMode === "all" ? [] : patch.sourceIds ?? previous.sourceIds,
       ...(patch.name !== undefined ? { name: patch.name } : {}),
-      ...(patch.sourceIds !== undefined ? { sourceIds: patch.sourceIds } : {}),
       ...(patch.chainIds !== undefined ? { chainIds: patch.chainIds } : {}),
       updatedAt: new Date().toISOString(),
     };

@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "1.5.1" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "1.6.0" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -380,6 +380,56 @@ describe("router subscriptions", () => {
     expect(body.subscription.link).toMatch(
       /^https:\/\/worker\.example\.com\/sub\/[A-Za-z0-9_-]{43}$/
     );
+  });
+
+  it("接受显式空绑定：sourceMode=explicit 不再被当成「全部启用源」", async () => {
+    const h = createHarness();
+    const created = await route(
+      apiRequest("/api/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "empty", sourceMode: "explicit", sourceIds: [] }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(created.status).toBe(201);
+    const { subscription } = (await created.json()) as {
+      subscription: { id: string; sourceIds: string[]; sourceMode: string };
+    };
+    expect(subscription.sourceMode).toBe("explicit");
+    expect(subscription.sourceIds).toEqual([]);
+
+    const patched = await route(
+      apiRequest(`/api/subscriptions/${subscription.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sourceMode: "all" }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(patched.status).toBe(200);
+    const { subscription: after } = (await patched.json()) as {
+      subscription: { sourceIds: string[]; sourceMode: string };
+    };
+    expect(after.sourceMode).toBe("all");
+    expect(after.sourceIds).toEqual([]);
+  });
+
+  it("拒绝非法的 sourceMode", async () => {
+    const h = createHarness();
+    const response = await route(
+      apiRequest("/api/subscriptions", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "bad", sourceMode: "some" }),
+      }),
+      h.env,
+      h.deps
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ code: "VALIDATION_ERROR" });
   });
 
   it("returns the newly created subscription when several exist", async () => {

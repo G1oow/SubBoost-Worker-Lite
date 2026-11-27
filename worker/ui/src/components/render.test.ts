@@ -20,7 +20,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "1.5.1" },
+  app: { name: "SubBoost Lite", version: "1.6.0" },
   sources: [
     {
       id: "s1",
@@ -46,6 +46,7 @@ const STATE: AppState = {
       id: "sub1",
       name: "默认订阅",
       sourceIds: [],
+      sourceMode: "all",
       chainIds: [],
       link: "https://worker.example.com/sub/tokenvalue",
       createdAt: "2026-10-01T00:00:00.000Z",
@@ -91,7 +92,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v1.5.1");
+    expect(html).toContain("v1.6.0");
     expect(html).toContain("content");
   });
 
@@ -302,7 +303,7 @@ describe("admin UI rendering", () => {
       React.createElement(SubscriptionsPanel, {
         state: {
           ...STATE,
-          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"] }],
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"], sourceMode: "explicit" }],
           capabilities: {
             age: {
               enabled: true,
@@ -368,7 +369,7 @@ describe("admin UI rendering", () => {
         state: {
           ...STATE,
           sources: [{ ...STATE.sources[0], name: longName }],
-          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"] }],
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: ["s1"], sourceMode: "explicit" }],
         },
         onCreate: noopAsync,
         onRotate: noopAsync,

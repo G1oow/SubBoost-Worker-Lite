@@ -20,10 +20,21 @@ export type SourceDto = {
   updatedAt: string;
 };
 
+/**
+ * 订阅的源绑定方式。
+ *
+ * - `all`：聚合全部启用源；
+ * - `explicit`：只聚合勾选的源，勾选的源被删光时订阅只输出一个提示节点，
+ *   不会退回「全部启用源」。
+ */
+export type SubscriptionSourceMode = "all" | "explicit";
+
 export type SubscriptionDto = {
   id: string;
   name: string;
   sourceIds: string[];
+  /** 源绑定方式：`all` = 全部启用源，`explicit` = 只聚合勾选的源 */
+  sourceMode: SubscriptionSourceMode;
   /** 勾选的链：链在这条订阅里充当「一个源」 */
   chainIds: string[];
   link: string;

@@ -96,7 +96,7 @@ export function buildDashboardStats(input: BuildDashboardStatsInput): DashboardS
     .map(([type, count]) => ({ type, count }))
     .sort((a, b) => b.count - a.count || a.type.localeCompare(b.type));
 
-  const allSources = subscriptions.filter((item) => item.sourceIds.length === 0).length;
+  const allSources = subscriptions.filter((item) => item.sourceMode === "all").length;
   const scoped = subscriptions.length - allSources;
 
   const lastRun: DashboardLastRun | null = status

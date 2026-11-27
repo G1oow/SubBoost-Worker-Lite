@@ -25,6 +25,8 @@ import {
   DialogTitle,
 } from "@subboost/ui/components/ui/dialog";
 import { FormField } from "@subboost/ui/components/ui/form-field";
+import { InlineNote } from "@subboost/ui/components/ui/inline-note";
+import { SwitchField } from "@subboost/ui/components/ui/switch-field";
 import { IconButton } from "@subboost/ui/components/ui/icon-button";
 import { Input } from "@subboost/ui/components/ui/input";
 import { useToast } from "@subboost/ui/components/ui/toaster";
@@ -33,7 +35,8 @@ import { SortableHandle, SortableItem, SortableList } from "@subboost/ui/compone
 import { LoadingButton } from "@subboost/ui/motion/loading-button";
 import { copyTextToClipboard } from "@subboost/ui/lib/clipboard";
 import { cn } from "@subboost/ui/lib/utils";
-import type { AppState, ChainOption, SubscriptionDto } from "../lib/types";
+import type { AppState, ChainOption, SubscriptionDto, SubscriptionSourceMode } from "../lib/types";
+import { EMPTY_SUBSCRIPTION_NODE_NAME } from "@subboost/core/subscription/empty-subscription-node";
 import { SubscriptionAgeDialog } from "./subscription-age-dialog";
 import { SubscriptionImportDialog } from "./subscription-import-dialog";
 import { SubscriptionShareDialog } from "./subscription-share-dialog";
@@ -41,6 +44,7 @@ import { SubscriptionShareDialog } from "./subscription-share-dialog";
 export type SubscriptionUpdatePatch = {
   name?: string;
   sourceIds?: string[];
+  sourceMode?: SubscriptionSourceMode;
   chainIds?: string[];
 };
 
@@ -48,7 +52,12 @@ export type SubscriptionsPanelProps = {
   state: AppState;
   /** 可勾选的链：链在订阅里就是一个源 */
   chains?: ChainOption[];
-  onCreate: (input: { name: string; sourceIds: string[]; chainIds: string[] }) => Promise<void>;
+  onCreate: (input: {
+    name: string;
+    sourceIds: string[];
+    sourceMode: SubscriptionSourceMode;
+    chainIds: string[];
+  }) => Promise<void>;
   onReorder?: (ids: string[]) => Promise<void>;
   onRotate: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
@@ -77,6 +86,17 @@ function splitBoundSourceIds(
   }
   return { selected, danglingCount };
 }
+
+/**
+ * 订阅显式绑定却一个源都不剩：绑定的源被删光了，或者用户自己一个都没勾。
+ *
+ * 这种情况后端只输出一个「当前订阅暂无绑定源」提示节点，链接仍然可用——所以卡片上
+ * 必须明说原因，而不能显示成「全部启用源」，更不能悄悄聚合别的源。
+ */
+function isSourceBindingEmpty(subscription: SubscriptionDto, knownIds: Set<string>): boolean {
+  if (subscription.sourceMode !== "explicit") return false;
+  return subscription.sourceIds.every((id) => !knownIds.has(id));
+}
 export function SubscriptionsPanel({
   state,
   chains,
@@ -95,6 +115,8 @@ export function SubscriptionsPanel({
   const [selected, setSelected] = React.useState<string[]>([]);
   const [selectedChains, setSelectedChains] = React.useState<string[]>([]);
   const [saving, setSaving] = React.useState(false);
+  /** 是否聚合全部启用源；关掉才进入逐源勾选（勾空 = 暂无绑定源，不会退化成全部） */
+  const [bindAllSources, setBindAllSources] = React.useState(true);
   const [error, setError] = React.useState("");
   /** 该订阅引用但已被删除的源数量：只用于弹窗提示，不参与提交 */
   const [danglingCount, setDanglingCount] = React.useState(0);
@@ -160,6 +182,7 @@ export function SubscriptionsPanel({
     setName("");
     setSelected([]);
     setSelectedChains([]);
+    setBindAllSources(true);
     setDanglingCount(0);
     setError("");
     setOpen(true);
@@ -174,6 +197,7 @@ export function SubscriptionsPanel({
     setName(subscription.name);
     // 已删除的源不能进勾选态，否则保存时会把看不见的 id 一起提交
     setSelected(bound);
+    setBindAllSources(subscription.sourceMode === "all");
     // 已删除的链同理：后端会以「链不存在」400
     setSelectedChains(subscription.chainIds.filter((chainId) => knownChainIds.has(chainId)));
     setDanglingCount(dangling);
@@ -201,8 +225,10 @@ export function SubscriptionsPanel({
       return;
     }
     setSaving(true);
-    // 兜底：只提交现存源/链，残留的已删除 id 会让后端 400
-    const sourceIds = selected.filter((id) => knownSourceIds.has(id));
+    // 兜底：只提交现存源/链，残留的已删除 id 会让后端 400。
+    // 「全部启用源」下 sourceIds 恒为空——空数组正是这个模式在存储里的表示。
+    const sourceMode: SubscriptionSourceMode = bindAllSources ? "all" : "explicit";
+    const sourceIds = bindAllSources ? [] : selected.filter((id) => knownSourceIds.has(id));
     const chainIds = selectedChains.filter((id) => knownChainIds.has(id));
     try {
       if (editingId) {
@@ -210,10 +236,14 @@ export function SubscriptionsPanel({
           setError("当前版本不支持修改订阅。");
           return;
         }
-        await onUpdate(editingId, { name: name.trim(), sourceIds, chainIds });
-        toast({ variant: "success", title: "已更新订阅", description: "链接保持不变，下次访问即按新源与链生成。" });
+        await onUpdate(editingId, { name: name.trim(), sourceIds, sourceMode, chainIds });
+        toast({
+          variant: "success",
+          title: "已更新订阅",
+          description: "链接保持不变，下次访问即按新源与链生成。",
+        });
       } else {
-        await onCreate({ name: name.trim(), sourceIds, chainIds });
+        await onCreate({ name: name.trim(), sourceIds, sourceMode, chainIds });
         toast({ variant: "success", title: "已创建订阅" });
       }
       setOpen(false);
@@ -307,7 +337,10 @@ export function SubscriptionsPanel({
   };
 
   const renderBoundSources = (subscription: SubscriptionDto) => {
-    if (subscription.sourceIds.length === 0) {
+    if (isSourceBindingEmpty(subscription, knownSourceIds)) {
+      return <Badge variant="destructive">未绑定源</Badge>;
+    }
+    if (subscription.sourceMode === "all") {
       return <Badge variant="secondary">全部启用源</Badge>;
     }
     const names = subscription.sourceIds.map((id) => sourceNameById.get(id) ?? "已删除的源");
@@ -410,6 +443,15 @@ export function SubscriptionsPanel({
                     <p className="truncate font-mono text-2xs text-fg-45" title={subscription.link}>
                       {subscription.link}
                     </p>
+                    {/*
+                     * 绑定的源被删光时后端只输出一个提示节点：链接照样能拉，但拉下来没节点。
+                     * 这里必须红字说清楚，别让用户以为订阅还在正常出节点。
+                     */}
+                    {isSourceBindingEmpty(subscription, knownSourceIds) ? (
+                      <InlineNote tone="danger">
+                        绑定的源已被删除，订阅里只会有一个「{EMPTY_SUBSCRIPTION_NODE_NAME}」提示节点；点「修改订阅」重新选择源。
+                      </InlineNote>
+                    ) : null}
                     {/* 短链独立成一个按钮：不翻弹窗也能生成，生成后短码直接显示在这一行 */}
                     {onCreateShortLink ? (
                       subscription.shortLink ? (
@@ -560,52 +602,68 @@ export function SubscriptionsPanel({
 
             <div className="space-y-2">
               <p className="text-sm font-medium text-fg-80">绑定源</p>
-              <p className="text-xs text-fg-45">
-                不选择任何源表示使用全部启用源；勾选后只聚合这些源。
-              </p>
-              {editingId && danglingCount > 0 ? (
-                <p className="text-xs text-warning-note-fg" role="status">
-                  该订阅还挂着 {danglingCount} 个已被删除的源（下方列表不再显示它们），保存后会自动移除。
+              <SwitchField
+                checked={bindAllSources}
+                onCheckedChange={setBindAllSources}
+                label="聚合全部启用源"
+                description="打开时聚合所有启用的源；关掉可以逐个勾选，一个都不勾时订阅只输出一个提示节点，不会退化成全部启用源。"
+              />
+              {bindAllSources ? (
+                <p className="text-xs text-fg-45">
+                  当前 {state.sources.length} 个源，其中 {state.sources.filter((source) => source.enabled).length} 个已启用。
                 </p>
-              ) : null}
-              {/* 勾选/取消只是改变高亮，不需要进离场动画；FLIP 负责重排 */}
-              <MotionList as="div" className="grid gap-2" mode="sync">
-                {state.sources.map((source) => {
-                  const checked = selected.includes(source.id);
-                  return (
-                    <MotionItem as="div" key={source.id} itemKey={source.id}>
-                      <button
-                        type="button"
-                        onClick={() => toggleSource(source.id)}
-                        aria-pressed={checked}
-                        className={cn(
-                          "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-[border-color,background-color,color] duration-200",
-                          checked
-                            ? "border-primary-500/50 bg-primary-500/20 text-fg"
-                            : "border-ink/10 bg-ink/5 text-fg-70 hover:border-ink/20 hover:bg-ink/10"
-                        )}
-                      >
-                        <span className="flex items-center gap-2">
-                          <span
-                            aria-hidden="true"
+              ) : (
+                <>
+                  {danglingCount > 0 ? (
+                    <InlineNote tone="warning">
+                      该订阅原本还挂着 {danglingCount} 个已被删除的源（下方列表不再显示它们），删除源时已自动移除。
+                    </InlineNote>
+                  ) : null}
+                  {selected.length === 0 ? (
+                    <InlineNote tone="danger">
+                      没有勾选任何源：订阅里只会有一个「{EMPTY_SUBSCRIPTION_NODE_NAME}」提示节点。
+                    </InlineNote>
+                  ) : null}
+                  {/* 勾选/取消只是改变高亮，不需要进离场动画；FLIP 负责重排 */}
+                  <MotionList as="div" className="grid gap-2" mode="sync">
+                    {state.sources.map((source) => {
+                      const checked = selected.includes(source.id);
+                      return (
+                        <MotionItem as="div" key={source.id} itemKey={source.id}>
+                          <button
+                            type="button"
+                            onClick={() => toggleSource(source.id)}
+                            aria-pressed={checked}
                             className={cn(
-                              "flex h-4 w-4 items-center justify-center rounded border transition-colors",
-                              checked ? "border-primary-500 bg-primary-500/70" : "border-ink/25"
+                              "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-[border-color,background-color,color] duration-200",
+                              checked
+                                ? "border-primary-500/50 bg-primary-500/20 text-fg"
+                                : "border-ink/10 bg-ink/5 text-fg-70 hover:border-ink/20 hover:bg-ink/10"
                             )}
                           >
-                            {checked ? <Icon icon={Check} size="xs" className="text-fg" /> : null}
-                          </span>
-                          {source.name}
-                        </span>
-                        <span className="text-xs text-fg-45">
-                          {source.kind === "remote" ? "远程" : "手动"}
-                          {source.enabled ? "" : " · 已停用"}
-                        </span>
-                      </button>
-                    </MotionItem>
-                  );
-                })}
-              </MotionList>
+                            <span className="flex items-center gap-2">
+                              <span
+                                aria-hidden="true"
+                                className={cn(
+                                  "flex h-4 w-4 items-center justify-center rounded border transition-colors",
+                                  checked ? "border-primary-500 bg-primary-500/70" : "border-ink/25"
+                                )}
+                              >
+                                {checked ? <Icon icon={Check} size="xs" className="text-fg" /> : null}
+                              </span>
+                              {source.name}
+                            </span>
+                            <span className="text-xs text-fg-45">
+                              {source.kind === "remote" ? "远程" : "手动"}
+                              {source.enabled ? "" : " · 已停用"}
+                            </span>
+                          </button>
+                        </MotionItem>
+                      );
+                    })}
+                  </MotionList>
+                </>
+              )}
             </div>
 
             {/* 链式代理：建好的链在这里就是一个源，只有勾选它的订阅才生成 */}

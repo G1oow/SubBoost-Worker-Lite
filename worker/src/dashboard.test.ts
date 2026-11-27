@@ -39,16 +39,17 @@ function snapshot(sourceId: string, nodes: ParsedNode[]): SnapshotRecord {
 }
 
 function subscription(overrides: Partial<SubscriptionDto> = {}): SubscriptionDto {
-  return {
+  const base: SubscriptionDto = {
     id: "sub1",
     name: "默认订阅",
     sourceIds: [],
+    sourceMode: "all",
     chainIds: [],
     link: "https://worker.example.com/sub/token",
     createdAt: "2026-10-01T00:00:00.000Z",
     updatedAt: "2026-10-01T00:00:00.000Z",
-    ...overrides,
   };
+  return { ...base, ...overrides, sourceMode: overrides.sourceMode ?? base.sourceMode };
 }
 
 const STATUS: StatusRecord = {
@@ -73,7 +74,11 @@ describe("buildDashboardStats", () => {
 
     const stats = buildDashboardStats({
       sources: [s1, s2],
-      subscriptions: [subscription(), subscription({ id: "sub2", sourceIds: ["s1"] })],
+      // 显式绑定（哪怕绑定被删光）不算「全部启用源」，所以 sourceMode 必须是 explicit
+      subscriptions: [
+        subscription(),
+        subscription({ id: "sub2", sourceIds: ["s1"], sourceMode: "explicit" }),
+      ],
       status: STATUS,
       snapshots,
       generatedAt: "2026-10-12T00:00:00.000Z",

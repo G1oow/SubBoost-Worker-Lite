@@ -13,8 +13,8 @@ import { ConfigNodesSection } from "./config-nodes-section";
  */
 
 const SUBSCRIPTIONS: SubscriptionDto[] = [
-  { id: "sub-1", name: "订阅一", sourceIds: ["s1"], chainIds: [], link: "", createdAt: "", updatedAt: "" },
-  { id: "sub-2", name: "订阅二", sourceIds: ["s2"], chainIds: [], link: "", createdAt: "", updatedAt: "" },
+  { id: "sub-1", name: "订阅一", sourceIds: ["s1"], sourceMode: "explicit", chainIds: [], link: "", createdAt: "", updatedAt: "" },
+  { id: "sub-2", name: "订阅二", sourceIds: ["s2"], sourceMode: "explicit", chainIds: [], link: "", createdAt: "", updatedAt: "" },
 ];
 
 const KEY_A = "a".repeat(16);

@@ -293,3 +293,55 @@ describe("createStore TTLs and config", () => {
   });
 });
 
+
+describe("createStore 源绑定方式", () => {
+  let kv: MemoryKV;
+  let store: ReturnType<typeof createStore>;
+
+  beforeEach(() => {
+    const created = createEnv();
+    kv = created.kv;
+    store = createStore(created.env);
+  });
+
+  it("删除源时自动剔掉订阅里的失效绑定，且不退回「全部启用源」", async () => {
+    const sources = await store.saveSources([
+      { name: "a", kind: "manual", manualText: "ss://a" },
+      { name: "b", kind: "manual", manualText: "ss://b" },
+    ]);
+    await store.createSubscription({ name: "both", sourceIds: [sources[0].id, sources[1].id] });
+    await store.createSubscription({ name: "only-a", sourceIds: [sources[0].id] });
+    await store.createSubscription({ name: "all", sourceIds: [] });
+
+    // 删掉 a：不需要用户逐条重存订阅
+    await store.saveSources([{ id: sources[1].id, name: "b", kind: "manual", manualText: "ss://b" }]);
+
+    const [both, onlyA, all] = await store.listSubscriptions("https://worker.example.com");
+    expect(both.sourceIds).toEqual([sources[1].id]);
+    expect(both.sourceMode).toBe("explicit");
+    // 关键：绑定被删光时保持 explicit 的空绑定（输出占位节点），不能变成 all
+    expect(onlyA.sourceIds).toEqual([]);
+    expect(onlyA.sourceMode).toBe("explicit");
+    expect(all.sourceMode).toBe("all");
+  });
+
+  it("老记录没有 sourceMode 时按 sourceIds 是否为空推断", async () => {
+    const { dto } = await store.createSubscription({ name: "legacy", sourceIds: [] });
+    const raw = JSON.parse(kv.raw("meta:subs") as string) as Array<Record<string, unknown>>;
+    delete raw[0].sourceMode;
+    await kv.put("meta:subs", JSON.stringify(raw));
+
+    const [subscription] = await store.listSubscriptions("https://worker.example.com");
+    expect(subscription.id).toBe(dto.id);
+    expect(subscription.sourceMode).toBe("all");
+  });
+
+  it("改成「全部启用源」时清空 sourceIds，避免旧勾选在切回 explicit 时复活", async () => {
+    const [source] = await store.saveSources([{ name: "a", kind: "manual", manualText: "ss://a" }]);
+    const { dto } = await store.createSubscription({ name: "s", sourceIds: [source.id] });
+
+    const updated = await store.updateSubscription(dto.id, { sourceMode: "all" }, "https://worker.example.com");
+    expect(updated?.sourceMode).toBe("all");
+    expect(updated?.sourceIds).toEqual([]);
+  });
+});
