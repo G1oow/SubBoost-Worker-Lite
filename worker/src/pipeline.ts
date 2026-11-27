@@ -14,6 +14,7 @@ import type { ParsedNode } from "@subboost/core/types/node";
 import { sha256Hex } from "./crypto";
 import { refreshSource, sanitizeErrorMessage, type RefreshSourceResult } from "./sources";
 import { nodeRenameKey } from "@subboost/core/node-rename-key";
+import { createEmptySubscriptionNode } from "@subboost/core/subscription/empty-subscription-node";
 import { resolveNodeNames, toCanvasNodeSummary } from "./node-renames";
 import type { fetchText } from "./safe-fetch";
 import type { Store } from "./store";
@@ -32,6 +33,8 @@ import {
   type StoredSubscription,
   type SubscriptionCanvasNodes,
   type SubscriptionRefreshStatus,
+  type SubscriptionSourceMode,
+  resolveSourceMode,
 } from "./types";
 
 
@@ -63,7 +66,7 @@ export type GetOrGenerateResult =
  * 本身变化时不会自动失效：升级部署后客户端仍会拿到旧 YAML，表现为「代码改了，
  * 输出的配置没变」。生成结果有任何可见变化都把这个版本 +1。
  */
-export const GENERATOR_CACHE_VERSION = 2;
+export const GENERATOR_CACHE_VERSION = 3;
 
 export async function computeConfigHash(config: Record<string, unknown>): Promise<string> {
   return sha256Hex(stableJsonStringify({ generator: GENERATOR_CACHE_VERSION, config }));
@@ -74,15 +77,21 @@ export async function computeConfigHash(config: Record<string, unknown>): Promis
  *
  * 只按配置算哈希会漏掉订阅级改动——勾上一条链或改选源都属于「输出变了但配置没变」，
  * 结果是旧的 YAML 一直被复用，用户看到链不生效。
+ *
+ * `sourceMode` 必须进哈希：`explicit` 空绑定与 `all` 的 `sourceIds` 都是空数组，
+ * 哈希一致就会把「暂无绑定源」的占位配置当成「全部启用源」的旧产物复用。
  */
 export async function computeSubscriptionCacheHash(
   config: Record<string, unknown>,
-  sub: Pick<StoredSubscription, "sourceIds" | "chainIds">
+  sub: Pick<StoredSubscription, "sourceIds" | "chainIds"> & {
+    sourceMode?: SubscriptionSourceMode;
+  }
 ): Promise<string> {
   return sha256Hex(
     stableJsonStringify({
       generator: GENERATOR_CACHE_VERSION,
       config,
+      sourceMode: resolveSourceMode(sub),
       sourceIds: [...(sub.sourceIds ?? [])].sort(),
       chainIds: [...(sub.chainIds ?? [])].sort(),
     })
@@ -144,18 +153,18 @@ export function selectSubscriptionChains(
 type SourceLike = { id: string; enabled: boolean; nodeRenames?: NodeRenames };
 
 /**
- * 订阅实际用到的源：订阅勾选的源（留空 = 全部已启用源）；
+ * 订阅实际用到的源：`all` = 全部已启用源，`explicit` = 只取点名的源。
  * `extraIds` 是链引用节点所在的源，订阅没勾也要一起进快照，否则链的组引用会悬空。
  */
 function targetSources<T extends SourceLike>(
-  sub: Pick<StoredSubscription, "sourceIds">,
+  sub: Pick<StoredSubscription, "sourceIds"> & { sourceMode?: SubscriptionSourceMode },
   sources: T[],
   extraIds: string[]
 ): T[] {
   const enabled = sources.filter((source) => source.enabled);
   const byId = new Map(enabled.map((source) => [source.id, source]));
   const picked =
-    sub.sourceIds.length === 0
+    resolveSourceMode(sub) === "all"
       ? enabled
       : sub.sourceIds
           .map((id) => byId.get(id))
@@ -224,6 +233,22 @@ function mergeSnapshotNodes(
   }
   return nodes;
 }
+
+/**
+ * 订阅勾选的源「一个都不在了」——删掉源的必然结果，不是生成失败。
+ *
+ * 只要还有源存在（哪怕被停用、或还没抓到快照）就不算这种情况：那种订阅仍按原来的
+ * 「无节点」处理，等源恢复。命中这里时输出占位节点，而不是把配置放宽成全部启用源。
+ */
+function boundSourcesVanished(
+  sub: Pick<StoredSubscription, "sourceIds"> & { sourceMode?: SubscriptionSourceMode },
+  sources: ReadonlyArray<{ id: string }>
+): boolean {
+  if (resolveSourceMode(sub) !== "explicit") return false;
+  const alive = new Set(sources.map((source) => source.id));
+  return sub.sourceIds.every((id) => !alive.has(id));
+}
+
 /**
  *
  * 语义见 `@subboost/core/subscription/node-order`：已排好的节点在前，其余按源顺序追加在末尾。
@@ -324,7 +349,13 @@ export async function generateSubscription(
     }
   );
 
-  const nodes = orderNodes(config, mergeSnapshotNodes(targets, snapshots));
+  const mergedNodes = orderNodes(config, mergeSnapshotNodes(targets, snapshots));
+  // 绑定的源被删光时输出占位节点：链接仍然可用，客户端节点列表里直接看到原因，
+  // 而不是 503 让客户端抱着旧配置不动，也不是放宽成「全部启用源」。
+  const nodes =
+    mergedNodes.length === 0 && boundSourcesVanished(sub, sources)
+      ? [createEmptySubscriptionNode()]
+      : mergedNodes;
 
   if (nodes.length === 0) return { kind: "no-nodes" };
 
@@ -372,7 +403,12 @@ export async function loadSubscriptionNodes(
   // order=source：画布要「重置为源顺序」时用，跳过自定义顺序，等价于清空 nodeOrder 之后的输出
   const merged = mergeSnapshotNodes(targets, snapshots);
   const ordered = options.order === "source" ? merged : orderNodes(config, merged);
-  const capped = ordered.slice(0, MAX_CANVAS_NODES);
+  // 画布与真实输出同口径：删光绑定源的订阅在画布上也是那一个占位节点
+  const canvasNodes =
+    ordered.length === 0 && boundSourcesVanished(sub, sources)
+      ? [createEmptySubscriptionNode()]
+      : ordered;
+  const capped = canvasNodes.slice(0, MAX_CANVAS_NODES);
 
   const sourceNames = new Map(sources.map((source) => [source.id, source.name]));
   const perSourceCount = new Map<string, number>();
@@ -393,8 +429,8 @@ export async function loadSubscriptionNodes(
 
   return {
     subscription: { id: sub.id, name: sub.name },
-    nodeCount: ordered.length,
-    truncated: ordered.length > capped.length,
+    nodeCount: canvasNodes.length,
+    truncated: canvasNodes.length > capped.length,
     sources: targets.map((source, index) => ({
       id: source.id,
       name: source.name,
@@ -451,7 +487,8 @@ export async function previewConfig(
   const draftChains = normalizeProxyChains(config.proxyChains);
   // 链引用的源即使被停用也要读快照：链的节点可能恰好来自这些源
   const summaries = await deps.store.listSourceSummaries();
-  const targets = targetSources({ sourceIds: [] }, summaries, collectChainSourceIds(draftChains));
+  // 预览是草稿级视图，没有订阅绑定语义，一律按「全部启用源」看
+  const targets = targetSources({ sourceIds: [], sourceMode: "all" }, summaries, collectChainSourceIds(draftChains));
   const snapshots = await deps.store.getSnapshots(targets.map((source) => source.id));
   const nodes = orderNodes(config, mergeSnapshotNodes(targets, snapshots));
 

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import * as React from "react";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AppState } from "../lib/types";
 import { SubscriptionsPanel } from "./subscriptions-panel";
 
@@ -33,6 +33,7 @@ const STATE: AppState = {
       id: "sub1",
       name: "默认订阅",
       sourceIds: ["s1", DANGLING_SOURCE_ID],
+      sourceMode: "explicit",
       chainIds: [],
       link: "https://worker.example.com/sub/tokenvalue",
       createdAt: "2026-10-01T00:00:00.000Z",
@@ -45,7 +46,25 @@ const STATE: AppState = {
 };
 
 const noopAsync = async () => {};
+afterEach(cleanup);
 
+/**
+ * jsdom 没有 ResizeObserver：弹窗里的 Radix Switch 通过 use-size 依赖它，
+ * 不 stub 的话一打开「修改订阅」就抛 ResizeObserver is not defined。
+ */
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+beforeEach(() => {
+  vi.stubGlobal("ResizeObserver", ResizeObserverStub);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 afterEach(cleanup);
 
 describe("SubscriptionsPanel 修改订阅的绑定源", () => {
@@ -72,6 +91,7 @@ describe("SubscriptionsPanel 修改订阅的绑定源", () => {
     expect(onUpdate).toHaveBeenCalledWith("sub1", {
       name: "默认订阅",
       sourceIds: ["s1"],
+      sourceMode: "explicit",
       chainIds: [],
     });
   });
@@ -93,5 +113,56 @@ describe("SubscriptionsPanel 修改订阅的绑定源", () => {
     fireEvent.click(screen.getByRole("button", { name: "修改 默认订阅 的源" }));
     expect(await screen.findByRole("button", { name: "保存修改" })).toBeTruthy();
     expect(screen.queryByText(/已被删除的源/)).toBeNull();
+  });
+});
+
+describe("SubscriptionsPanel 没有可用绑定源", () => {
+  it("卡片红字说明只会输出提示节点，并且不显示成「全部启用源」", () => {
+    render(
+      React.createElement(SubscriptionsPanel, {
+        state: {
+          ...STATE,
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: [], sourceMode: "explicit" }],
+        },
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+      })
+    );
+
+    expect(screen.getByText("未绑定源")).toBeTruthy();
+    expect(screen.getByText(/绑定的源已被删除/)).toBeTruthy();
+    expect(screen.getByText(/当前订阅暂无绑定源/)).toBeTruthy();
+    expect(screen.queryByText("全部启用源")).toBeNull();
+  });
+
+  it("关掉「聚合全部启用源」后保存，提交的是 explicit 的空绑定而不是 all", async () => {
+    const onUpdate = vi.fn(noopAsync);
+    render(
+      React.createElement(SubscriptionsPanel, {
+        state: {
+          ...STATE,
+          subscriptions: [{ ...STATE.subscriptions[0], sourceIds: [], sourceMode: "all" }],
+        },
+        onCreate: noopAsync,
+        onRotate: noopAsync,
+        onDelete: noopAsync,
+        onUpdate,
+      })
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "修改 默认订阅 的源" }));
+    fireEvent.click(await screen.findByRole("switch", { name: /聚合全部启用源/ }));
+    // 一个源都没勾：必须明说只会剩一个提示节点，而不是悄悄回到全部启用源
+    expect(await screen.findByText(/没有勾选任何源/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "保存修改" }));
+
+    await waitFor(() => expect(onUpdate).toHaveBeenCalledTimes(1));
+    expect(onUpdate).toHaveBeenCalledWith("sub1", {
+      name: "默认订阅",
+      sourceIds: [],
+      sourceMode: "explicit",
+      chainIds: [],
+    });
   });
 });

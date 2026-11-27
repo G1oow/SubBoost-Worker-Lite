@@ -31,6 +31,7 @@ import type {
   SourceNodesResponse,
   SubscriptionNodesResponse,
   StatusRecord,
+  SubscriptionSourceMode,
 } from "./lib/types";
 import {
   readDismissedVersion,
@@ -388,6 +389,7 @@ export function App() {
   const handleCreateSubscription = async (input: {
     name: string;
     sourceIds: string[];
+    sourceMode: SubscriptionSourceMode;
     chainIds: string[];
   }) => {
     const result = await client.send<SubscriptionResponse>("POST", "/api/subscriptions", input);

@@ -17,6 +17,7 @@ import { MemoryKV } from "./test-utils/memory-kv";
 import type { CacheRecord } from "./types";
 import type { ParsedNode } from "@subboost/core/types/node";
 import { stableJsonStringify } from "@subboost/core/node-identity";
+import { EMPTY_SUBSCRIPTION_NODE_NAME } from "@subboost/core/subscription/empty-subscription-node";
 import { sha256Hex } from "./crypto";
 
 const ENCRYPTION_KEY = "pipeline-test-key-0123456789";
@@ -1071,5 +1072,83 @@ describe("on-demand refresh", () => {
     expect(result.kind).toBe("ok");
     if (result.kind !== "ok") return;
     expect(result.cache.nodeCount).toBe(1);
+  });
+});
+
+describe("绑定源被删光之后的订阅输出", () => {
+  let h: Harness;
+
+  beforeEach(async () => {
+    h = await createHarness();
+  });
+
+  it("explicit 订阅的源全被删除时输出占位节点，而不是 503", async () => {
+    const [source] = await h.store.saveSources([
+      { name: "m", kind: "manual", manualText: ssNode("seed", 8388) },
+    ]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [source.id] });
+    expect((await getOrGenerateSubscription(h.deps, token)).kind).toBe("ok");
+
+    // 删掉唯一的源：绑定被自动清掉，但不会退化成「全部启用源」
+    await h.store.saveSources([]);
+    const sub = await h.store.findSubscriptionByToken(token);
+    expect(sub?.sourceIds).toEqual([]);
+    expect(sub?.sourceMode).toBe("explicit");
+
+    const after = await getOrGenerateSubscription(h.deps, token);
+    expect(after.kind).toBe("ok");
+    if (after.kind !== "ok") return;
+    expect(proxiesFrom(after.cache.yaml).map((node) => node.name)).toEqual([EMPTY_SUBSCRIPTION_NODE_NAME]);
+    expect(after.cache.nodeCount).toBe(1);
+  });
+
+  it("既不会被放宽成其它源，也不会把占位节点当成真实节点去解析链", async () => {
+    const sources = await h.store.saveSources([
+      { name: "gone", kind: "manual", manualText: ssNode("gone", 8388) },
+      { name: "other", kind: "manual", manualText: ssNode("other", 8389) },
+    ]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [sources[0].id] });
+
+    await h.store.saveSources([
+      { id: sources[1].id, name: "other", kind: "manual", manualText: ssNode("other", 8389) },
+    ]);
+
+    const after = await getOrGenerateSubscription(h.deps, token);
+    expect(after.kind).toBe("ok");
+    if (after.kind !== "ok") return;
+    const names = proxiesFrom(after.cache.yaml).map((node) => node.name);
+    expect(names).toEqual([EMPTY_SUBSCRIPTION_NODE_NAME]);
+    // 另一个源的节点绝不能悄悄进这条订阅
+    expect(names).not.toContain("other");
+  });
+
+  it("源只是被停用时仍按「无节点」处理，不塞占位节点", async () => {
+    const [source] = await h.store.saveSources([
+      { name: "m", kind: "manual", manualText: ssNode("seed", 8388) },
+    ]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [source.id] });
+
+    await h.store.saveSources([
+      { id: source.id, name: "m", kind: "manual", manualText: ssNode("seed", 8388), enabled: false },
+    ]);
+
+    expect((await getOrGenerateSubscription(h.deps, token)).kind).toBe("no-nodes");
+  });
+
+  it("「全部启用源」的订阅删掉源之后照常聚合剩下的源", async () => {
+    const sources = await h.store.saveSources([
+      { name: "a", kind: "manual", manualText: ssNode("a", 8388) },
+      { name: "b", kind: "manual", manualText: ssNode("b", 8389) },
+    ]);
+    const { token } = await h.store.createSubscription({ name: "s", sourceIds: [] });
+
+    await h.store.saveSources([
+      { id: sources[1].id, name: "b", kind: "manual", manualText: ssNode("b", 8389) },
+    ]);
+
+    const after = await getOrGenerateSubscription(h.deps, token);
+    expect(after.kind).toBe("ok");
+    if (after.kind !== "ok") return;
+    expect(proxiesFrom(after.cache.yaml).map((node) => node.name)).toEqual(["b"]);
   });
 });

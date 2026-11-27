@@ -47,6 +47,7 @@ import {
   type SnapshotRecord,
   type SourceInput,
   type StoredSubscription,
+  type SubscriptionSourceMode,
 } from "./types";
 
 export type RouterDeps = {
@@ -111,6 +112,16 @@ async function validateChainIds(store: Store, input: unknown): Promise<string[]>
     );
   }
   return chainIds;
+}
+
+/**
+ * 源绑定方式。缺省值由调用方给：创建时按「空 sourceIds = 全部启用源」推断，
+ * 修改时沿用订阅当前模式（老客户端不传该字段）。
+ */
+function parseSourceMode(value: unknown, fallback: SubscriptionSourceMode): SubscriptionSourceMode {
+  if (value === undefined) return fallback;
+  if (value === "all" || value === "explicit") return value;
+  throw new ApiError(400, "VALIDATION_ERROR", "sourceMode 必须是 all 或 explicit");
 }
 
 async function validateSources(input: unknown): Promise<SourceInput[]> {
@@ -467,6 +478,7 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
     const sourceIds = Array.isArray(rawSourceIds)
       ? rawSourceIds.filter((value): value is string => typeof value === "string")
       : [];
+    const sourceMode = parseSourceMode(body.sourceMode, sourceIds.length === 0 ? "all" : "explicit");
     const chainIds = await validateChainIds(store, body.chainIds);
 
     const existing = await store.listStoredSubscriptions();
@@ -474,7 +486,7 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
       throw new ApiError(400, "VALIDATION_ERROR", `最多允许 ${MAX_SUBSCRIPTIONS} 条订阅`);
     }
 
-    const { dto, token } = await store.createSubscription({ name, sourceIds, chainIds });
+    const { dto, token } = await store.createSubscription({ name, sourceIds, sourceMode, chainIds });
     // 用本次创建的 token 组装链接，避免多订阅时误取列表首项
     return json({ subscription: { ...dto, link: `${url.origin}/sub/${token}` } }, 201);
   }
@@ -503,11 +515,20 @@ async function handleApi(request: Request, env: Env, deps: RouterDeps): Promise<
 
   const subscriptionIdMatch = /^\/api\/subscriptions\/([^/]+)$/.exec(path);
 
-  // 随时修改订阅的名称与所含源；链接不变，但会丢弃旧缓存以便按新源重新生成
+  // 随时修改订阅的名称、所含源与绑定方式；链接不变，但会丢弃旧缓存以便按新源重新生成
   if (subscriptionIdMatch && method === "PATCH") {
     const id = decodeURIComponent(subscriptionIdMatch[1]);
     const body = requireObjectBody(await readJsonBody(request, BODY_LIMITS.small));
-    const patch: { name?: string; sourceIds?: string[]; chainIds?: string[] } = {};
+    const patch: {
+      name?: string;
+      sourceIds?: string[];
+      sourceMode?: SubscriptionSourceMode;
+      chainIds?: string[];
+    } = {};
+
+    if (body.sourceMode !== undefined) {
+      patch.sourceMode = parseSourceMode(body.sourceMode, "all");
+    }
 
     if (body.name !== undefined) {
       const name = stringField(body.name).trim();
