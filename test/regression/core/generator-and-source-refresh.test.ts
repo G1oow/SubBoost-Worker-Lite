@@ -380,7 +380,7 @@ describe("public core generator extra branch coverage", () => {
     ];
 
     // 没有开启任何分组时只剩「始终生成」的本地回环/进程直连规则与兜底 MATCH
-    expect(generateRules({ enabledModules: [], customRules: [] }).at(-1)).toBe("MATCH,手动选择");
+    expect(generateRules({ enabledModules: [], customRules: [] }).at(-1)).toBe("MATCH,默认分流");
     expect(generateRules({ enabledModules: [], customRules: [] })).toContain(
       "IP-CIDR,127.0.0.0/8,DIRECT,no-resolve"
     );

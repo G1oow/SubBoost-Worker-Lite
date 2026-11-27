@@ -77,12 +77,12 @@ const FULL_RULES = [
   "GEOSITE,onedrive,国内直连",
   "GEOSITE,microsoft@cn,国内直连",
   "GEOSITE,category-games@cn,国内直连",
-  "GEOSITE,geolocation-!cn,自动选择",
+  "GEOSITE,geolocation-!cn,节点选择",
   "GEOSITE,cn,国内直连",
-  "GEOIP,telegram,自动选择",
+  "GEOIP,telegram,节点选择",
   "GEOIP,private,国内直连,no-resolve",
   "GEOIP,cn,国内直连",
-  "MATCH,手动选择",
+  "MATCH,默认分流",
 ];
 
 describe("内置规则生成", () => {
@@ -102,7 +102,7 @@ describe("内置规则生成", () => {
       "DOMAIN-SUFFIX,example.com,国内直连",
       "RULE-SET,my-set,国内直连",
     ]);
-    expect(rules.at(-1)).toBe("MATCH,手动选择");
+    expect(rules.at(-1)).toBe("MATCH,默认分流");
   });
 
   it("自定义规则可以按 ruleOrder 调整相对顺序，内置规则位置不动", () => {
@@ -138,32 +138,32 @@ describe("内置规则生成", () => {
     expect(rules).not.toContain("RULE-SET,广告集合_rules,广告拦截");
     expect(rules).toContain("IP-CIDR,127.0.0.0/8,DIRECT,no-resolve");
     expect(rules).toContain("PROCESS-NAME,r5apex_dx12.exe,DIRECT");
-    expect(rules.at(-1)).toBe("MATCH,手动选择");
+    expect(rules.at(-1)).toBe("MATCH,默认分流");
   });
 
   it("分组名改过之后规则目标跟着改", () => {
     const rules = generate({ proxyGroupNameOverrides: { steam: "游戏代理" } });
     expect(rules).toContain("DOMAIN-SUFFIX,steamcommunity.com,🎮 游戏代理");
-    expect(rules).toContain("MATCH,手动选择");
+    expect(rules).toContain("MATCH,默认分流");
   });
 
   it("目标分组不可用时回退到兜底策略", () => {
     const entries = buildGeneratedRuleEntries({
       enabledModules: ALL_MODULES,
       customRules: [],
-      availablePolicyTargets: ["手动选择", "DIRECT", "REJECT"],
-      fallbackPolicyTarget: "手动选择",
+      availablePolicyTargets: ["默认分流", "DIRECT", "REJECT"],
+      fallbackPolicyTarget: "默认分流",
     } as Parameters<typeof buildGeneratedRuleEntries>[0]);
     const steamRule = entries.find((entry) => entry.key === "module:steam:domain-steamcommunity");
-    expect(steamRule?.target).toBe("手动选择");
+    expect(steamRule?.target).toBe("默认分流");
   });
 
-  it("MATCH 永远指向手动选择", () => {
+  it("MATCH 永远指向默认分流", () => {
     const entries = buildGeneratedRuleEntries({
       enabledModules: ALL_MODULES,
       customRules: [],
     });
-    expect(entries.at(-1)?.text).toBe("MATCH,手动选择");
+    expect(entries.at(-1)?.text).toBe("MATCH,默认分流");
   });
 });
 
@@ -179,7 +179,7 @@ describe("手动域名 / 进程规则与顺序视图", () => {
     const texts = view.entries.map((entry) => entry.text);
     expect(texts).toContain("PROCESS-NAME,curl,DIRECT");
     expect(texts).toContain("DOMAIN-SUFFIX,cdn.example.com,国内直连");
-    expect(texts.indexOf("DOMAIN-SUFFIX,api.example.org,自动选择")).toBeLessThan(
+    expect(texts.indexOf("DOMAIN-SUFFIX,api.example.org,节点选择")).toBeLessThan(
       texts.indexOf("RULE-SET,广告集合_rules,广告拦截")
     );
     expect(view.fullOrder.some((key) => key.startsWith("manual-"))).toBe(true);
@@ -218,7 +218,7 @@ describe("规则顺序视图", () => {
     });
     const adRule = view.entries.find((entry) => entry.key === "module:ad:ad-set");
     expect(adRule?.enabled).toBe(false);
-    expect(view.matchEntry.text).toBe("MATCH,手动选择");
+    expect(view.matchEntry.text).toBe("MATCH,默认分流");
   });
 
   it("自定义规则集使用固定 key 前缀", () => {

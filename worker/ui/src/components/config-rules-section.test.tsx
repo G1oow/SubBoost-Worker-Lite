@@ -122,7 +122,7 @@ describe("手动域名规则", () => {
   it("三列各自绑定一个分流组，重复条目会提示已在列表中", () => {
     renderSection({ manualDomains: { direct: ["example.com"], proxy: [], reject: [] } });
     expect(screen.getByText("→ 国内直连")).toBeTruthy();
-    expect(screen.getByText("→ 自动选择")).toBeTruthy();
+    expect(screen.getByText("→ 节点选择")).toBeTruthy();
     expect(screen.getByText("→ 广告拦截")).toBeTruthy();
 
     const input = screen.getByLabelText("输入直连域名");
@@ -143,8 +143,8 @@ describe("手动进程规则", () => {
     expect(lastConfig(onChange).manualProcessRules).toEqual(["steam.exe"]);
 
     // 一行一个：多行粘贴走剪贴板原文，含逗号的完整规则原样透传
-    paste(input, "foo.exe\nPROCESS-NAME,bar.exe,自动选择");
-    expect(lastConfig(onChange).manualProcessRules).toEqual(["steam.exe", "foo.exe", "PROCESS-NAME,bar.exe,自动选择"]);
+    paste(input, "foo.exe\nPROCESS-NAME,bar.exe,节点选择");
+    expect(lastConfig(onChange).manualProcessRules).toEqual(["steam.exe", "foo.exe", "PROCESS-NAME,bar.exe,节点选择"]);
   });
 
   it("删除进程规则后写回剩余条目", () => {
@@ -180,7 +180,7 @@ describe("自定义完整规则", () => {
     const apply = screen.getByRole("button", { name: "应用规则" }) as HTMLButtonElement;
     expect(apply.disabled).toBe(true);
 
-    fireEvent.change(box, { target: { value: "DOMAIN-SUFFIX,example.net,自动选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve" } });
+    fireEvent.change(box, { target: { value: "DOMAIN-SUFFIX,example.net,节点选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve" } });
     expect(screen.getByText("可写入 2 条")).toBeTruthy();
     fireEvent.click(apply);
 
@@ -191,7 +191,7 @@ describe("自定义完整规则", () => {
     ]);
     // 文本重新按实际写入的规则排出来
     expect((screen.getByLabelText("自定义完整规则") as HTMLTextAreaElement).value).toBe(
-      "DOMAIN-SUFFIX,example.net,自动选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve"
+      "DOMAIN-SUFFIX,example.net,节点选择\nIP-CIDR,192.0.2.0/24,DIRECT,no-resolve"
     );
 
     fireEvent.change(box, { target: { value: "DOMAIN-SUFFIX,example.net,不存在的分组" } });

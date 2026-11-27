@@ -20,7 +20,7 @@ import { TokenGate } from "./token-gate";
 import type { AppState, DashboardStats, SourceNodesResponse } from "../lib/types";
 
 const STATE: AppState = {
-  app: { name: "SubBoost Lite", version: "1.6.0" },
+  app: { name: "SubBoost Lite", version: "1.6.1" },
   sources: [
     {
       id: "s1",
@@ -92,7 +92,7 @@ describe("admin UI rendering", () => {
       )
     );
     expect(html).toContain("SubBoost Lite");
-    expect(html).toContain("v1.6.0");
+    expect(html).toContain("v1.6.1");
     expect(html).toContain("content");
   });
 
@@ -501,7 +501,7 @@ describe("admin UI rendering", () => {
     expect(html).toContain("内置 · 只读");
     // 最终规则预览默认收起，不渲染规则行
     expect(html).toContain("最终规则预览");
-    expect(html).not.toContain("MATCH,手动选择");
+    expect(html).not.toContain("MATCH,默认分流");
     // 没有修改时不挂载保存条
     expect(html).not.toContain("data-config-save-bar");
   });

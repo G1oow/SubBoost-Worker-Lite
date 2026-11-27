@@ -193,7 +193,7 @@ export interface UserConfig {
   ruleProviderBaseUrl: string;
   enabledRules: string[];
   customRules: CustomRule[];
-  /** 手动域名三表：直连 → 国内直连 / 代理 → 自动选择 / 拦截 → 广告拦截 */
+  /** 手动域名三表：直连 → 国内直连 / 代理 → 节点选择 / 拦截 → 广告拦截 */
   manualDomains?: ManualDomains;
   /** 手动进程规则（进程名或完整规则），默认目标 DIRECT */
   manualProcessRules?: string[];

@@ -286,7 +286,7 @@ describe("generateSubscription", () => {
     });
     await h.store.putConfig({
       enabledGroups: ["select", "auto"],
-      // 按源过滤节点成员：挂到含节点全集的内置组「自动选择」上
+      // 按源过滤节点成员：挂到含节点全集的内置组「节点选择」上
       proxyGroupAdvanced: { auto: { sourceIds: [sources[0].id] } },
     });
 
@@ -302,7 +302,7 @@ describe("generateSubscription", () => {
     const parsed = yaml.load(result.cache.yaml) as {
       "proxy-groups": Array<{ name: string; proxies: string[] }>;
     };
-    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "自动选择");
+    const finalGroup = parsed["proxy-groups"].find((group) => group.name === "节点选择");
     expect(finalGroup?.proxies).toContain("a");
     expect(finalGroup?.proxies).not.toContain("b");
   });
@@ -398,9 +398,9 @@ describe("previewConfig", () => {
           "PROCESS-NAME,start_protected_game.exe,DIRECT",
           "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
           "DOMAIN-SUFFIX,example.org,DIRECT",
-          "GEOSITE,geolocation-!cn,自动选择",
-          "GEOIP,telegram,自动选择",
-          "MATCH,手动选择",
+          "GEOSITE,geolocation-!cn,节点选择",
+          "GEOIP,telegram,节点选择",
+          "MATCH,默认分流",
         ],
         chains: [],
       },

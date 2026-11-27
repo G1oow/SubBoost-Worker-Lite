@@ -82,7 +82,7 @@ describe("router auth", () => {
     const response = await route(apiRequest("/api/state"), h.env, h.deps);
     expect(response.status).toBe(200);
     const body = (await response.json()) as Record<string, unknown>;
-    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "1.6.0" });
+    expect(body.app).toMatchObject({ name: "SubBoost Lite", version: "1.6.1" });
     expect(body.configIsDefault).toBe(true);
     expect(body.status).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
@@ -314,9 +314,9 @@ describe("router config", () => {
         "PROCESS-NAME,start_protected_game.exe,DIRECT",
         "PROCESS-NAME,EasyAntiCheat_EOS.exe,DIRECT",
         "DOMAIN-SUFFIX,example.org,DIRECT",
-        "GEOSITE,geolocation-!cn,自动选择",
-        "GEOIP,telegram,自动选择",
-        "MATCH,手动选择",
+        "GEOSITE,geolocation-!cn,节点选择",
+        "GEOIP,telegram,节点选择",
+        "MATCH,默认分流",
       ],
     });
 

@@ -65,7 +65,7 @@ describe("rule editor view", () => {
       detail: "GEOIP,cn",
       movable: false,
     });
-    expect(view.matchText).toBe("MATCH,手动选择");
+    expect(view.matchText).toBe("MATCH,默认分流");
     expect(view.matchLine).toBe(view.rows.length + 1);
     expect(view.counts).toEqual({ lines: 53, builtin: 52, builtinDisabled: 0, customRules: 0, customRuleSets: 0 });
     expect(editorLines(defaultConfig())).toEqual(generatedLines(defaultConfig()));
@@ -87,10 +87,10 @@ describe("rule editor view", () => {
       text: "GEOIP,cn,🔒 CN Direct",
       sourceLabel: "🔒 CN Direct",
     });
-    expect(buildRuleEditorView(config).matchText).toBe("MATCH,手动选择");
+    expect(buildRuleEditorView(config).matchText).toBe("MATCH,默认分流");
     expect(listRuleTargetOptions(config).map((option) => option.label)).toEqual([
-      "自动选择",
-      "手动选择",
+      "节点选择",
+      "默认分流",
       "🔒 CN Direct",
       "广告拦截",
       "🎮 游戏代理",
@@ -108,8 +108,8 @@ describe("rule editor view", () => {
     const options = listRuleTargetOptions(defaultConfig());
     // 内置分组固定 5 个，名字不再带 emoji
     expect(options).toEqual([
-      { value: "module:auto", label: "自动选择" },
-      { value: "module:select", label: "手动选择" },
+      { value: "module:auto", label: "节点选择" },
+      { value: "module:select", label: "默认分流" },
       { value: "module:cn", label: "国内直连" },
       { value: "module:ad", label: "广告拦截" },
       { value: "module:steam", label: "Steam 代理" },
@@ -160,9 +160,9 @@ describe("rule editor view", () => {
       "r1"
     ).config;
     expect((saved.customRules as { target: unknown }[])[0].target).toEqual({ kind: "chain", id: "c1" });
-    // 链没有可用节点时出口组不生成、目标按回退处理（生成期兜底 = 与 MATCH 一致的「手动选择」）
+    // 链没有可用节点时出口组不生成、目标按回退处理（生成期兜底 = 与 MATCH 一致的「默认分流」）
     expect(generateClashConfig(buildGenerateOptionsFromConfig(saved, { nodes: [] })).rules).toContain(
-      "DOMAIN,example.com,手动选择"
+      "DOMAIN,example.com,默认分流"
     );
 
     // 有节点时目标就是出口组名，与界面一致。节点与链引用必须同源同指纹，name 不参与指纹
@@ -218,9 +218,9 @@ describe("rule editor view", () => {
     const node = rows.find((row) => row.key === "custom-rule:node");
     const bare = rows.find((row) => row.key === "custom-rule:bare");
 
-    // 指向未开启分组：生成器回退到「手动选择」，预览文本也要照实显示
+    // 指向未开启分组：生成器回退到「默认分流」，预览文本也要照实显示
     expect(off).toMatchObject({
-      text: "DOMAIN,a.example.com,手动选择",
+      text: "DOMAIN,a.example.com,默认分流",
       targetValue: "module:steam",
       targetLabel: "Steam 代理",
     });
@@ -249,13 +249,13 @@ describe("module toggles", () => {
     const modules = groups.flatMap((group) => group.modules);
     // 内置分组固定 5 个，名字不再带 emoji
     expect(modules.map((module) => [module.id, module.name])).toEqual([
-      ["auto", "自动选择"],
-      ["select", "手动选择"],
+      ["auto", "节点选择"],
+      ["select", "默认分流"],
       ["cn", "国内直连"],
       ["ad", "广告拦截"],
       ["steam", "Steam 代理"],
     ]);
-    // 只有承载 MATCH 的「手动选择」锁定
+    // 只有承载 MATCH 的「默认分流」锁定
     expect(modules.filter((module) => module.locked).map((module) => module.id)).toEqual(["select"]);
     expect([...LOCKED_MODULE_IDS]).toEqual(["select"]);
     expect(modules.find((module) => module.id === "cn")).toMatchObject({ enabled: true, ruleCount: 13 });
@@ -397,7 +397,7 @@ describe("custom rules", () => {
     const bottom = moveRuleToLine(added, key, 9999);
     const rows = buildRuleEditorView(bottom).rows;
     expect(rows.at(-1)).toMatchObject({ key });
-    expect(editorLines(bottom).slice(-2)).toEqual(["DOMAIN-SUFFIX,example.com,DIRECT", "MATCH,手动选择"]);
+    expect(editorLines(bottom).slice(-2)).toEqual(["DOMAIN-SUFFIX,example.com,DIRECT", "MATCH,默认分流"]);
     expect(editorLines(bottom)).toEqual(generatedLines(bottom));
   });
 
@@ -532,8 +532,8 @@ describe("builtin rule edits", () => {
 
     expect(moved.builtinRuleEdits).toEqual({ [key]: { target: { kind: "module", id: "select" } } });
     expect(row).toMatchObject({
-      text: "DOMAIN-SUFFIX,steamcommunity.com,手动选择",
-      targetLabel: "手动选择",
+      text: "DOMAIN-SUFFIX,steamcommunity.com,默认分流",
+      targetLabel: "默认分流",
       defaultTarget: false,
     });
     expect(editorLines(moved)).toEqual(generatedLines(moved));

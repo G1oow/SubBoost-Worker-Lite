@@ -40,7 +40,7 @@ import type {
 
 export type ConfigRecord = Record<string, unknown>;
 
-/** 手动选择承载 MATCH 兜底，关掉会让整份配置失去兜底出口 */
+/** 默认分流承载 MATCH 兜底，关掉会让整份配置失去兜底出口 */
 export const LOCKED_MODULE_IDS: ReadonlySet<string> = new Set(["select"]);
 
 const MODULE_BY_ID = new Map(PROXY_GROUP_MODULES.map((module) => [module.id, module]));

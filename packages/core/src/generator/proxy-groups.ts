@@ -110,7 +110,7 @@ function customTargetIsDisabled(
 
 /**
  * 代理组显示顺序（在 Clash 客户端中的排列顺序），与脚本里的分组顺序一致：
- * 自动选择 → 手动选择 → 国内直连 → 广告拦截 → Steam 代理
+ * 节点选择 → 默认分流 → 国内直连 → 广告拦截 → Steam 代理
  */
 const PROXY_GROUP_ORDER: string[] = ["auto", "select", "cn", "ad", "steam"];
 
@@ -154,7 +154,7 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
     }
     return out;
   };
-  /** 只含节点：⚡ 自动选择这类测速组不能把出口组当成员，否则「自动」变成手选 */
+  /** 只含节点：⚡ 节点选择这类测速组不能把出口组当成员，否则「自动」变成手选 */
   const nodeOnlyNames = filteredNodeNames.filter((name) => !chainLandingToExit.has(name));
   /** 链感知的成员列表：落地节点被原地替换成出口组名 */
   const memberNames = chainAwareNames(filteredNodeNames);
@@ -166,9 +166,9 @@ export function generateProxyGroups(options: ProxyGroupGenerateOptions): ProxyGr
   const inlineCustomProxyGroups = activeCustomProxyGroups.filter((group) => !usesFilteredNodeMembers(group));
 
   const enabledSet = new Set(enabledModules);
-  // 默认顺序（影响 Clash 初始选中项）：节点选择 → 自动选择 → DIRECT → REJECT → 其它节点
+  // 默认顺序（影响 Clash 初始选中项）：默认分流 → 节点选择 → DIRECT → REJECT → 其它节点
   // - 大多数业务组默认指向“🚀 节点选择”，便于用户只改一次全局生效
-  // - “🚀 节点选择”组本身会默认选择“⚡ 自动选择”（见下方）
+  // - “默认分流”组本身会默认选择“节点选择”（见下方）
   const enabledModuleTarget = (moduleId: string) =>
     enabledSet.has(moduleId) ? resolveModuleName(moduleId, proxyGroupNameOverrides) : null;
 
@@ -513,7 +513,7 @@ export function getModulesForTemplate(_template: "minimal" | "standard" | "full"
 
 export function getGroupTarget(groupId: string): string {
   const proxyModule = PROXY_GROUP_MODULES.find((m) => m.id === groupId);
-  return proxyModule?.name || "手动选择";
+  return proxyModule?.name || "默认分流";
 }
 
 /**

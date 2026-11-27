@@ -47,11 +47,11 @@ describe("proxy group generator", () => {
     expect(groups.find((group) => group.name === "Custom filtered")?.url).toBe("https://probe.example.com/filtered");
     expect(groups.find((group) => group.name === "Custom fallback")?.url).toBe("https://probe.example.com/default");
     // 内置分组成员表写死、类型固定为 select，分组级 testUrl 不再生效
-    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
+    expect(groups.find((group) => group.name === "节点选择")).toMatchObject({
       type: "select",
       proxies: ["A"],
     });
-    expect(groups.find((group) => group.name === "自动选择")).not.toHaveProperty("url");
+    expect(groups.find((group) => group.name === "节点选择")).not.toHaveProperty("url");
     expect(groups.filter((group) => group.type === "select").every((group) => group.url === undefined)).toBe(true);
   });
   it("generates module, custom, advanced-filtered, and provider-backed groups", () => {
@@ -97,13 +97,13 @@ describe("proxy group generator", () => {
     expect(rejectProxies).not.toContain("Node B");
     // 内置分组固定 5 个、顺序固定，排在自定义分组之前
     expect(groups.map((group) => group.name).slice(0, 5)).toEqual([
-      "自动选择",
-      "手动选择",
+      "节点选择",
+      "默认分流",
       "国内直连",
       "广告拦截",
       "Steam 代理",
     ]);
-    expect(groups.find((group) => group.name === "手动选择")).toMatchObject({
+    expect(groups.find((group) => group.name === "默认分流")).toMatchObject({
       type: "select",
       use: ["remote"],
     });
@@ -156,7 +156,7 @@ describe("proxy group generator", () => {
     expect(getModulesForTemplate("standard")).toEqual(["auto", "select", "cn", "ad", "steam"]);
     expect(getModulesForTemplate("full")).toEqual(["auto", "select", "cn", "ad", "steam"]);
     expect(getGroupTarget("cn")).toBe("国内直连");
-    expect(getGroupTarget("missing")).toBe("手动选择");
+    expect(getGroupTarget("missing")).toBe("默认分流");
     expect(getAllGroupNames(["select"], [customGroup("custom", "select")])).toContain("Custom custom");
   });
 
@@ -179,15 +179,15 @@ describe("proxy group generator", () => {
     });
 
     // 高级设置显式改了类型时按类型生成（测速/故障转移/负载均衡都还能用）
-    const auto = groups.find((group) => group.name === "自动选择");
+    const auto = groups.find((group) => group.name === "节点选择");
     expect(auto).toMatchObject({ type: "fallback", proxies: ["DIRECT", "Node B", "Node A"] });
     const steam = groups.find((group) => group.name === "Steam 代理");
     expect(steam).toMatchObject({ type: "url-test" });
     expect(steam).toHaveProperty("url");
 
     // 没改类型的仍用固定成员表，不带测速字段
-    const select = groups.find((group) => group.name === "手动选择");
-    expect(select).toMatchObject({ type: "select", proxies: ["自动选择", "DIRECT"] });
+    const select = groups.find((group) => group.name === "默认分流");
+    expect(select).toMatchObject({ type: "select", proxies: ["节点选择", "DIRECT"] });
     expect(select).not.toHaveProperty("url");
     expect(select).not.toHaveProperty("interval");
   });
@@ -225,7 +225,7 @@ describe("proxy group generator", () => {
     });
 
     // 落地节点被替换成出口组名；出口组不在可用成员里时被过滤，只剩普通节点
-    expect(groups.find((group) => group.name === "自动选择")?.proxies).toEqual(["Node B"]);
+    expect(groups.find((group) => group.name === "节点选择")?.proxies).toEqual(["Node B"]);
   });
   it("自定义组名不是字符串时不影响内置分组生成", () => {
     const groups = generateProxyGroups({
@@ -264,13 +264,13 @@ describe("proxy group generator", () => {
       ],
     });
 
-    // 手动选择的成员表固定为 [自动选择, DIRECT]，普通自定义组不会挤进去
-    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual([
-      "自动选择",
+    // 默认分流的成员表固定为 [节点选择, DIRECT]，普通自定义组不会挤进去
+    expect(groups.find((group) => group.name === "默认分流")?.proxies).toEqual([
+      "节点选择",
       "DIRECT",
     ]);
-    expect(groups.find((group) => group.name === "手动选择")?.proxies).not.toContain("Custom one");
-    expect(groups.find((group) => group.name === "手动选择")?.proxies).not.toContain("Custom two");
+    expect(groups.find((group) => group.name === "默认分流")?.proxies).not.toContain("Custom one");
+    expect(groups.find((group) => group.name === "默认分流")?.proxies).not.toContain("Custom two");
     expect(groups.find((group) => group.name === "Custom one")?.proxies).toEqual([
       "DIRECT",
       "REJECT",
@@ -329,12 +329,12 @@ describe("proxy group generator", () => {
     ]);
     expect(groups.find((group) => group.name === "Filtered Group")).not.toHaveProperty("use");
     expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("Custom normal");
-    expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("手动选择");
+    expect(groups.find((group) => group.name === "Filtered Group")?.proxies).not.toContain("默认分流");
     expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("Filtered Group");
-    expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("手动选择");
+    expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("默认分流");
     expect(groups.find((group) => group.name === "Custom normal")?.proxies).not.toContain("Custom normal");
     expect(groups.find((group) => group.name === "Custom normal")).toMatchObject({ use: ["remote"] });
-    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual(["自动选择", "DIRECT"]);
+    expect(groups.find((group) => group.name === "默认分流")?.proxies).toEqual(["节点选择", "DIRECT"]);
     // includeInGroupMembers 的自定义组仍可被内置分组显式引用（advanced.extraMembers）
     expect(groups.find((group) => group.name === "国内直连")?.proxies).toEqual(["DIRECT", "Custom normal"]);
   });
@@ -532,7 +532,7 @@ describe("proxy group generator", () => {
     });
 
     // 高级设置显式改了类型时按类型生成
-    expect(groups.find((group) => group.name === "自动选择")).toMatchObject({
+    expect(groups.find((group) => group.name === "节点选择")).toMatchObject({
       type: "load-balance",
       strategy: "round-robin",
       use: ["remote"],
@@ -587,14 +587,14 @@ describe("proxy group generator", () => {
       },
     });
 
-    const auto = groups.find((group) => group.name === "自动选择");
+    const auto = groups.find((group) => group.name === "节点选择");
     const directLocal = groups.find((group) => group.name === "Direct Local");
     const rejectLocal = groups.find((group) => group.name === "Reject Local");
     const filteredReject = groups.find((group) => group.name === "Filtered Reject");
 
-    // 自动选择 = 全部节点（信息节点除外）+ 显式追加的自定义组 - 显式排除的节点
+    // 节点选择 = 全部节点（信息节点除外）+ 显式追加的自定义组 - 显式排除的节点
     expect(auto).toEqual({
-      name: "自动选择",
+      name: "节点选择",
       type: "select",
       proxies: ["Korea Node", "Direct Local"],
     });
@@ -604,7 +604,7 @@ describe("proxy group generator", () => {
     expect(directLocal?.proxies).not.toContain("Direct Local");
     expect(rejectLocal?.proxies?.slice(0, 2)).toEqual(["REJECT", "DIRECT"]);
     expect(filteredReject?.proxies).toEqual(["REJECT", "DIRECT", "Korea Node"]);
-    // 手动选择的成员表固定，includeInGroupMembers 的自定义组不会自动进入
-    expect(groups.find((group) => group.name === "手动选择")?.proxies).toEqual(["自动选择", "DIRECT"]);
+    // 默认分流的成员表固定，includeInGroupMembers 的自定义组不会自动进入
+    expect(groups.find((group) => group.name === "默认分流")?.proxies).toEqual(["节点选择", "DIRECT"]);
   });
 });

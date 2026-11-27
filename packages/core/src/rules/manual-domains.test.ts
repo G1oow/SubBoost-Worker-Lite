@@ -7,7 +7,7 @@ import {
   normalizeManualProcessList,
 } from "./manual-domains";
 
-const targets = { direct: "国内直连", proxy: "自动选择", reject: "广告拦截" };
+const targets = { direct: "国内直连", proxy: "节点选择", reject: "广告拦截" };
 
 describe("normalizeManualDomain", () => {
   it("把通配符、URL、端口、结尾点归一化成裸域名", () => {
@@ -44,7 +44,7 @@ describe("buildManualDomainRuleTexts", () => {
     );
     expect(texts).toEqual([
       "DOMAIN-SUFFIX,cdn.example.com,国内直连",
-      "DOMAIN-SUFFIX,api.example.org,自动选择",
+      "DOMAIN-SUFFIX,api.example.org,节点选择",
       "DOMAIN-SUFFIX,ads.example.net,广告拦截",
     ]);
     expect(dropped).toEqual([]);
@@ -52,7 +52,7 @@ describe("buildManualDomainRuleTexts", () => {
 
   it("IP 字面量转 /32 CIDR 并带 no-resolve", () => {
     const { texts } = buildManualDomainRuleTexts({ direct: [], proxy: ["192.0.2.10"], reject: [] }, targets);
-    expect(texts).toEqual(["IP-CIDR,192.0.2.10/32,自动选择,no-resolve"]);
+    expect(texts).toEqual(["IP-CIDR,192.0.2.10/32,节点选择,no-resolve"]);
   });
 
   it("更具体的域名排在前面", () => {
@@ -61,9 +61,9 @@ describe("buildManualDomainRuleTexts", () => {
       targets
     );
     expect(texts).toEqual([
-      "DOMAIN-SUFFIX,a.b.example.com,自动选择",
-      "DOMAIN-SUFFIX,b.example.com,自动选择",
-      "DOMAIN-SUFFIX,example.com,自动选择",
+      "DOMAIN-SUFFIX,a.b.example.com,节点选择",
+      "DOMAIN-SUFFIX,b.example.com,节点选择",
+      "DOMAIN-SUFFIX,example.com,节点选择",
     ]);
   });
 

@@ -54,7 +54,7 @@ describe("group listeners", () => {
     });
 
     expect(findGroupListeners(config)).toEqual([
-      { name: "group-mixed-0", type: "mixed", listen: "127.0.0.1", port: 7891, proxy: "自动选择", udp: true },
+      { name: "group-mixed-0", type: "mixed", listen: "127.0.0.1", port: 7891, proxy: "节点选择", udp: true },
       { name: "group-mixed-1", type: "mixed", listen: "127.0.0.1", port: 7892, proxy: "C Custom", udp: true },
       { name: "group-mixed-2", type: "mixed", listen: "127.0.0.1", port: 7893, proxy: "Chain", udp: true },
     ]);
@@ -201,6 +201,6 @@ describe("group listeners", () => {
     const listeners = (config.listeners ?? []) as Array<Record<string, unknown>>;
     // 基础 YAML listeners 在前，节点监听随后，分组监听最后；名字避开 base 中的 group-mixed-0
     expect(listeners.map((l) => l.name)).toEqual(["group-mixed-0", "mixed0", "group-mixed-1"]);
-    expect(listeners[2]).toMatchObject({ port: 7891, proxy: "自动选择" });
+    expect(listeners[2]).toMatchObject({ port: 7891, proxy: "节点选择" });
   });
 });

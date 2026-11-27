@@ -60,7 +60,7 @@ export const BUILTIN_RULE_PROVIDER_URL =
 export const PROXY_GROUP_MODULES: ProxyGroupModule[] = [
   {
     id: "auto",
-    name: "自动选择",
+    name: "节点选择",
     emoji: "⚡",
     category: "core",
     description: "全部节点，手动挑一个即可",
@@ -71,10 +71,10 @@ export const PROXY_GROUP_MODULES: ProxyGroupModule[] = [
   },
   {
     id: "select",
-    name: "手动选择",
+    name: "默认分流",
     emoji: "🚀",
     category: "core",
-    description: "兜底出口：未命中任何规则时走这里",
+    description: "未匹配规则的流量走向（MATCH 兜底）",
     groupType: "select",
     members: [{ module: "auto" }, "DIRECT"],
     rules: [],

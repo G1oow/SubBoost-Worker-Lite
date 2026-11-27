@@ -29,7 +29,7 @@ const PREVIEW: ConfigPreview = {
   proxyGroupCount: 5,
   ruleProviderCount: 1,
   chains: [],
-  rules: ["MATCH,手动选择"],
+  rules: ["MATCH,默认分流"],
 };
 
 /** 与吸顶工具条同一套约束：常驻覆盖层不许位移、缩放与过渡 */
@@ -302,7 +302,7 @@ describe("页面布局与折叠", () => {
     const rows = within(body as HTMLElement).getAllByRole("listitem");
     expect(rows.length).toBeGreaterThan(10);
     expect(rows[0]!.textContent).toMatch(/^1/u);
-    expect(rows[rows.length - 1]!.textContent).toContain("MATCH,手动选择");
+    expect(rows[rows.length - 1]!.textContent).toContain("MATCH,默认分流");
 
     fireEvent.click(screen.getByRole("button", { name: "收起预览" }));
     await waitFor(() => expect(document.getElementById("config-rule-preview")).toBeNull());

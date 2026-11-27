@@ -48,7 +48,7 @@ export interface RulesGenerateOptions {
   ruleOrder?: string[];
   availablePolicyTargets?: string[];
   fallbackPolicyTarget?: string;
-  /** 手动域名三表（直连 / 代理 / 拦截），目标分别是 国内直连 / 自动选择 / 广告拦截 */
+  /** 手动域名三表（直连 / 代理 / 拦截），目标分别是 国内直连 / 节点选择 / 广告拦截 */
   manualDomains?: ManualDomains;
   /** 手动进程规则：进程名或完整 Clash 规则，默认目标 DIRECT */
   manualProcessRules?: string[];
@@ -61,7 +61,7 @@ export interface RulesGenerateOptions {
 /**
  * 内置分组（= 分流规则目标）的固定 id
  *
- * 「手动选择」既是兜底出口（MATCH），也是脚本里 `steamGroup` 之外的默认选择组。
+ * 「默认分流」既是兜底出口（MATCH），也是脚本里 `steamGroup` 之外的默认选择组。
  */
 export const BUILTIN_MODULE_IDS = {
   select: "select",
@@ -509,7 +509,7 @@ function buildCanonicalRuleEntries(options: Omit<RulesGenerateOptions, "ruleOrde
 
   pushEditableEntries();
 
-  // 兜底出口固定是「手动选择」：只有它没开启/被筛掉时才退回生成期兜底目标
+  // 兜底出口固定是「默认分流」：只有它没开启/被筛掉时才退回生成期兜底目标
   const selectTarget = resolveModuleName(BUILTIN_MODULE_IDS.select, proxyGroupNameOverrides);
   const finalTarget = resolvePolicyTarget(
     enabledSet.has(BUILTIN_MODULE_IDS.select) ? selectTarget : fallbackPolicyTarget ?? selectTarget
